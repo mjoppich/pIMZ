@@ -1,4 +1,7 @@
 #include "srm.h"
+#include <limits>       // std::numeric_limits
+#include <assert.h>
+#include <cfloat>
 
 SRM::SRM(uint8_t iDims, float* pQValues, uint8_t iQCount)
 {
@@ -23,6 +26,126 @@ void SRM::setParameters()
 
 }
 
+float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
+{
+    float *pSim = (float*) malloc(sizeof(float) * xcount * ycount * xcount * ycount);
+
+    float* pCurData;
+    float* pCompareData;
+
+    uint32_t iCurIndex, iCompareIndex;
+    uint32_t iCurElement, iCompareElement;
+
+    uint32_t iElements = xcount * ycount;
+
+    std::cerr << "Element count " << iElements << std::endl;
+
+    for (uint32_t ix = 0; ix < xcount; ++ix)    
+    {
+        for (uint32_t iy = 0; iy < ycount; ++iy)    
+        {
+            iCurIndex = ix*ycount*m_iDims+iy*m_iDims;
+            iCurElement = ix * ycount + iy;
+
+            pCurData = &(pImage[iCurIndex]);
+
+            if (iCurElement % 1000 == 0)
+            {
+                std::cerr << "Starting processing of element " << iCurElement << std::endl;
+            }
+
+            for (uint32_t iix = 0; iix < xcount; ++iix)    
+            {
+                for (uint32_t iiy = 0; iiy < ycount; ++iiy)    
+                {
+                    iCompareIndex = iix*ycount*m_iDims+iiy*m_iDims;
+                    iCompareElement = iix * ycount + iiy;
+                    pCompareData = &(pImage[iCompareIndex]);
+
+                    float simValue = this->dotProduct(pCurData, pCompareData, m_iDims);
+
+                    pSim[ iCurElement * iElements + iCompareElement ] = (float) simValue;
+
+                    if ((ix == iix) && (iy == iiy))
+                    {
+                        if (!this->fequals(1.0f, simValue))
+                        {
+                            std::cerr << iCurElement << " " << iCompareElement << " " << simValue << std::endl;
+
+                            this->dotProduct(pCurData, pCompareData, m_iDims, true);
+                        }
+                        assert(this->fequals(1.0f, simValue));
+                    }
+                }
+            }
+        }
+    }
+
+    /*
+
+    for (uint32_t i = 0; i < iElements; ++i)
+    {
+        uint32_t coord = i * iElements + i;
+
+        if (!fequals(pSim[coord], 1.0f))
+        {
+            std::cerr << i << " " << coord << " " << pSim[coord] << std::endl;
+        }
+    }
+    */
+
+
+    std::cerr << "Final comparison " << iCurElement << " " << iCompareElement << std::endl;
+
+
+    return pSim;
+    
+}
+
+bool SRM::fequals(float f1, float f2)
+{
+    return fabs(f1 - f2) < 0.00005 ;
+}
+
+float SRM::dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbose)
+{
+    float outVal = 0.0f;
+    float ldat1 = 0.0f;
+    float ldat2 = 0.0f;
+
+    for (uint32_t i=0; i < icount; ++i)
+    {
+        outVal += (float) pData1[i]* (float) pData2[i];
+
+        ldat1 += (float) pData1[i]* (float) pData1[i];
+        ldat2 += (float) pData2[i]* (float) pData2[i];
+    }
+
+    if ((ldat1 == 0.0f) && (ldat2 == 0.0f))
+    {
+        return 1.0f;
+    }
+
+    if (outVal == 0.0f)
+    {
+        return 0.0f;
+    }
+
+    ldat1 = sqrt(ldat1);
+    ldat2 = sqrt(ldat2);
+
+    float flen = ldat1 * ldat2;
+
+    float retVal = 1.0f * ((float) outVal / (float) flen);
+
+    if (verbose)
+    {
+        std::cout << outVal << " " << ldat1 << " " << ldat2 << " " << flen << " " << retVal << " " << 1.0f-retVal << " " << this->fequals(1.0f, retVal) << std::endl;
+    }
+    
+
+    return retVal;
+}
 
 uint32_t* SRM::getSegmentedImageFloat(uint32_t xcount, uint32_t ycount, float* pImage)
 {

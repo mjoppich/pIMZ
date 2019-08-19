@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import os,sys
 from collections import defaultdict
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
-
+import logging
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
@@ -20,6 +20,61 @@ class Segmenter():
 
         lib.SRM_processFloat.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
         lib.SRM_processFloat.restype = ctypes.POINTER(ctypes.c_uint32)
+
+        lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
+        lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
+
+        lib.StatisticalRegionMerging_mode_dot.argtypes = []
+        lib.StatisticalRegionMerging_mode_dot.restype = None
+
+    def calc_similarity(self, inputarray):
+
+        #load image
+        dims = 1
+       
+        
+        if len(inputarray.shape) > 2:
+            dims = inputarray.shape[2]
+
+        qs = []
+        qArr = (ctypes.c_float * len(qs))(*qs)
+
+        logger = logging.getLogger('dev')
+        logger.setLevel(logging.INFO)
+
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+
+        logger.addHandler(consoleHandler)
+
+        formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+        consoleHandler.setFormatter(formatter)
+
+        logger.info('information message')
+
+        logger.info("Creating C++ obj")
+
+        self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
+
+        print(inputarray.shape)
+        
+        image_p = inputarray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        logger.info("Starting calc similarity c++")
+        retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
+
+        outclust = np.ctypeslib.as_array(retValues, shape=(inputarray.shape[0]*inputarray.shape[1], inputarray.shape[0]*inputarray.shape[1]))
+
+        print(outclust.dtype)
+        print(outclust.shape)
+
+        logger.info("displaying matrix")
+        plt.imshow(outclust)
+
+        plt.show()
+
+        return outclust
+
+
 
     def segment_array(self, inputarray, qs=[256, 0.5, 0.25], imagedim = None):
 
@@ -344,10 +399,15 @@ if __name__ == '__main__':
     imze = IMZMLExtract("/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML")
     spectra = imze.get_region_array(1)
 
+    print(spectra[2, 31,:], sum(spectra[2, 31,:]))
+
     print("Got spectra", spectra.shape)
     print("mz index", imze.get_mz_index(6662))
 
     seg = Segmenter()
+    seg.calc_similarity(spectra)
+
+    exit(0)
 
     #image, regions = seg.segment_image("/mnt/d/dev/data/mouse_pictures/segmented/test1_smaller.png", qs=[256, 0.5, 0.25, 0.0001, 0.00001])
     image, regions = seg.segment_array(spectra, qs=[256, 0.5, 0.25, 0.0001, 0.00001, 0.000000001], imagedim=imze.get_mz_index(6662))

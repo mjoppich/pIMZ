@@ -12,6 +12,16 @@ extern "C"
         return new SRM(colorDims, pQValues, iQCount);
     }
 
+    void* StatisticalRegionMerging_mode_dot( SRM* pSRM)
+    {
+        pSRM->setDotMode();
+    }
+
+    float* SRM_calc_similarity( SRM* pSRM, uint32_t xcount, uint32_t ycount, float* pImage)
+    {
+        return pSRM->calculateSimilarity(xcount, ycount, pImage);
+    }
+
     uint32_t* SRM_processFloat(SRM* pSRM, uint32_t xcount, uint32_t ycount, float* pImage)
     {
         return pSRM->getSegmentedImageFloat(xcount, ycount, pImage);

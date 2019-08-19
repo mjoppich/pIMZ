@@ -79,10 +79,19 @@ public:
     void setParameters();
 
     uint32_t* getSegmentedImageFloat(uint32_t xcount, uint32_t ycount, float* pImage);
+    float* calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage);
 
 
+    void setDotMode()
+    {
+        
+    }
 
 private:
+
+    bool fequals(float f1, float f2);
+
+    float dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbose=false);
 
     bool testMergeRegions(PixelRegion *pR1, PixelRegion *pR2, float fQ, uint32_t iImageSize, std::map<int, int>* pRegionsOfCardinality);
     static float distanceFunction(ImageRegion *pR1, ImageRegion *pR2);
