@@ -1,12 +1,16 @@
-
 import numpy as np
 from scipy import misc
 import ctypes
 import matplotlib.pyplot as plt
 import os,sys
+import imageio
+from PIL import Image
+import cv2
 from collections import defaultdict
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import logging
+import _pickle as pickle
+import math
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
@@ -15,7 +19,7 @@ lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
 class Segmenter():
 
     def __init__(self):
-        lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
+        lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
         lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
 
         lib.SRM_processFloat.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
@@ -24,6 +28,9 @@ class Segmenter():
         lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
         lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
 
+        lib.SRM_test_matrix.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
+        lib.SRM_test_matrix.restype = None
+
         lib.StatisticalRegionMerging_mode_dot.argtypes = []
         lib.StatisticalRegionMerging_mode_dot.restype = None
 
@@ -31,7 +38,8 @@ class Segmenter():
 
         #load image
         dims = 1
-       
+
+        inputarray = inputarray.astype(np.float32)
         
         if len(inputarray.shape) > 2:
             dims = inputarray.shape[2]
@@ -54,10 +62,18 @@ class Segmenter():
 
         logger.info("Creating C++ obj")
 
+        #self.obj = lib.StatisticalRegionMerging_New(dims, qArr, 3)
+        #print(inputarray.shape)
+        #testArray = np.array([[[1,2,3],[4,5,6]],[[7,8,9],[10,11,12]],[[13,14,15],[16,17,18]],[[19,20,21],[22,23,24]],[[25,26,27],[28,29,30]],[[31,32,33],[34,35,36]]], dtype=np.float32)
+        #print(testArray.shape)
+        #image_p = testArray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        #retValues = lib.SRM_test_matrix(self.obj, testArray.shape[0], testArray.shape[1], image_p)
+        #exit()
+
+        print("dimensions", dims)
+
         self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
 
-        print(inputarray.shape)
-        
         image_p = inputarray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         logger.info("Starting calc similarity c++")
         retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
@@ -68,9 +84,9 @@ class Segmenter():
         print(outclust.shape)
 
         logger.info("displaying matrix")
-        plt.imshow(outclust)
-
-        plt.show()
+        #plt.imshow(outclust, cmap='hot')
+        #plt.colorbar()
+        #plt.show()
 
         return outclust
 
@@ -114,7 +130,7 @@ class Segmenter():
     def segment_image(self, imagepath, qs=[256, 0.5, 0.25]):
 
         #load image
-        image = misc.imread(imagepath)
+        image = plt.imread(imagepath)
         image = image.astype(np.float32)
         image = image / np.max(image)
 
@@ -159,7 +175,40 @@ class IMZMLExtract:
 
         self.mzValues = self.parser.getspectrum(0)[0]
 
+        self.specStart = 0
+
+        if self.specStart != 0:
+            self.mzValues = self.mzValues[self.specStart:]
+            print("WARNING: SPECTRA STARTING AT POSITION", self.specStart)
+
         self.find_regions()
+
+    def get_spectrum(self, specid):
+        spectra1 = self.parser.getspectrum(specid)[1]
+        return spectra1
+
+    def compare_spectra(self, specid1, specid2):
+
+        spectra1 = self.parser.getspectrum(specid1)[1]
+        spectra2 = self.parser.getspectrum(specid2)[1]
+
+        ssum = 0.0
+        len1 = 0.0
+        len2 = 0.0
+
+        assert(len(spectra1) == len(spectra2))
+
+        for i in range(0, len(spectra1)):
+
+            ssum += spectra1[i] * spectra2[i]
+            len1 += spectra1[i]*spectra1[i]
+            len2 += spectra2[i]*spectra2[i]
+
+        len1 = math.sqrt(len1)
+        len2 = math.sqrt(len2)
+
+        return ssum/(len1*len2)
+
 
     def get_mz_index(self, value):
 
@@ -190,7 +239,10 @@ class IMZMLExtract:
                 print("Invalid coordinate", coord)
                 continue
 
-            outspectra[coord] = self.parser.getspectrum( spectID )[1]
+            cspec = self.parser.getspectrum( spectID )[1]
+            cspec = cspec[self.specStart:]
+            cspec = cspec/np.max(cspec)
+            outspectra[coord] = cspec
 
         return outspectra
 
@@ -216,7 +268,7 @@ class IMZMLExtract:
                 print("Invalid coordinate", coord)
                 continue
 
-            splen = self.parser.mzLengths[spectID]
+            splen = self.parser.mzLengths[spectID]-self.specStart
 
             spectraLength = max(spectraLength, splen)
 
@@ -291,7 +343,7 @@ class IMZMLExtract:
                 miny = min([x[1] for x in allpixels])
                 maxy = max([x[1] for x in allpixels])
 
-                print(regionid, minx, maxx, miny, maxy)
+                #print(regionid, minx, maxx, miny, maxy)
 
         else:
 
@@ -395,39 +447,71 @@ class IMZMLExtract:
 
 if __name__ == '__main__':
 
+    #img = Image.open("/Users/rita/Uni/bachelor_thesis/test2.tiff")
+    #img = np.asarray(img, dtype=np.float32)
+    #img = cv2.resize(img, (320, 240), interpolation = cv2.INTER_AREA) 
+    #imageio.imwrite("/Users/rita/Uni/bachelor_thesis/test2_smaller.png", img)
+    #seg = Segmenter()
 
-    imze = IMZMLExtract("/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML")
-    spectra = imze.get_region_array(1)
+    #image, regions = seg.segment_image("/Users/rita/Uni/bachelor_thesis/test6_smaller.png",qs=[256, 0.5, 0.25, 0.002])#, 0.0001])
+    #f, axarr = plt.subplots(len(regions), 2)
+
+    #for i,q in enumerate(regions):
+
+    #    curdata = regions[q]
+    #    uniques = np.unique(curdata)
+    #    print("Q", q, len(uniques))
+
+    #    if len(uniques) < 100:
+    #        print(uniques)
+    #    print()
+
+
+    #    axarr[i, 0].imshow( image )
+    #    axarr[i, 1].imshow( curdata )
+
+    #plt.show()
+    #plt.close()
+    #plt.imshow( curdata )
+    #plt.show()
+    #print(curdata.shape)
+    #imageio.imwrite('/Users/rita/Uni/bachelor_thesis/DL/segmented6.png', np.array(curdata, dtype=np.uint8))
+    #exit(0)
+    imze = IMZMLExtract("/Users/rita/Uni/bachelor_thesis/msi/181114_AT1_Slide_D_Proteins.imzML")
+    spectra = imze.get_region_array(4)
+
+    print(imze.compare_spectra(13311 ,13262))
+
+    spec1 = imze.get_spectrum(13311)
+    spec2 = imze.get_spectrum(13262)
+
+    tarray = np.zeros((2, 1, len(spec1)))
+
+    tarray[0,0, :] = spec1
+    tarray[1,0,:] = spec2
+
+    seg = Segmenter()
+
+    res = seg.calc_similarity(tarray)
+
+    print(res)
+
+    exit()
 
     print(spectra[2, 31,:], sum(spectra[2, 31,:]))
-
+    print("here ", imze.get_region_range(1))
     print("Got spectra", spectra.shape)
     print("mz index", imze.get_mz_index(6662))
 
     seg = Segmenter()
-    seg.calc_similarity(spectra)
+    outclust = seg.calc_similarity(spectra)
+    
+    similarity_matrix = open("similarity_matrix_msi_norm.pickle","wb")
+    pickle.dump(outclust, similarity_matrix)
 
     exit(0)
 
-    #image, regions = seg.segment_image("/mnt/d/dev/data/mouse_pictures/segmented/test1_smaller.png", qs=[256, 0.5, 0.25, 0.0001, 0.00001])
+    #
     image, regions = seg.segment_array(spectra, qs=[256, 0.5, 0.25, 0.0001, 0.00001, 0.000000001], imagedim=imze.get_mz_index(6662))
 
-
-    f, axarr = plt.subplots(len(regions), 2)
-
-    for i,q in enumerate(regions):
-
-        curdata = regions[q]
-        uniques = np.unique(curdata)
-        print("Q", q, len(uniques))
-
-        if len(uniques) < 100:
-            print(uniques)
-        print()
-
-
-        axarr[i, 0].imshow( image )
-        axarr[i, 1].imshow( curdata )
-
-    plt.show()
-    plt.close()
+    

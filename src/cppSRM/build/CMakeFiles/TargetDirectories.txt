@@ -1,0 +1,3 @@
+/Users/rita/Uni/bachelor_thesis/git_markus/pySRM/src/cppSRM/build/CMakeFiles/rebuild_cache.dir
+/Users/rita/Uni/bachelor_thesis/git_markus/pySRM/src/cppSRM/build/CMakeFiles/edit_cache.dir
+/Users/rita/Uni/bachelor_thesis/git_markus/pySRM/src/cppSRM/build/CMakeFiles/SRM.dir

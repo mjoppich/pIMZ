@@ -74,7 +74,7 @@ private:
 class SRM
 {
 public:
-    SRM(uint8_t iDims, float* pQValues, uint8_t iQCount);
+    SRM(uint32_t iDims, float* pQValues, uint8_t iQCount);
     ~SRM();
     void setParameters();
 
@@ -101,7 +101,7 @@ private:
 
     float getB(ImageRegion *pRegion, float fQ, uint32_t iImageSize, std::map<int, int>* pRegionsOfCardinality);
 
-    uint8_t m_iDims = 0;
+    uint32_t m_iDims = 0;
     std::vector<float> m_vQs;
 
 };

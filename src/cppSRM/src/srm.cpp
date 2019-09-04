@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <cfloat>
 
-SRM::SRM(uint8_t iDims, float* pQValues, uint8_t iQCount)
+SRM::SRM(uint32_t iDims, float* pQValues, uint8_t iQCount)
 {
     m_iDims = iDims;
 
@@ -112,6 +112,8 @@ float SRM::dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbos
     float outVal = 0.0f;
     float ldat1 = 0.0f;
     float ldat2 = 0.0f;
+
+    std::cout << "calc dot prod for elements " << icount << std::endl;
 
     for (uint32_t i=0; i < icount; ++i)
     {
