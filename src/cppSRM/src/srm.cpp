@@ -2,6 +2,7 @@
 #include <limits>       // std::numeric_limits
 #include <assert.h>
 #include <cfloat>
+#include <omp.h>
 
 SRM::SRM(uint32_t iDims, float* pQValues, uint8_t iQCount)
 {
@@ -33,15 +34,25 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     float* pCurData;
     float* pCompareData;
 
-    uint32_t iCurIndex, iCompareIndex;
-    uint32_t iCurElement, iCompareElement;
-
     uint32_t iElements = xcount * ycount;
 
     std::cerr << "Element count " << iElements << std::endl;
+    
+    uint32_t ix = 0;
+    uint32_t iCurIndex=0;
+    uint32_t iCompareIndex=0;
+    uint32_t iCurElement=0;
+    uint32_t iCompareElement=0;
+    float simValue = 0.0f;
 
-    for (uint32_t ix = 0; ix < xcount; ++ix)    
+    #pragma omp parallel for private(ix,iCurIndex,iCompareIndex,iCurElement,iCompareElement, simValue, pCurData, pCompareData) num_threads(4)
+    for  (ix = 0; ix < xcount; ++ix)    
     {
+        #pragma omp critical
+        {
+            //std::cout << ix << " " << omp_get_thread_num() << std::endl;
+        }
+
         for (uint32_t iy = 0; iy < ycount; ++iy)    
         {
             iCurIndex = ix*ycount*m_iDims+iy*m_iDims;
@@ -62,7 +73,7 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
                     iCompareElement = iix * ycount + iiy;
                     pCompareData = &(pImage[iCompareIndex]);
 
-                    float simValue = this->dotProduct(pCurData, pCompareData, m_iDims);
+                    simValue = this->dotProduct(pCurData, pCompareData, m_iDims);
 
                     pSim[ iCurElement * iElements + iCompareElement ] = (float) simValue;
 
@@ -113,7 +124,7 @@ float SRM::dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbos
     float ldat1 = 0.0f;
     float ldat2 = 0.0f;
 
-    std::cout << "calc dot prod for elements " << icount << std::endl;
+    //std::cout << "calc dot prod for elements " << icount << std::endl;
 
     for (uint32_t i=0; i < icount; ++i)
     {

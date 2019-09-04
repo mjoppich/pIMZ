@@ -477,36 +477,13 @@ if __name__ == '__main__':
     #print(curdata.shape)
     #imageio.imwrite('/Users/rita/Uni/bachelor_thesis/DL/segmented6.png', np.array(curdata, dtype=np.uint8))
     #exit(0)
-    imze = IMZMLExtract("/Users/rita/Uni/bachelor_thesis/msi/181114_AT1_Slide_D_Proteins.imzML")
-    spectra = imze.get_region_array(4)
-
-    print(imze.compare_spectra(13311 ,13262))
-
-    spec1 = imze.get_spectrum(13311)
-    spec2 = imze.get_spectrum(13262)
-
-    tarray = np.zeros((2, 1, len(spec1)))
-
-    tarray[0,0, :] = spec1
-    tarray[1,0,:] = spec2
-
-    seg = Segmenter()
-
-    res = seg.calc_similarity(tarray)
-
-    print(res)
-
-    exit()
-
-    print(spectra[2, 31,:], sum(spectra[2, 31,:]))
-    print("here ", imze.get_region_range(1))
-    print("Got spectra", spectra.shape)
-    print("mz index", imze.get_mz_index(6662))
+    imze = IMZMLExtract("/Users/rita/Uni/bachelor_thesis//190724_BCA_ZT1_Proteins/190724_BCA_ZT1_Proteins_spectra.imzML")
+    spectra = imze.get_region_array(7)
 
     seg = Segmenter()
     outclust = seg.calc_similarity(spectra)
     
-    similarity_matrix = open("similarity_matrix_msi_norm.pickle","wb")
+    similarity_matrix = open("similarity_matrix_BCA","wb")
     pickle.dump(outclust, similarity_matrix)
 
     exit(0)
