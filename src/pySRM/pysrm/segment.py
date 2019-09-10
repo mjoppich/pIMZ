@@ -24,8 +24,19 @@ class Segmenter():
         lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
         lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
 
-        lib.StatisticalRegionMerging_mode_dot.argtypes = []
+        lib.StatisticalRegionMerging_mode_dot.argtypes = [ctypes.c_void_p]
         lib.StatisticalRegionMerging_mode_dot.restype = None
+
+        lib.StatisticalRegionMerging_mode_eucl.argtypes = [ctypes.c_void_p]
+        lib.StatisticalRegionMerging_mode_eucl.restype = None
+
+        self.logger = logging.getLogger('dev')
+        self.logger.setLevel(logging.INFO)
+
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+
+        self.logger.addHandler(consoleHandler)
 
     def calc_similarity(self, inputarray):
 
@@ -39,27 +50,23 @@ class Segmenter():
         qs = []
         qArr = (ctypes.c_float * len(qs))(*qs)
 
-        logger = logging.getLogger('dev')
-        logger.setLevel(logging.INFO)
 
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setLevel(logging.INFO)
-
-        logger.addHandler(consoleHandler)
 
         formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
         consoleHandler.setFormatter(formatter)
 
-        logger.info('information message')
+        self.logger.info('information message')
 
-        logger.info("Creating C++ obj")
+        self.logger.info("Creating C++ obj")
 
         self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
+        self.logger.info("Switching to dot mode")
+        lib.StatisticalRegionMerging_mode_dot(self.obj)
 
         print(inputarray.shape)
         
         image_p = inputarray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        logger.info("Starting calc similarity c++")
+        self.logger.info("Starting calc similarity c++")
         retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
 
         outclust = np.ctypeslib.as_array(retValues, shape=(inputarray.shape[0]*inputarray.shape[1], inputarray.shape[0]*inputarray.shape[1]))
@@ -67,7 +74,7 @@ class Segmenter():
         print(outclust.dtype)
         print(outclust.shape)
 
-        logger.info("displaying matrix")
+        self.logger.info("displaying matrix")
         plt.imshow(outclust)
 
         plt.show()
@@ -85,16 +92,20 @@ class Segmenter():
 
         qArr = (ctypes.c_float * len(qs))(*qs)
 
+        self.logger.info("Creating SRM Object with {} dimensions".format(dims))
         self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
+        self.logger.info("Switching to dot mode")
+        lib.StatisticalRegionMerging_mode_dot(self.obj)
         
-        dimage = (inputarray / np.max(inputarray)) * 255
+        #dimage = (inputarray / np.max(inputarray)) * 255
+        dimage = inputarray
         image_p = dimage.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         retValues = lib.SRM_processFloat(self.obj, dimage.shape[0], dimage.shape[1], image_p)
 
         outclust = np.ctypeslib.as_array(retValues, shape=(len(qs), dimage.shape[0], dimage.shape[1]))
 
-        print(outclust.dtype)
-        print(outclust.shape)
+        self.logger.debug(outclust.dtype)
+        self.logger.debug(outclust.shape)
 
         outdict = {}
 
@@ -399,18 +410,17 @@ if __name__ == '__main__':
     imze = IMZMLExtract("/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML")
     spectra = imze.get_region_array(1)
 
-    print(spectra[2, 31,:], sum(spectra[2, 31,:]))
 
     print("Got spectra", spectra.shape)
     print("mz index", imze.get_mz_index(6662))
 
     seg = Segmenter()
-    seg.calc_similarity(spectra)
+    #seg.calc_similarity(spectra)
 
-    exit(0)
+    #exit(0)
 
     #image, regions = seg.segment_image("/mnt/d/dev/data/mouse_pictures/segmented/test1_smaller.png", qs=[256, 0.5, 0.25, 0.0001, 0.00001])
-    image, regions = seg.segment_array(spectra, qs=[256, 0.5, 0.25, 0.0001, 0.00001, 0.000000001], imagedim=imze.get_mz_index(6662))
+    image, regions = seg.segment_array(spectra, qs=[256, 128, 32, 0.5, 0.25, 0.0001, 0.00001, 0.000000001], imagedim=imze.get_mz_index(6662))
 
 
     f, axarr = plt.subplots(len(regions), 2)

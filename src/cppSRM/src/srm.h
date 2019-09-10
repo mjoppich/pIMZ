@@ -82,19 +82,21 @@ public:
     float* calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage);
 
 
-    void setDotMode()
+    void setDotMode(bool flag)
     {
-        
+        m_bDotMode = flag;
     }
 
 private:
 
-    bool fequals(float f1, float f2);
+    static bool fequals(float f1, float f2);
 
-    float dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbose=false);
+    static float dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbose=false);
 
     bool testMergeRegions(PixelRegion *pR1, PixelRegion *pR2, float fQ, uint32_t iImageSize, std::map<int, int>* pRegionsOfCardinality);
     static float distanceFunction(ImageRegion *pR1, ImageRegion *pR2);
+    static float distanceFunctionDot(ImageRegion *pR1, ImageRegion *pR2);
+
     static bool sortGradients(std::pair<PixelRegion *, PixelRegion *> *pP1, std::pair<PixelRegion *, PixelRegion *> *pP2);
 
     ImageRegion *mergeRegions(ImageRegion *pR1, ImageRegion *pR2, std::map<int, int>* pRegionsOfCardinality);
@@ -103,6 +105,8 @@ private:
 
     uint8_t m_iDims = 0;
     std::vector<float> m_vQs;
+
+    bool m_bDotMode = false;
 
 };
 

@@ -2,7 +2,7 @@
 
 
 
-#include "./src/SRM.h"
+#include "./src/srm.h"
 
 
 extern "C" 
@@ -14,11 +14,17 @@ extern "C"
 
     void* StatisticalRegionMerging_mode_dot( SRM* pSRM)
     {
-        pSRM->setDotMode();
+        pSRM->setDotMode(true);
+    }
+
+    void* StatisticalRegionMerging_mode_eucl( SRM* pSRM)
+    {
+        pSRM->setDotMode(false);
     }
 
     float* SRM_calc_similarity( SRM* pSRM, uint32_t xcount, uint32_t ycount, float* pImage)
     {
+        
         return pSRM->calculateSimilarity(xcount, ycount, pImage);
     }
 

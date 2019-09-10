@@ -140,7 +140,7 @@ float SRM::dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbos
 
     if (verbose)
     {
-        std::cout << outVal << " " << ldat1 << " " << ldat2 << " " << flen << " " << retVal << " " << 1.0f-retVal << " " << this->fequals(1.0f, retVal) << std::endl;
+        std::cout << outVal << " " << ldat1 << " " << ldat2 << " " << flen << " " << retVal << " " << 1.0f-retVal << " " << SRM::fequals(1.0f, retVal) << std::endl;
     }
     
 
@@ -318,7 +318,14 @@ bool SRM::testMergeRegions(PixelRegion *pPR1, PixelRegion *pPR2, float fQ, uint3
     fB1 = fB1 * fB1;
     fB2 = fB2 * fB2;
 
-    float fRegionDist = this->distanceFunction(pR1, pR2);
+    float fRegionDist = 0.0f;
+
+    if (this->m_bDotMode)
+    {
+        fRegionDist = this->distanceFunctionDot(pR1, pR2);
+    } else {
+        fRegionDist = this->distanceFunction(pR1, pR2);
+    }
 
     if ((fRegionDist * fRegionDist) <= sqrt(fB1+fB2) )
     {
@@ -342,6 +349,16 @@ float SRM::distanceFunction(ImageRegion *pR1, ImageRegion *pR2)
     dDist = sqrt(dDist);
 
     return dDist;
+}
+
+float SRM::distanceFunctionDot(ImageRegion *pR1, ImageRegion *pR2)
+{
+    float* oAvg1 = pR1->getAvgColor();
+    float* oAvg2 = pR2->getAvgColor();
+
+    float fDotProd = SRM::dotProduct(oAvg1, oAvg2, pR1->getDims(), false);
+
+    return 1.0f-fDotProd;
 }
 
 bool SRM::sortGradients(std::pair<PixelRegion*, PixelRegion*> *pP1, std::pair<PixelRegion*, PixelRegion*> *pP2)
@@ -377,7 +394,14 @@ ImageRegion *SRM::mergeRegions(ImageRegion *pR1, ImageRegion *pR2, std::map<int,
 
 float SRM::getB(ImageRegion *pRegion, float fQ, uint32_t iImageSize, std::map<int, int>* pRegionsOfCardinality)
 {
-    float fG = 256.0f;
+    float fG;
+    
+    if (this->m_bDotMode)
+    {
+        fG = 1.0f;
+    } else {
+        fG = 256.0f;
+    }   
 
     float fFac = 1.0f / (2.0f * fQ * pRegion->size());
 
