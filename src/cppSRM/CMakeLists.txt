@@ -12,6 +12,14 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package( ZLIB REQUIRED )
 
+# Find OpenMP
+if(APPLE)
+
+include_directories(${CMAKE_SOURCE_DIR} /usr/local/opt/libomp/include)
+link_directories(/usr/local/opt/libomp/lib)
+
+endif()
+
 message(STATUS "Checking OpenMP")
 find_package(OpenMP REQUIRED)
 IF(OPENMP_FOUND)
@@ -51,7 +59,6 @@ file(GLOB lib_SRC
 )
 
 
-include_directories(${CMAKE_SOURCE_DIR})
 
 set (SOURCE segment.cpp )
 set( CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/lib )

@@ -27,6 +27,8 @@ typedef unsigned __int64 uint64_t;
 #define SAFEDEL(x) {if (x != NULL) {delete x; x=NULL;}}
 #endif
 
+enum SEGMODE { EUCL, DOTPROD};
+
 class PixelRegion
 {
 public:
@@ -74,7 +76,7 @@ private:
 class SRM
 {
 public:
-    SRM(uint8_t iDims, float* pQValues, uint8_t iQCount);
+    SRM(uint32_t iDims, float* pQValues, uint8_t iQCount);
     ~SRM();
     void setParameters();
 
@@ -82,9 +84,9 @@ public:
     float* calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage);
 
 
-    void setDotMode(bool flag)
+    void setSegmentMode(SEGMODE emode)
     {
-        m_bDotMode = flag;
+        m_eSegmentMode = emode;
     }
 
 private:
@@ -103,10 +105,10 @@ private:
 
     float getB(ImageRegion *pRegion, float fQ, uint32_t iImageSize, std::map<int, int>* pRegionsOfCardinality);
 
-    uint8_t m_iDims = 0;
+    uint32_t m_iDims = 0;
     std::vector<float> m_vQs;
 
-    bool m_bDotMode = false;
+    SEGMODE m_eSegmentMode = SEGMODE::EUCL;
 
 };
 
