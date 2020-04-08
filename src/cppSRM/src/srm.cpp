@@ -336,11 +336,13 @@ bool SRM::testMergeRegions(PixelRegion *pPR1, PixelRegion *pPR2, float fQ, uint3
     if (this->m_eSegmentMode == SEGMODE::DOTPROD)
     {
         fRegionDist = this->distanceFunctionDot(pR1, pR2);
-    } else {
+    } else { // this->m_eSegmentMode == SEGMODE::EUCL
         fRegionDist = this->distanceFunction(pR1, pR2);
     }
 
-    if ((fRegionDist * fRegionDist) <= sqrt(fB1+fB2) )
+    float fRegionDistSq = fRegionDist * fRegionDist;
+
+    if (fRegionDistSq <= fB1+fB2 )
     {
         return true;
     }
@@ -412,13 +414,15 @@ float SRM::getB(ImageRegion *pRegion, float fQ, uint32_t iImageSize, std::map<in
     if (this->m_eSegmentMode == SEGMODE::DOTPROD)
     {
         fG = 256.0f;
+    } else if (this->m_eSegmentMode == SEGMODE::EUCL) {
+        fG = 256.0f;
     } else {
         fG = 256.0f;
-    }   
+    }
 
     float fFac = 1.0f / (2.0f * fQ * pRegion->size());
 
-    float fDelta = (*pRegionsOfCardinality)[pRegion->size()] * (6.0f * iImageSize * iImageSize) ;// 1 / (6 |I|^2)
+    float fDelta = (*pRegionsOfCardinality)[pRegion->size()] * ( iImageSize * iImageSize) ;// 1 / (6 |I|^2)
     //float fDelta = this->getRegionsOfCardinality(pRegion->size()) * (6.0f * m_iImageSize * m_iImageSize) ;// 1 / (6 |I|^2)
 
     float fSqrt =  sqrt( fFac * log( fDelta ));
