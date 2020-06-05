@@ -29,7 +29,8 @@ void SRM::setParameters()
 
 float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
 {
-    float *pSim = (float*) malloc(sizeof(float) * xcount * ycount * xcount * ycount);
+    size_t iNumFields = xcount * ycount * xcount * ycount;
+    float *pSim = (float*) malloc(sizeof(float) * iNumFields);
 
     float* pCurData;
     float* pCompareData;
@@ -45,13 +46,18 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     uint32_t iCompareElement=0;
     float simValue = 0.0f;
 
-    #pragma omp parallel for private(ix,iCurIndex,iCompareIndex,iCurElement,iCompareElement, simValue, pCurData, pCompareData) num_threads(4)
+    #pragma omp parallel for private(ix,iCurIndex,iCompareIndex,iCurElement,iCompareElement, simValue, pCurData, pCompareData)
     for  (ix = 0; ix < xcount; ++ix)    
     {
-        #pragma omp critical
+
+        if (ix == 0)
         {
-            //std::cout << ix << " " << omp_get_thread_num() << std::endl;
+            #pragma omp critical
+            {
+                std::cout << "Within for-loop: OMP THREADS=" << omp_get_num_threads() << std::endl;
+            }
         }
+
 
         for (uint32_t iy = 0; iy < ycount; ++iy)    
         {
@@ -106,7 +112,7 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     */
 
 
-    std::cerr << "Final comparison " << iCurElement << " " << iCompareElement << std::endl;
+    std::cerr << "Finished processing. Created matrix with " << iNumFields << " Fields." << std::endl;
 
 
     return pSim;

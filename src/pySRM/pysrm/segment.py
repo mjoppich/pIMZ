@@ -1,10 +1,16 @@
 import numpy as np
 from scipy import misc
 import ctypes
+import dabest
+
+import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
+import seaborn as sns
 import os,sys
 import imageio
 from PIL import Image
+from natsort import natsorted
 
 from collections import defaultdict
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
@@ -29,7 +35,14 @@ import hdbscan
 
 class SpectraRegion():
 
-    def __init__(self, region_array):
+    def __init__(self, region_array, idx2mass):
+
+        assert(not region_array is None)
+        assert(not idx2mass is None)
+
+        assert(len(region_array[0,0,:]) == len(idx2mass))
+
+
         lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
         lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
 
@@ -55,6 +68,8 @@ class SpectraRegion():
 
 
         self.region_array = region_array
+        self.idx2mass = idx2mass
+
         self.spectra_similarity = None
         self.dist_pixel = None
 
@@ -72,6 +87,7 @@ class SpectraRegion():
 
         self.consensus = None
         self.consensus_method = None
+        self.consensus_similarity_matrix = None
 
         for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
 
@@ -79,6 +95,46 @@ class SpectraRegion():
 
             self.idx2pixel[i] = (x,y)
             self.pixel2idx[(x,y)] = i
+
+
+    def __get_exmass_for_mass(self, mass):
+        
+        dist2mass = float('inf')
+        curMass = -1
+        curIdx = -1
+
+        for xidx,x in enumerate(self.idx2mass):
+            if abs(x-mass) < dist2mass:
+                dist2mass = abs(x-mass)
+                curMass = x    
+                curIdx = xidx    
+
+        return curMass, curIdx
+
+
+    def mass_heatmap(self, masses):
+
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        for mass in masses:
+            
+            bestExMassForMass, bestExMassIdx = self.__get_exmass_for_mass(mass)
+            self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+            for i in range(self.region_array.shape[0]):
+                for j in range(self.region_array.shape[1]):
+
+                    image[i,j] += self.region_array[i,j,bestExMassIdx]
+
+
+        heatmap = plt.matshow(image)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
 
     def __calc_similarity(self, inputarray):
         # load image
@@ -102,7 +158,8 @@ class SpectraRegion():
         # retValues = lib.SRM_test_matrix(self.obj, testArray.shape[0], testArray.shape[1], image_p)
         # exit()
 
-        print("dimensions", dims)
+        self.logger.info("dimensions {}".format(dims))
+        self.logger.info("input dimensions {}".format(inputarray.shape))
 
         self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
         self.logger.info("Switching to dot mode")
@@ -113,6 +170,8 @@ class SpectraRegion():
         retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
 
         outclust = np.ctypeslib.as_array(retValues, shape=(inputarray.shape[0] * inputarray.shape[1], inputarray.shape[0] * inputarray.shape[1]))
+
+        self.logger.info("outclust dimensions {}".format(outclust.shape))
 
         return outclust
 
@@ -159,23 +218,36 @@ class SpectraRegion():
 
 
     def __segment__upgma(self, number_of_regions):
-        Z = spc.hierarchy.linkage(squareform(self.spectra_similarity), method='average', metric='cosine')
+
+        ssim = 1-self.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='average', metric='cosine')
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
     def __segment__wpgma(self, number_of_regions):
-        Z = spc.hierarchy.weighted(squareform(self.spectra_similarity))
+
+        ssim = 1-self.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.weighted(squareform(ssim))
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
     def __segment__ward(self, number_of_regions):
-        Z = spc.hierarchy.ward(squareform(self.spectra_similarity))
+
+        ssim = 1-self.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.ward(squareform(ssim))
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
     def __segment__umap_hdbscan(self, number_of_regions):
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
         """
         
@@ -188,10 +260,17 @@ class SpectraRegion():
         
         """
 
+        idx2ij = {}
+
         for i in range(0, self.region_array.shape[0]):
             for j in range(0, self.region_array.shape[1]):
-                self.elem_matrix[i * self.region_array.shape[1] + j, :] = self.region_array[i,j,:]
+                idx = i * self.region_array.shape[1] + j
+                self.elem_matrix[idx, :] = self.region_array[i,j,:]
 
+                idx2ij[idx] = (i,j)
+
+
+        self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
             n_neighbors=30,
             min_dist=0.0,
@@ -199,48 +278,63 @@ class SpectraRegion():
             random_state=42,
         ).fit_transform(self.elem_matrix)
 
-        self.dimred_labels = hdbscan.HDBSCAN(
+        self.logger.info("HDBSCAN reduction")
+
+        clusterer = hdbscan.HDBSCAN(
             min_samples=10,
-            min_cluster_size=500,
-        ).fit_predict(self.dimred_elem_matrix)
+            min_cluster_size=10,
+        )
+        self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix) + 2
+
+        #c = spc.hierarchy.fcluster(clusterer.single_linkage_tree_.to_numpy(), t=10, criterion='maxclust')
 
         return self.dimred_labels
 
     def vis_umap(self):
 
-        assert(self.elem_matrix != None)
-        assert(self.dimred_labels != None)
-
-        dimred_2d = umap.UMAP(
-            n_neighbors=30,
-            min_dist=0.0,
-            n_components=2,
-            random_state=42,
-        ).fit_transform(self.elem_matrix)
-        labels = hdbscan.HDBSCAN(
-            min_samples=10,
-            min_cluster_size=500,
-        ).fit_predict(dimred_2d)
+        assert(not self.elem_matrix is None)
+        assert(not self.dimred_elem_matrix is None)
+        assert(not self.dimred_labels is None)
 
         plt.figure()
-        clustered = (labels >= 0)
-        plt.scatter(dimred_2d[~clustered, 0],
-                    dimred_2d[~clustered, 1],
-                    c=(0.5, 0.5, 0.5),
-                    s=0.1,
+        clustered = (self.dimred_labels >= 0)
+        plt.scatter(self.dimred_elem_matrix[~clustered, 0],
+                    self.dimred_elem_matrix[~clustered, 1],
+                    color=(0.5, 0.5, 0.5),
+                    label="Unassigned",
+                    s=0.3,
                     alpha=0.5)
-        plt.scatter(dimred_2d[clustered, 0],
-                    dimred_2d[clustered, 1],
-                    c=labels[clustered],
-                    s=0.1,
-                    cmap='Spectral')
 
+        uniqueClusters = sorted(set([x for x in self.dimred_labels if x >= 0]))
+
+        for cidx, clusterID in enumerate(uniqueClusters):
+            cmap = matplotlib.cm.get_cmap('Spectral')
+
+            clusterColor = cmap(cidx / len(uniqueClusters))
+
+            plt.scatter(self.dimred_elem_matrix[self.dimred_labels == clusterID, 0],
+                        self.dimred_elem_matrix[self.dimred_labels == clusterID, 1],
+                        color=clusterColor,
+                        label=str(clusterID),
+                        s=0.5)
+
+        plt.legend()
         plt.show()
         plt.close()
 
+
+    def plot_segments(self):
+        assert(not self.segmented is None)
+
+        heatmap = plt.matshow(self.segmented)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
+
     def segment(self, method="UPGMA", number_of_regions=10):
 
-        assert(self.spectra_similarity != None)
+        assert(not self.spectra_similarity is None)
         assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN"])
 
         self.logger.info("Calculating clusters")
@@ -260,7 +354,8 @@ class SpectraRegion():
 
         self.logger.info("Calculating clusters done")
 
-        image_UPGMA = np.zeros(self.region_array.shape)
+        image_UPGMA = np.zeros(self.region_array.shape, dtype=np.int16)
+        image_UPGMA = image_UPGMA[:,:,0]
 
 
         # cluster 0 has special meaning: not assigned !
@@ -282,7 +377,7 @@ class SpectraRegion():
 
     def filter_clusters(self, method='remove_singleton'):
 
-        assert(method in ["remove_singleton", "most_similar_singleton"])
+        assert(method in ["remove_singleton", "most_similar_singleton", "merge_background"])
 
         cluster2coords = defaultdict(list)
 
@@ -327,14 +422,39 @@ class SpectraRegion():
 
                     mostSimClus = sorted([(x, cons2sim[x]) for x in cons2sim], key=lambda x: x[1], reverse=True)[0][0]
                     self.segmented[self.segmented == clusterID] = mostSimClus
+        elif method == "merge_background":
+            
+            # which clusters are in 5x5 border boxes and not in 10x10 middle box?
+            borderSegments = set()
 
+            for i in range(0, min(5, self.segmented.shape[0])):
+                for j in range(0, min(5, self.segmented.shape[1])):
+                    clusterID = self.segmented[i, j]
+                    borderSegments.add(clusterID)
 
+            for i in range(max(0, self.segmented.shape[0]-5), self.segmented.shape[0]):
+                for j in range(max(0, self.segmented.shape[1]-5), self.segmented.shape[1]):
+                    clusterID = self.segmented[i, j]
+                    borderSegments.add(clusterID)
+
+            for i in range(max(0, self.segmented.shape[0]-5), self.segmented.shape[0]):
+                for j in range(0, min(5, self.segmented.shape[1])):
+                    clusterID = self.segmented[i, j]
+                    borderSegments.add(clusterID)
+
+            for i in range(0, min(5, self.segmented.shape[0])):
+                for j in range(max(0, self.segmented.shape[1]-5), self.segmented.shape[1]):
+                    clusterID = self.segmented[i, j]
+                    borderSegments.add(clusterID)
+
+            self.logger.info("Assigning clusters to background: {}".format(borderSegments))
+
+            for x in borderSegments:
+                self.segmented[self.segmented == x] = 0
+                    
         self.cluster_filters.append(method)
 
         return self.segmented
-
-
-
 
     def __cons_spectra__avg(self, cluster2coords):
 
@@ -356,29 +476,34 @@ class SpectraRegion():
 
                 avgSpectrum = avgSpectrum / len(spectraCoords)
 
-            cons_spectra[clusID] = avgSpectrum
+            cons_spectra[clusID] = avgSpectrum[0]
 
         return cons_spectra
 
-
-    def consensus_spectra(self, method="avg"):
-
-        assert(self.segmented != None)
-        assert(method in ["avg"])
-
-        self.logger.info("Calculating consensus spectra")
-
+    def getCoordsForSegmented(self):
         cluster2coords = defaultdict(list)
 
         for i in range(0, self.segmented.shape[0]):
             for j in range(0, self.segmented.shape[1]):
 
-                clusterID = self.segmented[i, j]
+                clusterID = int(self.segmented[i, j])
 
-                if clusterID == 0:
-                    continue # unassigned cluster
+                #if clusterID == 0:
+                #    continue # unassigned cluster
 
                 cluster2coords[clusterID].append((i,j))
+
+        return cluster2coords
+
+
+    def consensus_spectra(self, method="avg"):
+
+        assert(not self.segmented is None)
+        assert(method in ["avg"])
+
+        self.logger.info("Calculating consensus spectra")
+
+        cluster2coords = self.getCoordsForSegmented()
 
 
         cons_spectra = None
@@ -390,7 +515,181 @@ class SpectraRegion():
         self.consensus_method = method
         self.logger.info("Calculating consensus spectra done")
 
-        return self.segmented
+        return self.consensus
+
+    def mass_dabest(self, masses):
+
+        assert(not self.segmented is None)
+
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        for mass in masses:
+            
+            bestExMassForMass, bestExMassIdx = self.__get_exmass_for_mass(mass)
+            self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+            cluster2coords = self.getCoordsForSegmented()
+            clusterIntensities = defaultdict(list)
+
+            for clusterid in cluster2coords:
+                for coord in cluster2coords[clusterid]:
+                    intValue = self.region_array[coord[0], coord[1], bestExMassIdx]
+                    clusterIntensities[clusterid].append(intValue)
+
+
+            clusterVec = []
+            intensityVec = []
+            massVec = []
+            specIdxVec = []
+            for x in clusterIntensities:
+                
+                elems = clusterIntensities[x]
+                specIdxVec += [i for i in range(0, len(elems))]
+
+                clusterVec += ["Cluster " + str(x)] * len(elems)
+                intensityVec += elems
+                massVec += [mass] * len(elems)
+                    
+            dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
+            sns.boxplot(data=dfObj, x="cluster", y="intensity")
+            plt.show()
+            plt.close()
+
+            dfobj_db = dfObj.pivot(index="specidx", columns='cluster', values='intensity')
+
+            allClusterIDs = natsorted([x for x in set(clusterVec) if not " 0" in x])
+            
+            multi_groups = dabest.load(dfobj_db, idx=tuple(["Cluster 0"]+allClusterIDs))
+            multi_groups.mean_diff.plot()
+
+    def plot_inter_consensus_similarity(self, clusters=None):
+
+
+        cluster2coords = self.getCoordsForSegmented()
+        clusterLabels = sorted([x for x in cluster2coords])
+        self.logger.info("Found clusterLabels {}".format(clusterLabels))
+
+        if clusters == None:
+            clusters = sorted([x for x in cluster2coords])
+        
+        for cluster in clusters:
+            
+            self.logger.info("Processing cluster {}".format(cluster))
+
+            ownSpectra = [ self.region_array[xy[0], xy[1], :] for xy in cluster2coords[cluster] ]
+            clusterSimilarities = {}
+
+            for clusterLabel in clusterLabels:
+
+                allSpectra = [ self.region_array[xy[0], xy[1], :] for xy in cluster2coords[clusterLabel] ]
+
+                clusterSims = []
+                for i in range(0, len(ownSpectra)):
+                    for j in range(0, len(allSpectra)):
+                        clusterSims.append( self.__get_spectra_similarity(ownSpectra[i], allSpectra[j]) )
+
+                clusterSimilarities[clusterLabel] = clusterSims
+
+            clusterVec = []
+            similarityVec = []
+            for x in clusterSimilarities:
+                
+                elems = clusterSimilarities[x]
+                clusterVec += [x] * len(elems)
+                similarityVec += elems
+                    
+            dfObj = pd.DataFrame({"cluster": clusterVec, "similarity": similarityVec})
+            sns.boxplot(data=dfObj, x="cluster", y="similarity")
+            plt.show()
+            plt.close()
+
+
+
+    def plot_consensus_similarity(self, mode="heatmap"):
+
+        assert(not self.consensus_similarity_matrix is None)
+
+        assert(mode in ["heatmap", "spectra"])
+
+        if mode == "heatmap":
+            heatmap = plt.matshow(self.consensus_similarity_matrix)
+            plt.colorbar(heatmap)
+            plt.show()
+            plt.close()
+
+        elif mode == "spectra":
+            
+            cluster2coords = self.getCoordsForSegmented()
+            clusterLabels = sorted([x for x in cluster2coords])
+
+            self.logger.info("Found clusterLabels {}".format(clusterLabels))
+
+            clusterSimilarities = {}
+
+            for clusterLabel in clusterLabels:
+
+                allSpectra = [ self.region_array[xy[0], xy[1], :] for xy in cluster2coords[clusterLabel] ]
+
+                self.logger.info("Processing clusterLabel {}".format(clusterLabel))
+
+                clusterSims = []
+                for i in range(0, len(allSpectra)):
+                    for j in range(i+1, len(allSpectra)):
+                        clusterSims.append( self.__get_spectra_similarity(allSpectra[i], allSpectra[j]) )
+
+                clusterSimilarities[clusterLabel] = clusterSims
+
+            clusterVec = []
+            similarityVec = []
+            for x in clusterSimilarities:
+                
+                elems = clusterSimilarities[x]
+                clusterVec += [x] * len(elems)
+                similarityVec += elems
+                    
+            dfObj = pd.DataFrame({"cluster": clusterVec, "similarity": similarityVec})
+            sns.boxplot(data=dfObj, x="cluster", y="similarity")
+            plt.show()
+            plt.close()                                
+
+    def __get_spectra_similarity(self, vA, vB):
+        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
+
+
+    def consensus_similarity(self ):
+        """
+            calculates the similarity for consensus spectra
+        """
+
+        assert(not self.consensus is None)
+
+        allLabels = sorted([x for x in self.consensus])
+        specLength = len(self.consensus[allLabels[0]])
+        
+        # bring consensus into correct form
+        consMatrix = np.zeros((len(allLabels), specLength))
+
+        for lidx, label in enumerate(allLabels):
+            consMatrix[lidx, :] = self.consensus[label]
+
+
+
+        self.consensus_similarity_matrix = np.zeros((len(allLabels), len(allLabels)))
+
+        for i in range(len(allLabels)):
+            vA = self.consensus[allLabels[i]]
+            for j in range(i, len(allLabels)):
+
+                vB = self.consensus[allLabels[j]]
+
+                simValue = self.__get_spectra_similarity(vA, vB)
+
+                self.consensus_similarity_matrix[i, j] = simValue
+                self.consensus_similarity_matrix[j, i] = simValue
+
 
 
 
@@ -978,11 +1277,16 @@ if __name__ == '__main__':
 
     #imze = IMZMLExtract("/mnt/d/dev/data/msi/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML")
     imze = IMZMLExtract("/mnt/d/dev/data/msi/slideD/181114_AT1_Slide_D_Proteins.imzML")
-    spectra = imze.get_region_array(0, normalize=True)
+    spectra = imze.get_region_array(0)
 
 
     print("Got spectra", spectra.shape)
     print("mz index", imze.get_mz_index(6662))
+
+    imze.normalize_region_array(spectra, normalize="max_intensity_region")
+    spectra.spectra_log_dist()
+
+    exit()
 
     seg = Segmenter()
     #seg.calc_similarity(spectra)
