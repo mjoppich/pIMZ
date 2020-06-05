@@ -692,8 +692,96 @@ class SpectraRegion():
                 self.consensus_similarity_matrix[i, j] = simValue
                 self.consensus_similarity_matrix[j, i] = simValue
 
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False):
+        cluster2coords = self.getCoordsForSegmented()
 
-    def find_markers(self, clusters0, clusters1=None, outdirectory=None):
+        clusterVec = []
+        geneIdentVec = []
+        massVec = []
+        foundProtVec = []
+        lfcVec = []
+        qvalVec = []
+        detMassVec = []
+
+        for segment in cluster2coords:
+
+            clusters0 = [segment]
+            clusters1 = [x for x in cluster2coords if not x in clusters0]
+
+            self.find_markers(clusters0=clusters0, replaceExisting=replaceExisting)
+
+            # get result
+            resKey = self.__make_de_res_key(clusters0, clusters1)
+
+            deRes = self.de_results[resKey]      
+            ttr = deRes.summary()
+            self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
+
+            fttr = ttr[ttr.qval.lt(0.01) & ttr.log2fc.abs().gt(1.0)]
+
+            self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
+
+            for row in fttr.iterrows():
+                geneIDent = row[1]["gene"]
+                
+                ag = geneIDent.split("_")
+                massValue = float("{}.{}".format(ag[1], ag[2]))
+
+                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+
+                if keepOnlyProteins and len(foundProt) == 0:
+                    continue
+
+                lfc = row[1]["log2fc"]
+                qval = row[1]["qval"]
+
+                if len(foundProt) > 0:
+
+                    for protMassTuple in foundProt:
+                        
+                        prot,protMass = protMassTuple
+                
+                        clusterVec.append(segment)
+                        geneIdentVec.append(geneIDent)
+                        massVec.append(massValue)
+                        foundProtVec.append(prot)
+                        detMassVec.append(protMass)
+                        lfcVec.append(lfc)
+                        qvalVec.append(qval)
+
+                else:
+                    clusterVec.append(segment)
+                    geneIdentVec.append(geneIDent)
+                    massVec.append(massValue)
+                    foundProtVec.append("")
+                    detMassVec.append("-1")
+                    lfcVec.append(lfc)
+                    qvalVec.append(qval)
+
+
+        df = pd.DataFrame()
+        df["cluster"] = clusterVec
+        df["gene_ident"] = geneIdentVec
+        df["gene_mass"] = massVec
+        df["protein"] = foundProtVec
+        df["protein_mass"] = detMassVec
+        df["logFC"] = lfcVec
+        df["qvalue"] = qvalVec
+
+        return df
+
+                
+
+                
+
+    def __make_de_res_key(self, clusters0, clusters1):
+
+        return (tuple(clusters0), tuple(clusters1))
+        
+
+
+
+    def find_markers(self, clusters0, clusters1=None, outdirectory=None, replaceExisting=False):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -710,6 +798,16 @@ class SpectraRegion():
 
         self.logger.info("DE data for case: {}".format(clusters0))
         self.logger.info("DE data for control: {}".format(clusters1))
+
+        resKey = self.__make_de_res_key(clusters0, clusters1)
+        self.logger.info("DE result key: {}".format(resKey))
+
+        if not replaceExisting:
+
+            if resKey in self.de_results:
+                self.logger.info("DE result key already exists")
+                return
+
 
         sampleVec = []
         conditionVec = []
@@ -769,6 +867,10 @@ class SpectraRegion():
         availSamples = [x for x in exprData.columns if not x in ["mass"]]
         for sample in availSamples:
             fData[sample] = masses
+
+            if outdirectory == None:
+                #only needed for empire ...
+                break
             
         if outdirectory != None:
             fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
@@ -794,11 +896,7 @@ class SpectraRegion():
             )
 
 
-            resKey = (tuple(clusters0), tuple(clusters1))
-
             self.de_results[ resKey ] = test
-
-
             self.logger.info("DE-test finished. Results available: {}".format(resKey))
 
 
@@ -812,6 +910,57 @@ class SpectraRegion():
     def get_de_result(self, key):
 
         return self.de_results.get(key, None)
+
+
+class ProteinWeights():
+
+    def __init__(self, filename):
+
+        self.protein2mass = {}
+        self.protein_name2id = {}
+
+
+        with open(filename) as fin:
+            col2idx = {}
+            for lidx, line in enumerate(fin):
+
+                line = line.strip().split("\t")
+
+                if lidx == 0:
+                    for eidx, elem in enumerate(line):
+
+                        col2idx[elem] = eidx
+
+                    continue
+
+                #protein_id	gene_symbol	mol_weight_kd	mol_weight
+
+                if len(line) != 4:
+                    continue
+
+                proteinIDs = line[col2idx["protein_id"]].split(";")
+                proteinNames = line[col2idx["gene_symbol"]].split(";")
+                molWeight = float(line[col2idx["mol_weight"]])
+
+
+                if len(proteinNames) == 0:
+                    proteinNames = proteinIDs
+
+                for proteinName in proteinNames:
+                    self.protein2mass[proteinName] = molWeight
+                    self.protein_name2id[proteinName] = proteinIDs
+
+    def get_protein_from_mass(self, mass, maxdist=2):
+
+        possibleMatches = []
+
+        for protein in self.protein2mass:
+            protMass = self.protein2mass[protein]
+            if abs(mass-protMass) < maxdist:
+                possibleMatches.append((protein, protMass))
+
+        return possibleMatches
+
 
 
 class pyIMS():
