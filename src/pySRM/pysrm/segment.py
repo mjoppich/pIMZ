@@ -692,6 +692,40 @@ class SpectraRegion():
                 self.consensus_similarity_matrix[i, j] = simValue
                 self.consensus_similarity_matrix[j, i] = simValue
 
+
+    def __get_expression(self, massValue, segment, mode="avg"):
+
+        assert(massValue != None)
+        assert(segment != None)
+        assert(mode in ["avg", "median"])
+
+        cluster2coords = self.getCoordsForSegmented()
+
+        assert(segment in cluster2coords)
+
+        # best matchng massvalue - rounding difference, etc
+        massValue, massIndex = self.__get_exmass_for_mass(massValue)
+
+        segmentPixels = cluster2coords[segment]
+
+        allExprValues = []
+        for pixel in segmentPixels:
+            exprValue = self.region_array[pixel[0], pixel[1], massIndex]
+            allExprValues.append(exprValue)
+
+        num, anum = len(allExprValues), len([x for x in allExprValues if x > 0])
+
+        if mode == "avg":
+            return np.mean(allExprValues), num, anum
+
+        elif mode == "median":
+
+            return np.median(allExprValues), num, anum
+
+        return None, 0,0
+
+
+
     def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False):
         cluster2coords = self.getCoordsForSegmented()
 
@@ -702,6 +736,12 @@ class SpectraRegion():
         lfcVec = []
         qvalVec = []
         detMassVec = []
+
+        avgExpressionVec = []
+        medianExpressionVec = []
+
+        totalSpectraVec = []
+        measuredSpectraVec = []
 
         for segment in cluster2coords:
 
@@ -735,6 +775,9 @@ class SpectraRegion():
                 lfc = row[1]["log2fc"]
                 qval = row[1]["qval"]
 
+                avgExpr, totalSpectra, measuredSpecta = self.__get_expression(massValue, segment, "avg")
+                medianExpr, _, _ = self.__get_expression(massValue, segment, "median")
+
                 if len(foundProt) > 0:
 
                     for protMassTuple in foundProt:
@@ -749,6 +792,11 @@ class SpectraRegion():
                         lfcVec.append(lfc)
                         qvalVec.append(qval)
 
+                        avgExpressionVec.append(avgExpr)
+                        medianExpressionVec.append(medianExpr)
+                        totalSpectraVec.append(totalSpectra)
+                        measuredSpectraVec.append(measuredSpecta)
+
                 else:
                     clusterVec.append(segment)
                     geneIdentVec.append(geneIDent)
@@ -758,15 +806,27 @@ class SpectraRegion():
                     lfcVec.append(lfc)
                     qvalVec.append(qval)
 
+                    avgExpressionVec.append(avgExpr)
+                    medianExpressionVec.append(medianExpr)
 
+                    totalSpectraVec.append(totalSpectra)
+                    measuredSpectraVec.append(measuredSpecta)
+
+
+        #requiredColumns = ["gene", "clusterID", "avg_logFC", "p_val_adj", "mean", "num", "anum"]
         df = pd.DataFrame()
-        df["cluster"] = clusterVec
+        df["clusterID"] = clusterVec
         df["gene_ident"] = geneIdentVec
         df["gene_mass"] = massVec
-        df["protein"] = foundProtVec
+        df["gene"] = foundProtVec
         df["protein_mass"] = detMassVec
-        df["logFC"] = lfcVec
+        df["avg_logFC"] = lfcVec
         df["qvalue"] = qvalVec
+        df["num"] = totalSpectraVec
+        df["anum"]= measuredSpectraVec
+
+        df["mean"] = avgExpressionVec
+        df["median"] = medianExpressionVec
 
         return df
 
