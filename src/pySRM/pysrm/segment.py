@@ -89,6 +89,8 @@ class SpectraRegion():
         self.consensus_method = None
         self.consensus_similarity_matrix = None
 
+        self.de_results = {}
+
         for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
 
             x,y = divmod(i, self.region_array.shape[1])
@@ -691,6 +693,125 @@ class SpectraRegion():
                 self.consensus_similarity_matrix[j, i] = simValue
 
 
+    def find_markers(self, clusters0, clusters1=None, outdirectory=None):
+
+        cluster2coords = self.getCoordsForSegmented()
+
+        if not isinstance(clusters0, (list, tuple, set)):
+            clusters0 = [clusters0]
+
+        if clusters1 == None:
+            clusters1 = [x for x in cluster2coords if not x in clusters0]
+
+        assert(len(clusters1) > 0)
+
+        assert(all([x in cluster2coords for x in clusters0]))
+        assert(all([x in cluster2coords for x in clusters1]))
+
+        self.logger.info("DE data for case: {}".format(clusters0))
+        self.logger.info("DE data for control: {}".format(clusters1))
+
+        sampleVec = []
+        conditionVec = []
+
+        exprData = pd.DataFrame()
+        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mass]
+
+        for clus in clusters0:
+
+            allPixels = cluster2coords[clus]
+
+            self.logger.info("Processing cluster: {}".format(clus))
+
+            for pxl in allPixels:
+
+                pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+
+                sampleVec.append(pxl_name)
+                conditionVec.append(0)
+
+                exprData[pxl_name] = (10000* self.region_array[pxl[0], pxl[1], :]).astype('int')
+
+
+        for clus in clusters1:
+            self.logger.info("Processing cluster: {}".format(clus))
+
+            allPixels = cluster2coords[clus]
+            for pxl in allPixels:
+
+                pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+
+                sampleVec.append(pxl_name)
+                conditionVec.append(1)
+
+                exprData[pxl_name] = (10000* self.region_array[pxl[0], pxl[1], :]).astype('int')
+
+
+        self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
+
+        if outdirectory != None:
+            exprData.to_csv(outdirectory + "/exprs.txt", index=False,header=False, sep="\t")
+
+        pData = pd.DataFrame()
+
+        pData["sample"] = sampleVec
+        pData["condition"] = conditionVec
+        pData["batch"] = 0
+
+
+        self.logger.info("DE Sample DataFrame ready. Shape {}".format(pData.shape))
+
+        if outdirectory != None:
+            pData.to_csv(outdirectory+"/p_data.txt", index=False, sep="\t")
+
+
+        fData = pd.DataFrame()
+        availSamples = [x for x in exprData.columns if not x in ["mass"]]
+        for sample in availSamples:
+            fData[sample] = masses
+            
+        if outdirectory != None:
+            fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
+
+        if outdirectory == None:
+            self.logger.info("NO outdirectory given. Performing DE-test")
+
+            import diffxpy.api as de
+            import anndata
+
+            pdat = pData.copy()
+            del pdat["sample"]
+
+            deData = anndata.AnnData(
+                X=exprData.values.transpose(),
+                var=pd.DataFrame(index=[x for x in fData[availSamples[0]]]),
+                obs=pdat
+            )
+
+            test = de.test.t_test(
+                data=deData,
+                grouping="condition"
+            )
+
+
+            resKey = (tuple(clusters0), tuple(clusters1))
+
+            self.de_results[ resKey ] = test
+
+
+            self.logger.info("DE-test finished. Results available: {}".format(resKey))
+
+
+        return exprData, pData, fData
+
+
+    def list_de_results(self):
+        return [x for x in self.de_results]
+
+
+    def get_de_result(self, key):
+
+        return self.de_results.get(key, None)
 
 
 class pyIMS():
