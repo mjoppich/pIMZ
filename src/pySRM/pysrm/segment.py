@@ -114,7 +114,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses):
+    def mass_heatmap(self, masses, log=False):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -131,6 +131,9 @@ class SpectraRegion():
 
                     image[i,j] += self.region_array[i,j,bestExMassIdx]
 
+
+        if log:
+            image = np.log(image)
 
         heatmap = plt.matshow(image)
         plt.colorbar(heatmap)
@@ -325,10 +328,26 @@ class SpectraRegion():
         plt.close()
 
 
-    def plot_segments(self):
+    def plot_segments(self, highlight=None):
         assert(not self.segmented is None)
 
-        heatmap = plt.matshow(self.segmented)
+        showcopy = np.copy(self.segmented)
+
+        if highlight != None:
+            if not isinstance(highlight, (list, tuple, set)):
+                highlight = [highlight]
+
+            for i in range(0, showcopy.shape[0]):
+                for j in range(0, showcopy.shape[1]):
+
+                    if showcopy[i,j] != 0:
+
+                        if showcopy[i,j] in highlight:
+                            showcopy[i,j] = 2
+                        elif showcopy[i,j] != 0:
+                            showcopy[i,j] = 1
+
+        heatmap = plt.matshow(showcopy)
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
@@ -426,26 +445,29 @@ class SpectraRegion():
                     self.segmented[self.segmented == clusterID] = mostSimClus
         elif method == "merge_background":
             
-            # which clusters are in 5x5 border boxes and not in 10x10 middle box?
+            # which clusters are in 3x3 border boxes and not in 10x10 middle box?
             borderSegments = set()
 
-            for i in range(0, min(5, self.segmented.shape[0])):
-                for j in range(0, min(5, self.segmented.shape[1])):
+            xdim = 4
+            ydim = 4
+
+            for i in range(0, min(xdim, self.segmented.shape[0])):
+                for j in range(0, min(ydim, self.segmented.shape[1])):
                     clusterID = self.segmented[i, j]
                     borderSegments.add(clusterID)
 
-            for i in range(max(0, self.segmented.shape[0]-5), self.segmented.shape[0]):
-                for j in range(max(0, self.segmented.shape[1]-5), self.segmented.shape[1]):
+            for i in range(max(0, self.segmented.shape[0]-xdim), self.segmented.shape[0]):
+                for j in range(max(0, self.segmented.shape[1]-ydim), self.segmented.shape[1]):
                     clusterID = self.segmented[i, j]
                     borderSegments.add(clusterID)
 
-            for i in range(max(0, self.segmented.shape[0]-5), self.segmented.shape[0]):
-                for j in range(0, min(5, self.segmented.shape[1])):
+            for i in range(max(0, self.segmented.shape[0]-xdim), self.segmented.shape[0]):
+                for j in range(0, min(ydim, self.segmented.shape[1])):
                     clusterID = self.segmented[i, j]
                     borderSegments.add(clusterID)
 
-            for i in range(0, min(5, self.segmented.shape[0])):
-                for j in range(max(0, self.segmented.shape[1]-5), self.segmented.shape[1]):
+            for i in range(0, min(xdim, self.segmented.shape[0])):
+                for j in range(max(0, self.segmented.shape[1]-ydim), self.segmented.shape[1]):
                     clusterID = self.segmented[i, j]
                     borderSegments.add(clusterID)
 
@@ -519,12 +541,17 @@ class SpectraRegion():
 
         return self.consensus
 
-    def mass_dabest(self, masses):
+    def mass_dabest(self, masses, background=0):
 
         assert(not self.segmented is None)
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
+
+
+        cluster2coords = self.getCoordsForSegmented()
+        assert(background in cluster2coords)
+
 
         image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
 
@@ -533,7 +560,7 @@ class SpectraRegion():
             bestExMassForMass, bestExMassIdx = self.__get_exmass_for_mass(mass)
             self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
-            cluster2coords = self.getCoordsForSegmented()
+            
             clusterIntensities = defaultdict(list)
 
             for clusterid in cluster2coords:
@@ -562,9 +589,9 @@ class SpectraRegion():
 
             dfobj_db = dfObj.pivot(index="specidx", columns='cluster', values='intensity')
 
-            allClusterIDs = natsorted([x for x in set(clusterVec) if not " 0" in x])
+            allClusterIDs = natsorted([x for x in set(clusterVec) if not " {}".format(background) in x])
             
-            multi_groups = dabest.load(dfobj_db, idx=tuple(["Cluster 0"]+allClusterIDs))
+            multi_groups = dabest.load(dfobj_db, idx=tuple(["Cluster {}".format(background)]+allClusterIDs))
             multi_groups.mean_diff.plot()
 
     def plot_inter_consensus_similarity(self, clusters=None):
@@ -693,41 +720,96 @@ class SpectraRegion():
                 self.consensus_similarity_matrix[j, i] = simValue
 
 
-    def __get_expression(self, massValue, segment, mode="avg"):
+    def __get_expression(self, massValue, segments, mode="avg"):
 
         assert(massValue != None)
-        assert(segment != None)
-        assert(mode in ["avg", "median"])
+        assert(segments != None)
+
+        if not isinstance(mode, (list, tuple, set)):
+            mode = [mode]
+
+        if not isinstance(segments, (list, tuple, set)):
+            segments = [segments]
+
+        assert(all([x in ["avg", "median"] for x in mode]))
 
         cluster2coords = self.getCoordsForSegmented()
 
-        assert(segment in cluster2coords)
+        assert(all([y in cluster2coords for y in segments]))
 
         # best matchng massvalue - rounding difference, etc
         massValue, massIndex = self.__get_exmass_for_mass(massValue)
 
-        segmentPixels = cluster2coords[segment]
-
         allExprValues = []
-        for pixel in segmentPixels:
-            exprValue = self.region_array[pixel[0], pixel[1], massIndex]
-            allExprValues.append(exprValue)
+        for segment in segments:
+            segmentPixels = cluster2coords[segment]
+
+            for pixel in segmentPixels:
+                exprValue = self.region_array[pixel[0], pixel[1], massIndex]
+                allExprValues.append(exprValue)
 
         num, anum = len(allExprValues), len([x for x in allExprValues if x > 0])
 
-        if mode == "avg":
-            return np.mean(allExprValues), num, anum
+        resElem = []
 
-        elif mode == "median":
+        for modElem in mode:
 
-            return np.median(allExprValues), num, anum
+            if modElem == "avg":
+                resElem.append( np.mean(allExprValues) )
 
-        return None, 0,0
+            elif modElem == "median":
+                resElem.append( np.median(allExprValues) )
 
+        return tuple(resElem), num, anum
 
+    def __get_spectra_matrix(self,segments):
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False):
         cluster2coords = self.getCoordsForSegmented()
+
+        relPixels = []
+        for x in segments:
+            relPixels += cluster2coords.get(x, [])
+
+        spectraMatrix = np.zeros((len(relPixels), len(self.idx2mass)))
+
+        for pidx, px in enumerate(relPixels):
+            spectraMatrix[pidx, :] = self.region_array[px[0], px[1], :]
+
+        return spectraMatrix
+
+
+    def __get_expression_from_matrix(self, matrix, massValue, segments, mode="avg"):
+
+        assert(massValue != None)
+        assert(segments != None)
+
+        if not isinstance(mode, (list, tuple, set)):
+            mode = [mode]
+
+        if not isinstance(segments, (list, tuple, set)):
+            segments = [segments]
+
+        assert(all([x in ["avg", "median"] for x in mode]))
+
+        # best matchng massvalue - rounding difference, etc
+        massValue, massIndex = self.__get_exmass_for_mass(massValue)
+
+        allExprValues = list(matrix[:, massIndex])
+
+        num, anum = len(allExprValues), len([x for x in allExprValues if x > 0])
+        resElem = []
+
+        for modElem in mode:
+
+            if modElem == "avg":
+                resElem.append( np.mean(allExprValues) )
+
+            elif modElem == "median":
+                resElem.append( np.median(allExprValues) )
+
+        return tuple(resElem), num, anum
+
+    def deres_to_df(self, resKey, protWeights, keepOnlyProteins=True):
 
         clusterVec = []
         geneIdentVec = []
@@ -739,78 +821,88 @@ class SpectraRegion():
 
         avgExpressionVec = []
         medianExpressionVec = []
-
         totalSpectraVec = []
         measuredSpectraVec = []
 
-        for segment in cluster2coords:
+        avgExpressionBGVec = []
+        medianExpressionBGVec = []
+        totalSpectraBGVec = []
+        measuredSpectraBGVec = []
 
-            clusters0 = [segment]
-            clusters1 = [x for x in cluster2coords if not x in clusters0]
+        deRes = self.de_results[resKey]      
+        ttr = deRes.summary()
 
-            self.find_markers(clusters0=clusters0, replaceExisting=replaceExisting)
+        ttr["log2fc"] = -ttr["log2fc"]
+        self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
 
-            # get result
-            resKey = self.__make_de_res_key(clusters0, clusters1)
+        fttr = ttr[ttr.qval.lt(0.05) & ttr.log2fc.abs().gt(0.5)]
 
-            deRes = self.de_results[resKey]      
-            ttr = deRes.summary()
-            self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
+        self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
 
-            fttr = ttr[ttr.qval.lt(0.01) & ttr.log2fc.abs().gt(1.0)]
 
-            self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
+        targetSpectraMatrix = self.__get_spectra_matrix(resKey[0])
+        bgSpectraMatrix = self.__get_spectra_matrix(resKey[1])
 
-            for row in fttr.iterrows():
-                geneIDent = row[1]["gene"]
-                
-                ag = geneIDent.split("_")
-                massValue = float("{}.{}".format(ag[1], ag[2]))
+        self.logger.info("Created matrices with shape {} and {} (target, bg)".format(targetSpectraMatrix.shape, bgSpectraMatrix.shape))
 
-                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
 
-                if keepOnlyProteins and len(foundProt) == 0:
-                    continue
+        for row in fttr.iterrows():
+            geneIDent = row[1]["gene"]
+            
+            ag = geneIDent.split("_")
+            massValue = float("{}.{}".format(ag[1], ag[2]))
 
-                lfc = row[1]["log2fc"]
-                qval = row[1]["qval"]
+            foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
 
-                avgExpr, totalSpectra, measuredSpecta = self.__get_expression(massValue, segment, "avg")
-                medianExpr, _, _ = self.__get_expression(massValue, segment, "median")
+            if keepOnlyProteins and len(foundProt) == 0:
+                continue
 
-                if len(foundProt) > 0:
+            lfc = row[1]["log2fc"]
+            qval = row[1]["qval"]
 
-                    for protMassTuple in foundProt:
-                        
-                        prot,protMass = protMassTuple
-                
-                        clusterVec.append(segment)
-                        geneIdentVec.append(geneIDent)
-                        massVec.append(massValue)
-                        foundProtVec.append(prot)
-                        detMassVec.append(protMass)
-                        lfcVec.append(lfc)
-                        qvalVec.append(qval)
+            expT, totalSpectra, measuredSpecta = self.__get_expression_from_matrix(targetSpectraMatrix, massValue, resKey[0], ["avg", "median"])
+            exprBG, totalSpectraBG, measuredSpectaBG = self.__get_expression_from_matrix(bgSpectraMatrix, massValue, resKey[0], ["avg", "median"])
 
-                        avgExpressionVec.append(avgExpr)
-                        medianExpressionVec.append(medianExpr)
-                        totalSpectraVec.append(totalSpectra)
-                        measuredSpectraVec.append(measuredSpecta)
+            avgExpr, medianExpr = expT
+            avgExprBG, medianExprBG = exprBG
 
-                else:
-                    clusterVec.append(segment)
+            if len(foundProt) > 0:
+
+                for protMassTuple in foundProt:
+                    
+                    prot,protMass = protMassTuple
+            
+                    clusterVec.append(",".join([str(x) for x in resKey[0]]))
                     geneIdentVec.append(geneIDent)
                     massVec.append(massValue)
-                    foundProtVec.append("")
-                    detMassVec.append("-1")
+                    foundProtVec.append(prot)
+                    detMassVec.append(protMass)
                     lfcVec.append(lfc)
                     qvalVec.append(qval)
 
                     avgExpressionVec.append(avgExpr)
                     medianExpressionVec.append(medianExpr)
-
                     totalSpectraVec.append(totalSpectra)
                     measuredSpectraVec.append(measuredSpecta)
+
+                    avgExpressionBGVec.append(avgExprBG)
+                    medianExpressionBGVec.append(medianExprBG)
+                    totalSpectraBGVec.append(totalSpectraBG)
+                    measuredSpectraBGVec.append(measuredSpectaBG)
+
+            else:
+                clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                geneIdentVec.append(geneIDent)
+                massVec.append(massValue)
+                foundProtVec.append("")
+                detMassVec.append("-1")
+                lfcVec.append(lfc)
+                qvalVec.append(qval)
+
+                avgExpressionVec.append(avgExpr)
+                medianExpressionVec.append(medianExpr)
+                totalSpectraVec.append(totalSpectra)
+                measuredSpectraVec.append(measuredSpecta)
 
 
         #requiredColumns = ["gene", "clusterID", "avg_logFC", "p_val_adj", "mean", "num", "anum"]
@@ -822,21 +914,49 @@ class SpectraRegion():
         df["protein_mass"] = detMassVec
         df["avg_logFC"] = lfcVec
         df["qvalue"] = qvalVec
+        
         df["num"] = totalSpectraVec
         df["anum"]= measuredSpectraVec
-
         df["mean"] = avgExpressionVec
         df["median"] = medianExpressionVec
 
+        df["num_bg"] = totalSpectraBGVec
+        df["anum_bg"]= measuredSpectraBGVec
+        df["mean_bg"] = avgExpressionBGVec
+        df["median_bg"] = medianExpressionBGVec
+
         return df
 
-                
 
-                
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True):
+        cluster2coords = self.getCoordsForSegmented()
+
+        df = pd.DataFrame()
+
+        for segment in cluster2coords:
+
+            clusters0 = [segment]
+            clusters1 = [x for x in cluster2coords if not x in clusters0]
+
+            if not includeBackground and 0 in clusters1:
+                del clusters1[clusters1.index(0)]
+
+            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting)
+
+            # get result
+            resKey = self.__make_de_res_key(clusters0, clusters1)
+
+            resDF = self.deres_to_df(resKey, protWeights, keepOnlyProteins=keepOnlyProteins)
+
+            df = pd.concat([df, resDF], sort=False)           
+
+        return df
+
+                    
 
     def __make_de_res_key(self, clusters0, clusters1):
 
-        return (tuple(clusters0), tuple(clusters1))
+        return (tuple(sorted(clusters0)), tuple(sorted(clusters1)))
         
 
 
@@ -916,7 +1036,6 @@ class SpectraRegion():
         pData["condition"] = conditionVec
         pData["batch"] = 0
 
-
         self.logger.info("DE Sample DataFrame ready. Shape {}".format(pData.shape))
 
         if outdirectory != None:
@@ -970,6 +1089,16 @@ class SpectraRegion():
     def get_de_result(self, key):
 
         return self.de_results.get(key, None)
+
+    def get_de_results(self, key):
+
+        rets = []
+        for x in self.de_results:
+            if x[0] == key:
+                rets.append(x)
+
+        return rets
+
 
 
 class ProteinWeights():
@@ -1186,6 +1315,14 @@ class IMZMLExtract:
 
     def __init__(self, fname):
         #fname = "/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML"
+
+        self.logger = logging.getLogger('IMZMLExtract')
+        self.logger.setLevel(logging.INFO)
+
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+
+        self.logger.addHandler(consoleHandler)
 
         self.fname = fname
         self.parser = ImzMLParser(fname)
@@ -1444,13 +1581,11 @@ class IMZMLExtract:
 
 
 
-    def get_region_array(self, regionid):
-
-
+    def get_region_array(self, regionid, makeNullLine=True):
 
         xr,yr,zr,sc = self.get_region_range(regionid)
         rs = self.get_region_shape(regionid)
-        print(rs)
+        self.logger.info("Found region {} with shape {}".format(regionid, rs))
 
         sarray = np.zeros( rs, dtype=np.float32 )
 
@@ -1464,6 +1599,11 @@ class IMZMLExtract:
 
             if len(spectra) < sc:
                 spectra = np.pad(spectra, ((0,0),(0, sc-len(spectra) )), mode='constant', constant_values=0)
+
+
+            if makeNullLine:
+                spectra[spectra < 0.0] = 0.0
+                spectra = spectra - np.min(spectra)
 
             sarray[xpos, ypos, :] = spectra
 
