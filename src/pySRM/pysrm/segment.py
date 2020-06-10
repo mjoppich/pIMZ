@@ -2,7 +2,7 @@ import numpy as np
 from scipy import misc
 import ctypes
 import dabest
-
+import json
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -11,12 +11,14 @@ import os,sys
 import imageio
 from PIL import Image
 from natsort import natsorted
-
-from collections import defaultdict
+import subprocess
+from collections import defaultdict, Counter
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import logging
 import _pickle as pickle
 import math
+import scipy.ndimage as ndimage
+
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
@@ -90,6 +92,7 @@ class SpectraRegion():
         self.consensus_similarity_matrix = None
 
         self.de_results = {}
+        self.de_results_all = defaultdict(lambda: dict())
 
         for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
 
@@ -97,6 +100,108 @@ class SpectraRegion():
 
             self.idx2pixel[i] = (x,y)
             self.pixel2idx[(x,y)] = i
+
+    def plot_array(self, fig, arr):
+
+
+        valid_vals = np.unique(arr)
+        heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
+
+        # calculate the POSITION of the tick labels
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        formatter = plt.FuncFormatter(formatter_func)
+
+        # We must be sure to specify the ticks matching our target names
+        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+        
+        return fig
+
+
+
+    def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None):
+
+        cluster2coords = self.getCoordsForSegmented()
+
+        os.makedirs(folder, exist_ok=True)
+        segmentsPath = prefix + "." + str(regionID) + ".upgma.png"
+
+        # plot image
+        cmap = plt.cm.jet
+        norm = plt.Normalize(vmin=self.segmented.min(), vmax=self.segmented.max())
+        image = cmap(norm(self.segmented))
+        plt.imsave(os.path.join(folder, segmentsPath), image)
+
+        if pathPrefix != None:
+            segmentsPath = os.path.join(pathPrefix, segmentsPath)
+
+        # write DE data
+        if protWeights != None:
+
+            if not nodf:
+                markerGenes = self.find_all_markers(protWeights, includeBackground=True)
+            
+            cluster2deData = {}
+
+            for cluster in cluster2coords:
+
+                outputname = prefix + "." + str(regionID) + "." + str(cluster) +".tsv"
+
+                if not nodf:
+                    outfile = os.path.join(folder, outputname)
+                    subdf = markerGenes[markerGenes["clusterID"] == str(cluster)]
+                    subdf.to_csv(outfile, sep="\t", index=True)
+
+
+                if pathPrefix != None:
+                    outputname = os.path.join(pathPrefix, outputname)
+
+                cluster2deData[cluster] = outputname
+
+        # write info
+        regionInfos = {}
+        
+        
+        for cluster in cluster2coords:
+
+            clusterType = "aorta" if cluster != 0 else "background"
+
+            regionInfo = {
+                "type_det": [clusterType],
+                "coordinates": [[x[1], x[0]] for x in cluster2coords[cluster]],
+            }
+
+            if cluster in cluster2deData:
+                regionInfo["de_data"] = cluster2deData[cluster]
+
+            regionInfos[str(cluster)] = regionInfo
+
+
+
+        infoDict = {}
+        infoDict = {
+            "region": regionID,
+            "path_upgma": segmentsPath,
+            "info": regionInfos
+        }
+
+
+        jsElems = json.dumps([infoDict])
+
+        # write config_file
+
+        with open(os.path.join(folder, prefix + "." + str(regionID) + ".info"), 'w') as fout:
+            print(jsElems, file=fout)
+        
 
 
     def __get_exmass_for_mass(self, mass):
@@ -180,7 +285,7 @@ class SpectraRegion():
 
         return outclust
 
-    def calculate_similarity(self, mode="spectra"):
+    def calculate_similarity(self, mode="spectra", features=None):
         """
 
         :param mode: must be in  ["spectra", "spectra_log", "spectra_log_dist"]
@@ -190,7 +295,19 @@ class SpectraRegion():
 
         assert(mode in ["spectra", "spectra_log", "spectra_log_dist"])
 
-        self.spectra_similarity = self.__calc_similarity(self.region_array)
+        if features != None:
+            regArray = np.copy((self.region_array.shape[0], self.region_array.shape[1], len(features)))
+
+            for i in range(0, regArray.shape[0]):
+                for j in range(0, regArray.shape[1]):
+                    regArray[i,j,:] = self.region_array[i,j,0:len(features)] # FIXME
+
+        else:
+            regArray = np.copy(self.region_array)
+
+
+
+        self.spectra_similarity = self.__calc_similarity(regArray)
 
         if mode in ["spectra_log", "spectra_log_dist"]:
             self.logger.info("Calculating spectra similarity")
@@ -229,6 +346,7 @@ class SpectraRegion():
 
         Z = spc.hierarchy.linkage(squareform(ssim), method='average', metric='cosine')
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+
         return c
 
     def __segment__wpgma(self, number_of_regions):
@@ -238,6 +356,7 @@ class SpectraRegion():
 
         Z = spc.hierarchy.weighted(squareform(ssim))
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+
         return c
 
     def __segment__ward(self, number_of_regions):
@@ -347,8 +466,9 @@ class SpectraRegion():
                         elif showcopy[i,j] != 0:
                             showcopy[i,j] = 1
 
-        heatmap = plt.matshow(showcopy)
-        plt.colorbar(heatmap)
+
+        fig = plt.figure()
+        self.plot_array(fig, showcopy)
         plt.show()
         plt.close()
 
@@ -398,18 +518,27 @@ class SpectraRegion():
 
     def filter_clusters(self, method='remove_singleton'):
 
-        assert(method in ["remove_singleton", "most_similar_singleton", "merge_background"])
+        assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands"])
 
-        cluster2coords = defaultdict(list)
+        cluster2coords = self.getCoordsForSegmented()
 
-        for i in range(0, self.segmented.shape[0]):
-            for j in range(0, self.segmented.shape[1]):
+        if method == "remove_islands":
 
-                clusterID = self.segmented[i, j]
-                cluster2coords[clusterID].append((i,j))
+            exarray = self.segmented.copy()
+            exarray[exarray >= 1] = 1
+
+            labeledArr, num_ids = ndimage.label(exarray, structure=np.ones((3,3)))
+
+            for i in range(0, num_ids+1):
+
+                labelCells = np.count_nonzero(labeledArr == i)
+
+                if labelCells <= 10:
+                    self.segmented[labeledArr == i] = 0
 
 
-        if method == "remove_singleton":
+
+        elif method == "remove_singleton":
             for clusterID in cluster2coords:
 
                 if clusterID == 0:
@@ -928,12 +1057,15 @@ class SpectraRegion():
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, outdirectory=None):
         cluster2coords = self.getCoordsForSegmented()
 
         df = pd.DataFrame()
 
         for segment in cluster2coords:
+
+            if not includeBackground and segment == 0:
+                continue
 
             clusters0 = [segment]
             clusters1 = [x for x in cluster2coords if not x in clusters0]
@@ -941,7 +1073,7 @@ class SpectraRegion():
             if not includeBackground and 0 in clusters1:
                 del clusters1[clusters1.index(0)]
 
-            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting)
+            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory)
 
             # get result
             resKey = self.__make_de_res_key(clusters0, clusters1)
@@ -958,6 +1090,58 @@ class SpectraRegion():
 
         return (tuple(sorted(clusters0)), tuple(sorted(clusters1)))
         
+
+    def clear_de_results(self):
+        self.de_results = {}
+
+    def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
+        import regex as re
+        def run(cmd):
+            print(cmd)
+            proc = subprocess.Popen(cmd,
+                stdout = subprocess.DEVNULL,
+                stderr = subprocess.PIPE,
+            )
+            stdout, stderr = proc.communicate()
+        
+            return proc.returncode, stdout, stderr
+        
+        print(pdata)
+
+        runI = 0
+        while runI < 10:
+            pysrmPath = os.path.dirname(os.path.abspath(__file__))
+            code, out, err = run(["/usr/bin/java", "-Xmx16G", "-cp", pysrmPath+"/../../../tools/nlEmpiRe.jar", "nlEmpiRe.input.ExpressionSet", "-getbestsubN", "100", "-inputdir", nlDir, "-cond1", "0", "-cond2", "1", "-o", diffOutput])
+
+            print(code)
+
+            if code == 0:
+                break
+
+            errStr = err.decode()
+            print(errStr)
+
+            res = re.findall(r"replicates: \[(.*?)\]", errStr)
+
+            if len(res) == 1:
+                break
+
+            res = res[1:]
+
+            removeSpectra = []
+            for x in res:
+                ress = x.split(", ")
+                for y in ress:
+                    removeSpectra.append(y)
+
+            print("Removing spectra", removeSpectra)
+            pdata=pdata[~pdata['sample'].isin(removeSpectra)]
+            print(pdata)
+            pdata.to_csv(pdataPath, index=False, sep="\t")
+
+            runI += 1
+
+        return diffOutput
 
 
 
@@ -1039,7 +1223,16 @@ class SpectraRegion():
         self.logger.info("DE Sample DataFrame ready. Shape {}".format(pData.shape))
 
         if outdirectory != None:
-            pData.to_csv(outdirectory+"/p_data.txt", index=False, sep="\t")
+            pDataOut = outdirectory+"/p_data.txt"
+            pData.to_csv(pDataOut, index=False, sep="\t")
+
+            nlOutput = outdirectory + "/nldiffreg." + "_".join([str(z) for z in resKey[0]]) +"." + "_".join([str(z) for z in resKey[1]]) + ".tsv"
+
+            self.run_nlempire(outdirectory, pData, pDataOut, nlOutput)
+
+            if os.path.isfile(nlOutput):
+                empireData=pd.read_csv("nl_diff_masses.tsv", delimiter="\t")
+                self.de_results_all["empire"][resKey] = empireData
 
 
         fData = pd.DataFrame()
@@ -1076,6 +1269,7 @@ class SpectraRegion():
 
 
             self.de_results[ resKey ] = test
+            self.de_results_all["ttest"][resKey] = test.summary()
             self.logger.info("DE-test finished. Results available: {}".format(resKey))
 
 
@@ -1400,8 +1594,8 @@ class IMZMLExtract:
                 continue
 
             cspec = self.get_spectrum( spectID )
-            cspec = cspec[self.specStart:]
-            cspec = cspec/np.max(cspec)
+            cspec = cspec[self.specStart:] / 1.0
+            #cspec = cspec/np.max(cspec)
             outspectra[coord] = cspec
 
         return outspectra
@@ -1579,6 +1773,42 @@ class IMZMLExtract:
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
                 region_array[i, j, :] = spectrum
 
+    def list_highest_peaks(self, region_array, counter=False):
+        region_dims = region_array.shape
+
+        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        maxPeakCounter = Counter()
+        allPeakIntensities = []
+        for i in range(0, region_dims[0]):
+            for j in range(0, region_dims[1]):
+
+                spectrum = region_array[i, j, :]
+
+                idx = np.argmax(spectrum, axis=None)
+                mzInt = spectrum[idx]
+                mzVal = self.mzValues[idx]
+                peakplot[i,j] = mzVal
+                allPeakIntensities.append(mzInt)
+
+                if not counter:
+                    print(i,j,mzVal)
+                else:
+                    maxPeakCounter[mzVal] += 1
+
+        if counter:
+            for x in maxPeakCounter:
+                print(x, maxPeakCounter[x])
+
+        heatmap = plt.matshow(peakplot)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
+        print(len(allPeakIntensities), min(allPeakIntensities), max(allPeakIntensities), sum(allPeakIntensities)/len(allPeakIntensities))
+
+        plt.hist(allPeakIntensities, bins=len(allPeakIntensities), cumulative=True, histtype="step")
+        plt.show()
+        plt.close()
 
 
     def get_region_array(self, regionid, makeNullLine=True):
@@ -1608,6 +1838,62 @@ class IMZMLExtract:
             sarray[xpos, ypos, :] = spectra
 
         return sarray
+
+
+    def list_regions(self):
+
+        allMaxX = 0
+        allMaxY = 0
+
+        for regionid in self.dregions:
+
+            allpixels = self.dregions[regionid]
+
+            minx = min([x[0] for x in allpixels])
+            maxx = max([x[0] for x in allpixels])
+
+            miny = min([x[1] for x in allpixels])
+            maxy = max([x[1] for x in allpixels])
+
+            allMaxX = max(maxx, allMaxX)
+            allMaxY = max(maxy, allMaxY)
+
+            print(regionid, minx, maxx, miny, maxy)
+
+        outimg = np.zeros((allMaxY, allMaxX))
+
+        for regionid in self.dregions:
+
+            allpixels = self.dregions[regionid]
+
+            minx = min([x[0] for x in allpixels])
+            maxx = max([x[0] for x in allpixels])
+
+            miny = min([x[1] for x in allpixels])
+            maxy = max([x[1] for x in allpixels])
+
+            outimg[miny:maxy, minx:maxx] = regionid+1
+
+        heatmap = plt.matshow(outimg)
+        for regionid in self.dregions:
+            allpixels = self.dregions[regionid]
+
+            minx = min([x[0] for x in allpixels])
+            maxx = max([x[0] for x in allpixels])
+
+            miny = min([x[1] for x in allpixels])
+            maxy = max([x[1] for x in allpixels])
+
+            middlex = minx + (maxx-minx)/ 2.0
+            middley = miny + (maxy-miny)/ 2.0
+
+            plt.text(middlex, middley, str(regionid))
+
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+        
+
 
     def find_regions(self):
 
