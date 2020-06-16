@@ -1082,7 +1082,7 @@ class SpectraRegion():
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, outdirectory=None):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, outdirectory=None, use_methods = ["empire", "ttest"], count_scale={"ttest": 1, "empire": 10000}):
         cluster2coords = self.getCoordsForSegmented()
 
         dfbyMethod = defaultdict(lambda: pd.DataFrame())
@@ -1098,7 +1098,7 @@ class SpectraRegion():
             if not includeBackground and 0 in clusters1:
                 del clusters1[clusters1.index(0)]
 
-            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory)
+            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory, use_methods=use_methods, count_scale=count_scale)
 
             # get result
             resKey = self.__make_de_res_key(clusters0, clusters1)
@@ -1211,7 +1211,7 @@ class SpectraRegion():
 
 
 
-    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], outdirectory=None, replaceExisting=False, count_scale=1):
+    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], outdirectory=None, replaceExisting=False, count_scale={"ttest": 1, "empire": 10000}):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1258,7 +1258,7 @@ class SpectraRegion():
                 sampleVec.append(pxl_name)
                 conditionVec.append(0)
 
-                exprData[pxl_name] = (count_scale * self.region_array[pxl[0], pxl[1], :])#.astype('int')
+                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]#.astype('int')
 
 
         for clus in clusters1:
@@ -1272,7 +1272,7 @@ class SpectraRegion():
                 sampleVec.append(pxl_name)
                 conditionVec.append(1)
 
-                exprData[pxl_name] = (count_scale* self.region_array[pxl[0], pxl[1], :])#.astype('int')
+                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]#.astype('int')
 
 
         self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
@@ -1301,7 +1301,16 @@ class SpectraRegion():
             if replaceExisting or fillCondition:
                 self.logger.info("Starting EMPIRE; Writing Expression Files")
 
-                exprData.to_csv(outdirectory + "/exprs.txt", index=False,header=False, sep="\t")
+                empExprData = exprData.copy(deep=True)
+
+                if count_scale != None and "empire" in count_scale:
+                    empExprData = empExprData * count_scale["empire"]
+
+                    if count_scale["empire"] > 1:
+                        empExprData = empExprData.astype(int)
+
+                empExprData.to_csv(outdirectory + "/exprs.txt", index=False,header=False, sep="\t")
+                empExprData = None
                 pDataOut = outdirectory+"/p_data.txt"
                 pData.to_csv(pDataOut, index=False, sep="\t")
                 fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
@@ -1327,6 +1336,14 @@ class SpectraRegion():
             if replaceExisting or fillCondition:
 
                 self.logger.info("Performing DE-test: ttest")
+
+                ttExprData = exprData.copy(deep=True)
+
+                if count_scale != None and "ttest" in count_scale:
+                    ttExprData = ttExprData * count_scale["ttest"]
+
+                    if count_scale["ttest"] > 1:
+                        ttExprData = ttExprData.astype(int)
 
                 pdat = pData.copy()
                 del pdat["sample"]
@@ -1360,6 +1377,18 @@ class SpectraRegion():
                 allDERes.append((x,y))
 
         return allDERes
+
+    def find_de_results(self, keypart):
+
+        results = []
+        for method in self.de_results_all:
+            for key in self.de_results_all[method]:
+
+                if keypart == key[0] or keypart == key[1]:
+                    results.append( (method, key) )
+
+        return results
+
 
 
     def get_de_results(self, key):
