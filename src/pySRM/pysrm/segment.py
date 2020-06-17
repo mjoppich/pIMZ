@@ -36,6 +36,63 @@ import sklearn as sk
 import umap
 import hdbscan
 
+
+class CombinedSpectra():
+
+    def __init__(self, regions):
+
+        self.regions = {}
+        self.consensus_similarity_matrix = None
+
+        for x in regions:
+            
+            addregion = regions[x]
+            if addregion.name == None:
+                addregion.name = x
+
+            self.regions[x] = regions[x]
+
+
+    def __get_spectra_similarity(self, vA, vB):
+        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
+
+
+    def consensus_similarity(self):
+        
+        allConsSpectra = {}
+
+        for regionName in self.regions:
+            region = self.regions[regionName]
+
+            regionCS = region.consensus_spectra()
+
+            for clusterid in regionCS:
+                allConsSpectra[(region.name, clusterid)] = regionCS[clusterid]
+
+        allRegionClusters = sorted([x for x in allConsSpectra])
+
+        distDF = pd.DataFrame(0.0, index=allRegionClusters, columns=allRegionClusters)
+
+        for i in range(0, len(allRegionClusters)):
+            regionI = allRegionClusters[i]
+            for j in range(i, len(allRegionClusters)):
+
+                regionJ = allRegionClusters[j]
+
+                specSim = self.__get_spectra_similarity(allConsSpectra[regionI], allConsSpectra[regionJ])
+
+                distDF[regionI][regionJ] = specSim
+                distDF[regionJ][regionI] = specSim
+
+        self.consensus_similarity_matrix = distDF
+
+    def plot_consensus_similarity(self):
+            sns.heatmap(self.consensus_similarity_matrix)
+            plt.show()
+            plt.close()
+
+                
+
 class SpectraRegion():
 
     def __init__(self, region_array, idx2mass):
@@ -69,7 +126,7 @@ class SpectraRegion():
         formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
         consoleHandler.setFormatter(formatter)
 
-
+        self.name = None
         self.region_array = region_array
         self.idx2mass = idx2mass
 
@@ -1082,7 +1139,7 @@ class SpectraRegion():
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, outdirectory=None, use_methods = ["empire", "ttest"], count_scale={"ttest": 1, "empire": 10000}):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest"], count_scale={"ttest": 1, "empire": 10000}):
         cluster2coords = self.getCoordsForSegmented()
 
         dfbyMethod = defaultdict(lambda: pd.DataFrame())
@@ -1098,7 +1155,7 @@ class SpectraRegion():
             if not includeBackground and 0 in clusters1:
                 del clusters1[clusters1.index(0)]
 
-            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory, use_methods=use_methods, count_scale=count_scale)
+            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory, out_prefix=out_prefix, use_methods=use_methods, count_scale=count_scale)
 
             # get result
             resKey = self.__make_de_res_key(clusters0, clusters1)
@@ -1211,7 +1268,7 @@ class SpectraRegion():
 
 
 
-    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], outdirectory=None, replaceExisting=False, count_scale={"ttest": 1, "empire": 10000}):
+    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, count_scale={"ttest": 1, "empire": 10000}):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1315,7 +1372,7 @@ class SpectraRegion():
                 pData.to_csv(pDataOut, index=False, sep="\t")
                 fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
                 
-                nlOutput = outdirectory + "/nldiffreg." + "_".join([str(z) for z in resKey[0]]) +"." + "_".join([str(z) for z in resKey[1]]) + ".tsv"
+                nlOutput = outdirectory + "/"+out_prefix+"." + "_".join([str(z) for z in resKey[0]]) +"." + "_".join([str(z) for z in resKey[1]]) + ".tsv"
 
                 self.logger.info("Starting EMPIRE; Running nlEmpiRe")
                 self.run_nlempire(outdirectory, pData, pDataOut, nlOutput)
@@ -1681,15 +1738,15 @@ class IMZMLExtract:
         return ssum/(len1*len2)
 
 
-    def get_mz_index(self, value):
+    def get_mz_index(self, value, threshold=None):
 
         curIdxDist = 1000000
-        curIdx = 0
+        curIdx = None
 
         for idx, x in enumerate(self.mzValues):
             dist = abs(x-value)
 
-            if dist < curIdxDist:
+            if dist < curIdxDist and (threhsold==None or dist < threshold):
                 curIdx = idx
                 curIdxDist = dist
             
@@ -1839,16 +1896,16 @@ class IMZMLExtract:
 
     def normalize_spectrum(self, spectrum, normalize=None, max_region_value=None):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "vector"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
-        if normalize == "max_intensity_region":
+        if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             assert(max_region_value != None)
 
         if normalize == "max_intensity_spectrum":
             spectrum = spectrum / np.max(spectrum)
             return spectrum
 
-        elif normalize == "max_intensity_region":
+        elif normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             spectrum = spectrum / max_region_value
             return spectrum
 
@@ -1863,25 +1920,31 @@ class IMZMLExtract:
 
     def normalize_region_array(self, region_array, normalize=None):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "vector"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
         region_dims = region_array.shape
 
-        maxInt = 0
+        maxInt = 0.0
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
 
                 spectrum = region_array[i, j, :]
 
-                if normalize == 'max_intensity_region':
+                if normalize in ['max_intensity_region', 'max_intensity_all_regions']:
                     maxInt = max(maxInt, np.max(spectrum))
 
                 else:
                     spectrum = self.normalize_spectrum(spectrum, normalize=normalize)
                     region_array[i, j, :] = spectrum
 
-        if normalize != 'max_intensity_region':
+        if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
             return
+
+        if normalize in ["max_intensity_all_regions"]:
+            for idx, _ in enumerate(self.parser.coordinates):
+                mzs, intensities = p.getspectrum(idx)
+                maxInt = max(maxInt, np.max(intensities))
+
 
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
@@ -1889,6 +1952,23 @@ class IMZMLExtract:
                 spectrum = region_array[i, j, :]
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
                 region_array[i, j, :] = spectrum
+
+    def plot_toc(self, region_array):
+        region_dims = region_array.shape
+        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        for i in range(0, region_dims[0]):
+            for j in range(0, region_dims[1]):
+
+                spectrum = region_array[i, j, :]
+                peakplot[i,j] = sum(spectrum)
+
+        heatmap = plt.matshow(peakplot)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
+
+
 
     def list_highest_peaks(self, region_array, counter=False):
         region_dims = region_array.shape
