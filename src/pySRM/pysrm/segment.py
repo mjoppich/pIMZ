@@ -285,7 +285,7 @@ class SpectraRegion():
 
         return outclust
 
-    def calculate_similarity(self, mode="spectra", features=None):
+    def calculate_similarity(self, mode="spectra", features=[]):
         """
 
         :param mode: must be in  ["spectra", "spectra_log", "spectra_log_dist"]
@@ -295,12 +295,18 @@ class SpectraRegion():
 
         assert(mode in ["spectra", "spectra_log", "spectra_log_dist"])
 
-        if features != None:
-            regArray = np.copy((self.region_array.shape[0], self.region_array.shape[1], len(features)))
+        if len(features) > 0:
+            regArray = np.zeros((self.region_array.shape[0], self.region_array.shape[1], len(features)))
 
-            for i in range(0, regArray.shape[0]):
-                for j in range(0, regArray.shape[1]):
-                    regArray[i,j,:] = self.region_array[i,j,0:len(features)] # FIXME
+            for i in range(regArray.shape[0]):
+                for j in range(regArray.shape[1]):
+                    limit = len(self.region_array[i,j,:])
+                    min_mz = int(np.min(self.idx2mass))
+                    print(min_mz)
+                    extracted = [self.region_array[i,j,:][k-min_mz] for k in tuple(features)]
+                    regArray[i,j,:] = extracted
+                    print(extracted)
+                    exit
 
         else:
             regArray = np.copy(self.region_array)
