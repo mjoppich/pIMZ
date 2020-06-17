@@ -18,7 +18,8 @@ import logging
 import _pickle as pickle
 import math
 import scipy.ndimage as ndimage
-
+import diffxpy.api as de
+import anndata
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
@@ -34,6 +35,63 @@ import sklearn as sk
 
 import umap
 import hdbscan
+
+
+class CombinedSpectra():
+
+    def __init__(self, regions):
+
+        self.regions = {}
+        self.consensus_similarity_matrix = None
+
+        for x in regions:
+            
+            addregion = regions[x]
+            if addregion.name == None:
+                addregion.name = x
+
+            self.regions[x] = regions[x]
+
+
+    def __get_spectra_similarity(self, vA, vB):
+        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
+
+
+    def consensus_similarity(self):
+        
+        allConsSpectra = {}
+
+        for regionName in self.regions:
+            region = self.regions[regionName]
+
+            regionCS = region.consensus_spectra()
+
+            for clusterid in regionCS:
+                allConsSpectra[(region.name, clusterid)] = regionCS[clusterid]
+
+        allRegionClusters = sorted([x for x in allConsSpectra])
+
+        distDF = pd.DataFrame(0.0, index=allRegionClusters, columns=allRegionClusters)
+
+        for i in range(0, len(allRegionClusters)):
+            regionI = allRegionClusters[i]
+            for j in range(i, len(allRegionClusters)):
+
+                regionJ = allRegionClusters[j]
+
+                specSim = self.__get_spectra_similarity(allConsSpectra[regionI], allConsSpectra[regionJ])
+
+                distDF[regionI][regionJ] = specSim
+                distDF[regionJ][regionI] = specSim
+
+        self.consensus_similarity_matrix = distDF
+
+    def plot_consensus_similarity(self):
+            sns.heatmap(self.consensus_similarity_matrix)
+            plt.show()
+            plt.close()
+
+                
 
 class SpectraRegion():
 
@@ -68,7 +126,7 @@ class SpectraRegion():
         formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
         consoleHandler.setFormatter(formatter)
 
-
+        self.name = None
         self.region_array = region_array
         self.idx2mass = idx2mass
 
@@ -91,7 +149,6 @@ class SpectraRegion():
         self.consensus_method = None
         self.consensus_similarity_matrix = None
 
-        self.de_results = {}
         self.de_results_all = defaultdict(lambda: dict())
 
         for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
@@ -219,7 +276,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -239,6 +296,9 @@ class SpectraRegion():
 
         if log:
             image = np.log(image)
+
+        if min_cut_off != None:
+            image[image <= min_cut_off] = min_cut_off
 
         heatmap = plt.matshow(image)
         plt.colorbar(heatmap)
@@ -309,11 +369,11 @@ class SpectraRegion():
                     exit
 
         else:
-            regArray = np.copy(self.region_array)
+            regArray = np.array(self.region_array, copy=True)  
 
-
-
+        print(regArray.shape)
         self.spectra_similarity = self.__calc_similarity(regArray)
+        print(self.spectra_similarity.shape)
 
         if mode in ["spectra_log", "spectra_log_dist"]:
             self.logger.info("Calculating spectra similarity")
@@ -719,6 +779,7 @@ class SpectraRegion():
                     
             dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
             sns.boxplot(data=dfObj, x="cluster", y="intensity")
+            plt.xticks(rotation=90)
             plt.show()
             plt.close()
 
@@ -944,7 +1005,7 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-    def deres_to_df(self, resKey, protWeights, keepOnlyProteins=True):
+    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
 
         clusterVec = []
         geneIdentVec = []
@@ -964,13 +1025,34 @@ class SpectraRegion():
         totalSpectraBGVec = []
         measuredSpectraBGVec = []
 
-        deRes = self.de_results[resKey]      
-        ttr = deRes.summary()
-
-        ttr["log2fc"] = -ttr["log2fc"]
+        ttr = deResDF.copy(deep=True)#self.de_results[resKey]      
         self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
+        #ttr = deRes.summary()
 
-        fttr = ttr[ttr.qval.lt(0.05) & ttr.log2fc.abs().gt(0.5)]
+        log2fcCol = "log2fc"
+        massCol = "gene"
+        adjPvalCol = "qval"
+
+        ttrColNames = list(ttr.columns.values)
+
+
+        if log2fcCol in ttrColNames and massCol in ttrColNames and adjPvalCol in ttrColNames:
+            dfColType = "diffxpy"
+
+        else:
+            #id	numFeatures	pval	abs.log2FC	log2FC	fdr	SDcorr	fc.pval	fc.fdr	nonde.fcwidth	fcCI.90.start	fcCI.90.end	fcCI.95.start	fcCI.95.end	fcCI.99.start	fcCI.99.end
+            if "id" in ttrColNames and "log2FC" in ttrColNames and "fc.fdr" in ttrColNames:
+                log2fcCol = "log2FC"
+                massCol = "id"
+                adjPvalCol = "fc.fdr"
+                dfColType = "empire"
+
+
+        if inverse_fc:
+            self.logger.info("DE result logFC inversed")
+            ttr[log2fcCol] = -ttr[log2fcCol]
+
+        fttr = ttr[ttr[adjPvalCol].lt(max_adj_pval) & ttr[log2fcCol].abs().gt(min_log2fc)]
 
         self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
 
@@ -980,9 +1062,9 @@ class SpectraRegion():
 
         self.logger.info("Created matrices with shape {} and {} (target, bg)".format(targetSpectraMatrix.shape, bgSpectraMatrix.shape))
 
-
+        
         for row in fttr.iterrows():
-            geneIDent = row[1]["gene"]
+            geneIDent = row[1][massCol]
             
             ag = geneIDent.split("_")
             massValue = float("{}.{}".format(ag[1], ag[2]))
@@ -992,8 +1074,8 @@ class SpectraRegion():
             if keepOnlyProteins and len(foundProt) == 0:
                 continue
 
-            lfc = row[1]["log2fc"]
-            qval = row[1]["qval"]
+            lfc = row[1][log2fcCol]
+            qval = row[1][adjPvalCol]
 
             expT, totalSpectra, measuredSpecta = self.__get_expression_from_matrix(targetSpectraMatrix, massValue, resKey[0], ["avg", "median"])
             exprBG, totalSpectraBG, measuredSpectaBG = self.__get_expression_from_matrix(bgSpectraMatrix, massValue, resKey[0], ["avg", "median"])
@@ -1063,10 +1145,10 @@ class SpectraRegion():
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, outdirectory=None):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest"], count_scale={"ttest": 1, "empire": 10000}):
         cluster2coords = self.getCoordsForSegmented()
 
-        df = pd.DataFrame()
+        dfbyMethod = defaultdict(lambda: pd.DataFrame())
 
         for segment in cluster2coords:
 
@@ -1079,16 +1161,25 @@ class SpectraRegion():
             if not includeBackground and 0 in clusters1:
                 del clusters1[clusters1.index(0)]
 
-            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory)
+            self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory, out_prefix=out_prefix, use_methods=use_methods, count_scale=count_scale)
 
             # get result
             resKey = self.__make_de_res_key(clusters0, clusters1)
 
-            resDF = self.deres_to_df(resKey, protWeights, keepOnlyProteins=keepOnlyProteins)
+            keyResults = self.get_de_results(resKey)
 
-            df = pd.concat([df, resDF], sort=False)           
+            for method in keyResults:
+                methodKeyDF = self.get_de_result(method, resKey)
 
-        return df
+                inverseFC = False
+                if method in ["ttest"]:
+                    inverseFC = True
+
+                resDF = self.deres_to_df(methodKeyDF, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
+
+                dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)           
+
+        return dfbyMethod
 
                     
 
@@ -1098,26 +1189,54 @@ class SpectraRegion():
         
 
     def clear_de_results(self):
-        self.de_results = {}
+        self.de_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
         import regex as re
         def run(cmd):
-            print(cmd)
+            print(" ".join(cmd))
             proc = subprocess.Popen(cmd,
                 stdout = subprocess.DEVNULL,
                 stderr = subprocess.PIPE,
             )
             stdout, stderr = proc.communicate()
+
+            print("Cmd returned with exit code", proc.returncode)
         
             return proc.returncode, stdout, stderr
         
-        print(pdata)
+        pysrmPath = os.path.dirname(os.path.abspath(__file__))
+        tocounts = Counter([x for x in pdata["condition"]])
+        mc = tocounts.most_common(1)[0]
+
+        print("Max condition count", mc)
+
+        if mc[1] > 100:
+            code, out, err = run(["/usr/bin/java", "-Xmx24G", "-cp", pysrmPath+"/../../../tools/nlEmpiRe.jar", "nlEmpiRe.input.ExpressionSet", "-getbestsubN", "100", "-inputdir", nlDir, "-cond1", "0", "-cond2", "1", "-o", nlDir + "/exprs_ds.txt"])
+
+            empireData=pd.read_csv(nlDir + "/exprs_ds.txt", delimiter="\t")
+            del empireData["gene"]
+
+            allreps = [x for x in list(empireData.columns.values) if not x in ["gene"]]
+
+            cond1reps = [x for x in allreps if x.startswith("cond1")]
+            cond2reps = [x for x in allreps if x.startswith("cond2")]
+
+            newPData = pd.DataFrame()
+
+            newPData["sample"] = cond1reps+cond2reps
+            newPData["condition"] = [0] * len(cond1reps) + [1] * len(cond2reps)
+            newPData["batch"] = 0
+
+            print("Writing new Pdata")
+            newPData.to_csv(nlDir + "/p_data.txt", sep="\t", index=False)
+
+            print("Writing new exprs data")
+            empireData.to_csv(nlDir + "/exprs.txt", sep="\t", index=False, header=False)
 
         runI = 0
         while runI < 10:
-            pysrmPath = os.path.dirname(os.path.abspath(__file__))
-            code, out, err = run(["/usr/bin/java", "-Xmx16G", "-cp", pysrmPath+"/../../../tools/nlEmpiRe.jar", "nlEmpiRe.input.ExpressionSet", "-getbestsubN", "100", "-inputdir", nlDir, "-cond1", "0", "-cond2", "1", "-o", diffOutput])
+            code, out, err = run(["/usr/bin/java", "-Xmx16G", "-cp", pysrmPath+"/../../../tools/nlEmpiRe.jar", "nlEmpiRe.input.ExpressionSet", "-inputdir", nlDir, "-cond1", "0", "-cond2", "1", "-o", diffOutput])
 
             print(code)
 
@@ -1140,6 +1259,10 @@ class SpectraRegion():
                 for y in ress:
                     removeSpectra.append(y)
 
+
+            print("Loading pdata", )
+            pdata = pd.read_csv(pdataPath, delimiter="\t")
+
             print("Removing spectra", removeSpectra)
             pdata=pdata[~pdata['sample'].isin(removeSpectra)]
             print(pdata)
@@ -1151,7 +1274,7 @@ class SpectraRegion():
 
 
 
-    def find_markers(self, clusters0, clusters1=None, outdirectory=None, replaceExisting=False):
+    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, count_scale={"ttest": 1, "empire": 10000}):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1168,16 +1291,16 @@ class SpectraRegion():
 
         self.logger.info("DE data for case: {}".format(clusters0))
         self.logger.info("DE data for control: {}".format(clusters1))
+        print("Running {} against {}".format(clusters0, clusters1))
 
         resKey = self.__make_de_res_key(clusters0, clusters1)
         self.logger.info("DE result key: {}".format(resKey))
 
         if not replaceExisting:
 
-            if resKey in self.de_results:
+            if all([resKey in self.de_results_all[x] for x in use_methods]):
                 self.logger.info("DE result key already exists")
                 return
-
 
         sampleVec = []
         conditionVec = []
@@ -1198,7 +1321,7 @@ class SpectraRegion():
                 sampleVec.append(pxl_name)
                 conditionVec.append(0)
 
-                exprData[pxl_name] = (10000* self.region_array[pxl[0], pxl[1], :]).astype('int')
+                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]#.astype('int')
 
 
         for clus in clusters1:
@@ -1212,13 +1335,10 @@ class SpectraRegion():
                 sampleVec.append(pxl_name)
                 conditionVec.append(1)
 
-                exprData[pxl_name] = (10000* self.region_array[pxl[0], pxl[1], :]).astype('int')
+                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]#.astype('int')
 
 
         self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
-
-        if outdirectory != None:
-            exprData.to_csv(outdirectory + "/exprs.txt", index=False,header=False, sep="\t")
 
         pData = pd.DataFrame()
 
@@ -1228,19 +1348,6 @@ class SpectraRegion():
 
         self.logger.info("DE Sample DataFrame ready. Shape {}".format(pData.shape))
 
-        if outdirectory != None:
-            pDataOut = outdirectory+"/p_data.txt"
-            pData.to_csv(pDataOut, index=False, sep="\t")
-
-            nlOutput = outdirectory + "/nldiffreg." + "_".join([str(z) for z in resKey[0]]) +"." + "_".join([str(z) for z in resKey[1]]) + ".tsv"
-
-            self.run_nlempire(outdirectory, pData, pDataOut, nlOutput)
-
-            if os.path.isfile(nlOutput):
-                empireData=pd.read_csv("nl_diff_masses.tsv", delimiter="\t")
-                self.de_results_all["empire"][resKey] = empireData
-
-
         fData = pd.DataFrame()
         availSamples = [x for x in exprData.columns if not x in ["mass"]]
         for sample in availSamples:
@@ -1249,55 +1356,122 @@ class SpectraRegion():
             if outdirectory == None:
                 #only needed for empire ...
                 break
-            
-        if outdirectory != None:
-            fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
 
-        if outdirectory == None:
-            self.logger.info("NO outdirectory given. Performing DE-test")
+        if outdirectory != None and "empire" in use_methods:
 
-            import diffxpy.api as de
-            import anndata
+            fillCondition = not resKey in self.de_results_all["empire"]
 
-            pdat = pData.copy()
-            del pdat["sample"]
+            if replaceExisting or fillCondition:
+                self.logger.info("Starting EMPIRE; Writing Expression Files")
 
-            deData = anndata.AnnData(
-                X=exprData.values.transpose(),
-                var=pd.DataFrame(index=[x for x in fData[availSamples[0]]]),
-                obs=pdat
-            )
+                empExprData = exprData.copy(deep=True)
 
-            test = de.test.t_test(
-                data=deData,
-                grouping="condition"
-            )
+                if count_scale != None and "empire" in count_scale:
+                    empExprData = empExprData * count_scale["empire"]
+
+                    if count_scale["empire"] > 1:
+                        empExprData = empExprData.astype(int)
+
+                empExprData.to_csv(outdirectory + "/exprs.txt", index=False,header=False, sep="\t")
+                empExprData = None
+                pDataOut = outdirectory+"/p_data.txt"
+                pData.to_csv(pDataOut, index=False, sep="\t")
+                fData.to_csv(outdirectory+"/f_data.txt", index=False, header=False, sep="\t")
+                
+                nlOutput = outdirectory + "/"+out_prefix+"." + "_".join([str(z) for z in resKey[0]]) +"." + "_".join([str(z) for z in resKey[1]]) + ".tsv"
+
+                self.logger.info("Starting EMPIRE; Running nlEmpiRe")
+                self.run_nlempire(outdirectory, pData, pDataOut, nlOutput)
+
+                if os.path.isfile(nlOutput):
+                    print("EMPIRE output available: {}".format(nlOutput))
+                    empireData=pd.read_csv(nlOutput, delimiter="\t")
+                    self.de_results_all["empire"][resKey] = empireData
+
+            else:
+                self.logger.info("Skipping empire for: {}, {}, {}".format(resKey, replaceExisting, fillCondition))
 
 
-            self.de_results[ resKey ] = test
-            self.de_results_all["ttest"][resKey] = test.summary()
-            self.logger.info("DE-test finished. Results available: {}".format(resKey))
+        if "ttest" in use_methods:
+
+            fillCondition = not resKey in self.de_results_all["ttest"]
+
+            if replaceExisting or fillCondition:
+
+                self.logger.info("Performing DE-test: ttest")
+
+                ttExprData = exprData.copy(deep=True)
+
+                if count_scale != None and "ttest" in count_scale:
+                    ttExprData = ttExprData * count_scale["ttest"]
+
+                    if count_scale["ttest"] > 1:
+                        ttExprData = ttExprData.astype(int)
+
+                pdat = pData.copy()
+                del pdat["sample"]
+
+                deData = anndata.AnnData(
+                    X=exprData.values.transpose(),
+                    var=pd.DataFrame(index=[x for x in fData[availSamples[0]]]),
+                    obs=pdat
+                )
+
+                test = de.test.t_test(
+                    data=deData,
+                    grouping="condition"
+                )
+
+                self.de_results_all["ttest"][resKey] = test.summary()
+                self.logger.info("DE-test finished. Results available: {}".format(resKey))
+
+            else:
+                self.logger.info("Skipping ttest for: {}, {}, {}".format(resKey, replaceExisting, fillCondition))
 
 
         return exprData, pData, fData
 
 
     def list_de_results(self):
-        return [x for x in self.de_results]
+        
+        allDERes = []
+        for x in self.de_results_all:
+            for y in self.de_results_all[x]:
+                allDERes.append((x,y))
+
+        return allDERes
+
+    def find_de_results(self, keypart):
+
+        results = []
+        for method in self.de_results_all:
+            for key in self.de_results_all[method]:
+
+                if keypart == key[0] or keypart == key[1]:
+                    results.append( (method, key) )
+
+        return results
 
 
-    def get_de_result(self, key):
-
-        return self.de_results.get(key, None)
 
     def get_de_results(self, key):
 
-        rets = []
-        for x in self.de_results:
-            if x[0] == key:
-                rets.append(x)
+        results = {}
+        for method in self.de_results_all:
+            if key in self.de_results_all[method]:
+                results[method] = self.de_results_all[method][key]
 
-        return rets
+        return results
+
+    def get_de_result(self, method, key):
+
+        rets = []
+        for x in self.de_results_all:
+            if x == method:
+                for y in self.de_results_all[x]:
+                    if y == key:
+                        return self.de_results_all[x][y]
+        return None
 
 
 
@@ -1570,15 +1744,15 @@ class IMZMLExtract:
         return ssum/(len1*len2)
 
 
-    def get_mz_index(self, value):
+    def get_mz_index(self, value, threshold=None):
 
         curIdxDist = 1000000
-        curIdx = 0
+        curIdx = None
 
         for idx, x in enumerate(self.mzValues):
             dist = abs(x-value)
 
-            if dist < curIdxDist:
+            if dist < curIdxDist and (threhsold==None or dist < threshold):
                 curIdx = idx
                 curIdxDist = dist
             
@@ -1728,16 +1902,16 @@ class IMZMLExtract:
 
     def normalize_spectrum(self, spectrum, normalize=None, max_region_value=None):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "vector"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
-        if normalize == "max_intensity_region":
+        if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             assert(max_region_value != None)
 
         if normalize == "max_intensity_spectrum":
             spectrum = spectrum / np.max(spectrum)
             return spectrum
 
-        elif normalize == "max_intensity_region":
+        elif normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             spectrum = spectrum / max_region_value
             return spectrum
 
@@ -1752,25 +1926,31 @@ class IMZMLExtract:
 
     def normalize_region_array(self, region_array, normalize=None):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "vector"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
         region_dims = region_array.shape
 
-        maxInt = 0
+        maxInt = 0.0
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
 
                 spectrum = region_array[i, j, :]
 
-                if normalize == 'max_intensity_region':
+                if normalize in ['max_intensity_region', 'max_intensity_all_regions']:
                     maxInt = max(maxInt, np.max(spectrum))
 
                 else:
                     spectrum = self.normalize_spectrum(spectrum, normalize=normalize)
                     region_array[i, j, :] = spectrum
 
-        if normalize != 'max_intensity_region':
+        if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
             return
+
+        if normalize in ["max_intensity_all_regions"]:
+            for idx, _ in enumerate(self.parser.coordinates):
+                mzs, intensities = p.getspectrum(idx)
+                maxInt = max(maxInt, np.max(intensities))
+
 
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
@@ -1778,6 +1958,23 @@ class IMZMLExtract:
                 spectrum = region_array[i, j, :]
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
                 region_array[i, j, :] = spectrum
+
+    def plot_toc(self, region_array):
+        region_dims = region_array.shape
+        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        for i in range(0, region_dims[0]):
+            for j in range(0, region_dims[1]):
+
+                spectrum = region_array[i, j, :]
+                peakplot[i,j] = sum(spectrum)
+
+        heatmap = plt.matshow(peakplot)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
+
+
 
     def list_highest_peaks(self, region_array, counter=False):
         region_dims = region_array.shape
