@@ -201,21 +201,21 @@ class SpectraRegion():
         if pathPrefix != None:
             segmentsPath = os.path.join(pathPrefix, segmentsPath)
 
+        cluster2deData = {}
+
         # write DE data
         if protWeights != None:
 
             if not nodf:
                 markerGenes = self.find_all_markers(protWeights, includeBackground=True)
-            
-            cluster2deData = {}
 
             for cluster in cluster2coords:
 
                 outputname = prefix + "." + str(regionID) + "." + str(cluster) +".tsv"
-
+    
                 if not nodf:
                     outfile = os.path.join(folder, outputname)
-                    subdf = markerGenes[markerGenes["clusterID"] == str(cluster)]
+                    subdf = markerGenes["ttest"][markerGenes["ttest"]["clusterID"] == str(cluster)]
                     subdf.to_csv(outfile, sep="\t", index=True)
 
 
