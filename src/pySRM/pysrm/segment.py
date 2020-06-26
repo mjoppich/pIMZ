@@ -410,10 +410,11 @@ class SpectraRegion():
         if min_cut_off != None:
             image[image <= min_cut_off] = min_cut_off
 
-        heatmap = plt.matshow(image)
-        plt.colorbar(heatmap)
-        plt.show()
-        plt.close()
+        #heatmap = plt.matshow(image)
+        #plt.colorbar(heatmap)
+        #plt.show()
+        #plt.close()
+        return image
 
 
     def __calc_similarity(self, inputarray):
@@ -2072,8 +2073,8 @@ class IMZMLExtract:
 
 
         if normalize in ["inter_median", "intra_median"]:
-
-            ref_spectra = region_array[0,0,:]+0.01
+            
+            ref_spectra = region_array[0,0,:] + 0.01
 
             if normalize == "intra_median":
 
@@ -2081,7 +2082,10 @@ class IMZMLExtract:
                 for i in range(region_array.shape[0]):
                     for j in range(region_array.shape[1]):
                         median = np.median(region_array[i,j,:]/ref_spectra)
-                        intra_norm[i,j,:] = region_array[i,j, :]/median
+                        if median != 0:
+                            intra_norm[i,j,:] = region_array[i,j, :]/median
+                        else:
+                            intra_norm[i,j,:] = region_array[i,j,:]
 
                 return intra_norm
 
