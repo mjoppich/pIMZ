@@ -311,7 +311,7 @@ class SpectraRegion():
         if pathPrefix != None:
             segmentsPath = os.path.join(pathPrefix, segmentsPath)
 
-        cluster2deData = {}#
+        cluster2deData = {}
         # write DE data
         if protWeights != None:
 
@@ -321,7 +321,7 @@ class SpectraRegion():
             for cluster in cluster2coords:
 
                 outputname = prefix + "." + str(regionID) + "." + str(cluster) +".tsv"
-
+    
                 if not nodf:
                     outfile = os.path.join(folder, outputname)
                     subdf = markerGenes["ttest"][markerGenes["ttest"]["clusterID"] == str(cluster)]
@@ -424,7 +424,7 @@ class SpectraRegion():
 
         if len(inputarray.shape) > 2:
             dims = inputarray.shape[2]
-
+        print(dims)
         qs = []
         qArr = (ctypes.c_float * len(qs))(*qs)
 
@@ -455,7 +455,7 @@ class SpectraRegion():
 
         return outclust
 
-    def calculate_similarity(self, mode="spectra", features=None):
+    def calculate_similarity(self, mode="spectra", features=[], neighbors = 1):
         """
 
         :param mode: must be in  ["spectra", "spectra_log", "spectra_log_dist"]
@@ -465,13 +465,18 @@ class SpectraRegion():
 
         assert(mode in ["spectra", "spectra_log", "spectra_log_dist"])
 
-        if features != None:
-            regArray = np.copy((self.region_array.shape[0], self.region_array.shape[1], len(features)))
-
-            for i in range(0, regArray.shape[0]):
-                for j in range(0, regArray.shape[1]):
-                    regArray[i,j,:] = self.region_array[i,j,0:len(features)] # FIXME
-
+        if len(features) > 0:
+            for neighbor in range(neighbors):
+                features = features + [i + neighbor for i in features] + [i - neighbor for i in features]
+            features = np.unique(features)
+            featureIndex = [self.__get_exmass_for_mass(x) for x in features]
+            featureIndex = [y for (x,y) in featureIndex if y != None]
+            featureIndex = sorted(np.unique(featureIndex))
+            regArray = np.zeros((self.region_array.shape[0], self.region_array.shape[1], len(featureIndex)))
+            for i in range(self.region_array.shape[0]):
+                for j in range(self.region_array.shape[1]):
+                    extracted = [self.region_array[i,j,:][k] for k in tuple(featureIndex)]
+                    regArray[i,j,:] = extracted
         else:
             regArray = np.array(self.region_array, copy=True)  
 
