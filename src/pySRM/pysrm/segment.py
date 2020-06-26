@@ -410,11 +410,11 @@ class SpectraRegion():
         if min_cut_off != None:
             image[image <= min_cut_off] = min_cut_off
 
-        #heatmap = plt.matshow(image)
-        #plt.colorbar(heatmap)
-        #plt.show()
-        #plt.close()
-        return image
+        heatmap = plt.matshow(image)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+        #return image
 
 
     def __calc_similarity(self, inputarray):
