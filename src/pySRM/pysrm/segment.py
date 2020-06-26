@@ -20,7 +20,7 @@ import math
 import scipy.ndimage as ndimage
 import diffxpy.api as de
 import anndata
-
+from mpl_toolkits.axes_grid1 import ImageGrid
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
 lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
@@ -43,6 +43,7 @@ class CombinedSpectra():
 
         self.regions = {}
         self.consensus_similarity_matrix = None
+        self.region_cluster2cluster = None
 
         for x in regions:
             
@@ -50,7 +51,7 @@ class CombinedSpectra():
             if addregion.name == None:
                 addregion.name = x
 
-            self.regions[x] = regions[x]
+            self.regions[addregion.name] = regions[x]
 
 
     def __get_spectra_similarity(self, vA, vB):
@@ -91,7 +92,116 @@ class CombinedSpectra():
             plt.show()
             plt.close()
 
-                
+
+    def cluster_concensus_spectra(self, number_of_clusters=5):
+        df = self.consensus_similarity_matrix.copy()
+        # Calculate the distance between each sample
+        Z = spc.hierarchy.linkage(df.values, 'ward')
+
+        plt.figure(figsize=(8,8))
+        # Make the dendro
+        spc.hierarchy.dendrogram(Z, labels=df.columns.values, leaf_rotation=0, orientation="left", color_threshold=240, above_threshold_color='grey')
+
+        c = spc.hierarchy.fcluster(Z, t=number_of_clusters, criterion='maxclust')
+
+        lbl2cluster = {}
+        region2cluster = {}
+        for lbl, clus in zip(df.columns.values, c):
+            lbl2cluster[str(lbl)] = clus
+            region2cluster[lbl] = clus
+
+        # Create a color palette with 3 color for the 3 cyl possibilities
+        my_palette = plt.cm.get_cmap("Accent", 5)
+        
+        # transforme the 'cyl' column in a categorical variable. It will allow to put one color on each level.
+        df['cat']=pd.Categorical(c)
+        my_color=df['cat'].cat.codes
+        
+        # Apply the right color to each label
+        ax = plt.gca()
+        xlbls = ax.get_ymajorticklabels()
+        num=-1
+        for lbl in xlbls:
+            num+=1
+            val=lbl2cluster[lbl.get_text()]
+            lbl.set_color(my_palette(val))
+
+        plt.show()
+        plt.close()
+
+        self.region_cluster2cluster = region2cluster
+
+
+    def plot_common_segments(self):
+
+        assert(not self.region_cluster2cluster is None)
+
+        allClusters = [self.region_cluster2cluster[x] for x in self.region_cluster2cluster]
+        valid_vals = sorted(set(allClusters))
+
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+        print(val_lookup)
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        region2segments = {}
+        for regionName in self.regions:
+            origSegments = np.array(self.regions[regionName].segmented, copy=True)
+
+            origCluster2New = {}
+
+            for x in self.region_cluster2cluster:
+                if x[0] == regionName:
+                    origCluster2New[x[1]] = self.region_cluster2cluster[x]
+
+            newSegments = np.zeros(origSegments.shape)
+
+            print(origCluster2New)
+            for i in range(0, newSegments.shape[0]):
+                for j in range(0, newSegments.shape[1]):
+                    newSegments[i,j] = origCluster2New.get(origSegments[i,j], 0)
+            
+            region2segments[regionName] = newSegments
+
+
+        fig = plt.figure(figsize=(12, 12))
+
+
+        grid = ImageGrid(fig, 111,          # as in plt.subplot(111)
+                        nrows_ncols=(1,len(region2segments)),
+                        axes_pad=0.15,
+                        share_all=True,
+                        cbar_location="right",
+                        cbar_mode="single",
+                        cbar_size="7%",
+                        cbar_pad=0.15,
+                        )
+
+        # Add data to image grid
+        axes = [ax for ax in grid]
+
+        for didx, regionName in enumerate(region2segments):
+            ax = axes[didx]
+
+            im = ax.matshow(region2segments[regionName], cmap=plt.cm.get_cmap('viridis', len(valid_vals)), vmin=min_, vmax=max_)
+            formatter = plt.FuncFormatter(formatter_func)
+
+            # We must be sure to specify the ticks matching our target names
+            ax.set_title(regionName, y=0.1)
+
+        ax.cax.colorbar(im,ticks=positions, format=formatter, spacing='proportional')
+        ax.cax.toggle_label(True)
+
+        plt.show()
+        plt.close()
+
 
 class SpectraRegion():
 
@@ -201,21 +311,20 @@ class SpectraRegion():
         if pathPrefix != None:
             segmentsPath = os.path.join(pathPrefix, segmentsPath)
 
+        cluster2deData = {}#
         # write DE data
         if protWeights != None:
 
             if not nodf:
-                markerGenes = self.find_all_markers(protWeights, includeBackground=True)
+                markerGenes = self.find_all_markers(protWeights, use_methods=["ttest"], includeBackground=True)
             
-            cluster2deData = {}
-
             for cluster in cluster2coords:
 
                 outputname = prefix + "." + str(regionID) + "." + str(cluster) +".tsv"
 
                 if not nodf:
                     outfile = os.path.join(folder, outputname)
-                    subdf = markerGenes[markerGenes["clusterID"] == str(cluster)]
+                    subdf = markerGenes["ttest"][markerGenes["ttest"]["clusterID"] == str(cluster)]
                     subdf.to_csv(outfile, sep="\t", index=True)
 
 
@@ -261,15 +370,16 @@ class SpectraRegion():
         
 
 
-    def __get_exmass_for_mass(self, mass):
+    def __get_exmass_for_mass(self, mass, threshold=None):
         
         dist2mass = float('inf')
         curMass = -1
         curIdx = -1
 
         for xidx,x in enumerate(self.idx2mass):
-            if abs(x-mass) < dist2mass:
-                dist2mass = abs(x-mass)
+            dist = abs(x-mass)
+            if dist < dist2mass and (threshold==None or dist < threshold):
+                dist2mass = dist
                 curMass = x    
                 curIdx = xidx    
 
@@ -1139,7 +1249,7 @@ class SpectraRegion():
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest"], count_scale={"ttest": 1, "empire": 10000}):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
         cluster2coords = self.getCoordsForSegmented()
 
         dfbyMethod = defaultdict(lambda: pd.DataFrame())
@@ -1166,7 +1276,7 @@ class SpectraRegion():
                 methodKeyDF = self.get_de_result(method, resKey)
 
                 inverseFC = False
-                if method in ["ttest"]:
+                if method in ["ttest", "rank"]:
                     inverseFC = True
 
                 resDF = self.deres_to_df(methodKeyDF, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
@@ -1268,7 +1378,7 @@ class SpectraRegion():
 
 
 
-    def find_markers(self, clusters0, clusters1=None, use_methods = ["empire", "ttest"], out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, count_scale={"ttest": 1, "empire": 10000}):
+    def find_markers(self, clusters0, clusters1=None, out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1386,41 +1496,55 @@ class SpectraRegion():
                 self.logger.info("Skipping empire for: {}, {}, {}".format(resKey, replaceExisting, fillCondition))
 
 
-        if "ttest" in use_methods:
+        diffxPyTests = set(["ttest", "rank"])
+        if len(diffxPyTests.intersection(use_methods)) > 0:
 
-            fillCondition = not resKey in self.de_results_all["ttest"]
+            for testMethod in use_methods:
 
-            if replaceExisting or fillCondition:
+                if not testMethod in diffxPyTests:
+                    continue
 
-                self.logger.info("Performing DE-test: ttest")
+                fillCondition = not resKey in self.de_results_all[testMethod]
 
-                ttExprData = exprData.copy(deep=True)
+                if replaceExisting or fillCondition:
 
-                if count_scale != None and "ttest" in count_scale:
-                    ttExprData = ttExprData * count_scale["ttest"]
+                    self.logger.info("Performing DE-test: {}".format(testMethod))
 
-                    if count_scale["ttest"] > 1:
-                        ttExprData = ttExprData.astype(int)
+                    ttExprData = exprData.copy(deep=True)
 
-                pdat = pData.copy()
-                del pdat["sample"]
+                    if count_scale != None and testMethod in count_scale:
+                        ttExprData = ttExprData * count_scale[testMethod]
 
-                deData = anndata.AnnData(
-                    X=exprData.values.transpose(),
-                    var=pd.DataFrame(index=[x for x in fData[availSamples[0]]]),
-                    obs=pdat
-                )
+                        if count_scale[testMethod] > 1:
+                            ttExprData = ttExprData.astype(int)
 
-                test = de.test.t_test(
-                    data=deData,
-                    grouping="condition"
-                )
+                    pdat = pData.copy()
+                    del pdat["sample"]
 
-                self.de_results_all["ttest"][resKey] = test.summary()
-                self.logger.info("DE-test finished. Results available: {}".format(resKey))
+                    deData = anndata.AnnData(
+                        X=exprData.values.transpose(),
+                        var=pd.DataFrame(index=[x for x in fData[availSamples[0]]]),
+                        obs=pdat
+                    )
 
-            else:
-                self.logger.info("Skipping ttest for: {}, {}, {}".format(resKey, replaceExisting, fillCondition))
+                    if testMethod == "ttest":
+
+                        test = de.test.t_test(
+                            data=deData,
+                            grouping="condition"
+                        )
+
+                    elif testMethod == "rank":
+                        test = de.test.rank_test(
+                            data=deData,
+                            grouping="condition"
+                        )
+
+                    self.de_results_all[testMethod][resKey] = test.summary()
+                    self.logger.info("DE-test ({}) finished. Results available: {}".format(testMethod, resKey))
+
+                else:
+                    self.logger.info("Skipping {} for: {}, {}, {}".format(testMethod, resKey, replaceExisting, fillCondition))
 
 
         return exprData, pData, fData
@@ -1752,6 +1876,25 @@ class IMZMLExtract:
             
         return curIdx
 
+    def get_region_indices(self, regionid):
+
+        if not regionid in self.dregions:
+            return None
+        
+        outindices = {}
+
+        for coord in self.dregions[regionid]:
+
+            spectID = self.parser.coordinates.index(coord)
+
+            if spectID == None or spectID < 0:
+                print("Invalid coordinate", coord)
+                continue
+
+            outindices[coord] = spectID
+
+        return outindices
+
     def get_region_spectra(self, regionid):
 
         if not regionid in self.dregions:
@@ -1768,7 +1911,7 @@ class IMZMLExtract:
                 continue
 
             cspec = self.get_spectrum( spectID )
-            cspec = cspec[self.specStart:] / 1.0
+            cspec = cspec[self.specStart:]# / 1.0
             #cspec = cspec/np.max(cspec)
             outspectra[coord] = cspec
 
@@ -1920,9 +2063,42 @@ class IMZMLExtract:
 
     def normalize_region_array(self, region_array, normalize=None):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median"])
+
+
+        if normalize in ["inter_median", "intra_median"]:
+
+            ref_spectra = region_array[0,0,:]+0.01
+
+            if normalize == "intra_median":
+
+                intra_norm = np.zeros(region_array.shape)
+                for i in range(region_array.shape[0]):
+                    for j in range(region_array.shape[1]):
+                        median = np.median(region_array[i,j,:]/ref_spectra)
+                        intra_norm[i,j,:] = region_array[i,j, :]/median
+
+                return intra_norm
+
+            if normalize == "inter_median":
+                global_fcs = []
+
+                for i in range(region_array.shape[0]):
+                    for j in range(region_array.shape[1]):
+
+                        foldchanges = list(region_array[i][j] / ref_spectra)
+                        global_fcs += [foldchanges]
+
+                inter_norm = np.array(region_array, copy=True)
+                global_median = np.concatenate(global_fcs)
+
+                inter_norm = inter_norm / np.median(global_median)
+
+                return inter_norm
+
 
         region_dims = region_array.shape
+        outarray = np.array(region_array, copy=True)
 
         maxInt = 0.0
         for i in range(0, region_dims[0]):
@@ -1935,10 +2111,10 @@ class IMZMLExtract:
 
                 else:
                     spectrum = self.normalize_spectrum(spectrum, normalize=normalize)
-                    region_array[i, j, :] = spectrum
+                    outarray[i, j, :] = spectrum
 
         if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
-            return
+            return None
 
         if normalize in ["max_intensity_all_regions"]:
             for idx, _ in enumerate(self.parser.coordinates):
@@ -1949,9 +2125,11 @@ class IMZMLExtract:
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
 
-                spectrum = region_array[i, j, :]
+                spectrum = outarray[i, j, :]
                 spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
-                region_array[i, j, :] = spectrum
+                outarray[i, j, :] = spectrum
+
+        return outarray
 
     def plot_toc(self, region_array):
         region_dims = region_array.shape
@@ -1993,7 +2171,7 @@ class IMZMLExtract:
                     maxPeakCounter[mzVal] += 1
 
         if counter:
-            for x in maxPeakCounter:
+            for x in sorted([x for x in maxPeakCounter]):
                 print(x, maxPeakCounter[x])
 
         heatmap = plt.matshow(peakplot)
@@ -2006,6 +2184,40 @@ class IMZMLExtract:
         plt.hist(allPeakIntensities, bins=len(allPeakIntensities), cumulative=True, histtype="step")
         plt.show()
         plt.close()
+
+    def get_pixel_spectrum(self, regionid, specCoords):
+
+        xr,yr,zr,sc = self.get_region_range(regionid)
+        
+        totalCoords = (specCoords[0]+xr[0], specCoords[1]+yr[0], 1)
+
+        spectID = self.parser.coordinates.index(totalCoords)
+
+        if spectID == None or spectID < 0:
+            print("Invalid coordinate", totalCoords)
+            return None
+
+        cspec = self.get_spectrum( spectID )
+        return cspec, spectID, totalCoords
+        
+    def get_region_index_array(self, regionid):
+        xr,yr,zr,sc = self.get_region_range(regionid)
+        rs = self.get_region_shape(regionid)
+        self.logger.info("Found region {} with shape {}".format(regionid, rs))
+
+        sarray = np.zeros( (rs[0], rs[1]), dtype=np.float32 )
+
+        coord2spec = self.get_region_indices(regionid)
+
+        for coord in coord2spec:
+            xpos = coord[0]-xr[0]
+            ypos = coord[1]-yr[0]
+
+            specIdx = coord2spec[coord]
+
+            sarray[xpos, ypos] = specIdx
+
+        return sarray
 
 
     def get_region_array(self, regionid, makeNullLine=True):
@@ -2027,6 +2239,7 @@ class IMZMLExtract:
             if len(spectra) < sc:
                 spectra = np.pad(spectra, ((0,0),(0, sc-len(spectra) )), mode='constant', constant_values=0)
 
+            spectra = np.array(spectra, copy=True)
 
             if makeNullLine:
                 spectra[spectra < 0.0] = 0.0
@@ -2144,6 +2357,8 @@ class IMZMLExtract:
 
         return dist
 
+    def _detectRegions(self, allpixels):
+        return self.__detectRegions(allpixels)
 
     def __detectRegions(self, allpixels):
 
@@ -2181,11 +2396,22 @@ class IMZMLExtract:
                 #if pixel[1] - miny > 100:
                 #    continue
 
+                if pixel[0] == 693 and pixel[1] == 317:
+                    print("proc pixel")
+
+                pixelAdded = False
                 for coord in region:
                     if self.__dist(coord, pixel) <= 1:
                         accRegions.append(ridx)
+                        pixelAdded = False
                         break
 
+                if not pixelAdded:
+                    if pixel[0] == 693 and pixel[1] == 317:
+                        print("Pixel not added", pixel)
+
+            if pixel[0] == 693 and pixel[1] == 317:
+                print("Pixel acc regions", accRegions)
 
             if len(accRegions) == 0:
                 allregions.append([pixel])
@@ -2199,7 +2425,7 @@ class IMZMLExtract:
 
                 bc = len(allregions)
 
-                totalRegion = []
+                totalRegion = [pixel]
                 for ridx in accRegions:
                     totalRegion += allregions[ridx]
 
