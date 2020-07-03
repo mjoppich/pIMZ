@@ -479,6 +479,7 @@ class SpectraRegion():
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
+        #return image
 
 
     def __calc_similarity(self, inputarray):
@@ -2175,8 +2176,8 @@ class IMZMLExtract:
 
 
         if normalize in ["inter_median", "intra_median"]:
-
-            ref_spectra = region_array[0,0,:]+0.01
+            
+            ref_spectra = region_array[0,0,:] + 0.01
 
             if normalize == "intra_median":
 
