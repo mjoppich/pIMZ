@@ -20,6 +20,7 @@ import math
 import scipy.ndimage as ndimage
 import diffxpy.api as de
 import anndata
+import progressbar
 from mpl_toolkits.axes_grid1 import ImageGrid
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
@@ -205,7 +206,7 @@ class CombinedSpectra():
 
 class SpectraRegion():
 
-    def __init__(self, region_array, idx2mass):
+    def __init__(self, region_array, idx2mass, name=None):
 
         assert(not region_array is None)
         assert(not idx2mass is None)
@@ -225,16 +226,8 @@ class SpectraRegion():
         lib.StatisticalRegionMerging_mode_eucl.argtypes = [ctypes.c_void_p]
         lib.StatisticalRegionMerging_mode_eucl.restype = None
 
-        self.logger = logging.getLogger('SpectraRegion')
-        self.logger.setLevel(logging.INFO)
-
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setLevel(logging.INFO)
-
-        self.logger.addHandler(consoleHandler)
-
-        formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
-        consoleHandler.setFormatter(formatter)
+        self.logger = None
+        self.__setlogger()
 
         self.name = None
         self.region_array = region_array
@@ -267,6 +260,78 @@ class SpectraRegion():
 
             self.idx2pixel[i] = (x,y)
             self.pixel2idx[(x,y)] = i
+
+    def __setlogger(self):
+        self.logger = logging.getLogger('SpectraRegion')
+
+        if len(self.logger.handlers) == 0:
+            self.logger.setLevel(logging.INFO)
+
+            consoleHandler = logging.StreamHandler()
+            consoleHandler.setLevel(logging.INFO)
+
+            self.logger.addHandler(consoleHandler)
+
+            formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+            consoleHandler.setFormatter(formatter)
+
+
+    def __getstate__(self):
+        return {
+            "name": self.name,
+            "region_array": self.region_array,
+            "idx2mass": self.idx2mass,
+            "spectra_similarity": self.spectra_similarity,
+            "dist_pixel": self.dist_pixel,
+            "idx2pixel": self.pixel2idx,
+            "elem_matrix": self.elem_matrix,
+            "dimred_elem_matrix": self.dimred_elem_matrix,
+            "dimred_labels": self.dimred_labels,
+            "segmented": self.segmented,
+            "segmented_method": self.segmented_method,
+            "cluster_filters": self.cluster_filters,
+            "consensus": self.consensus,
+            "consensus_method": self.consensus_method,
+            "consensus_similarity_matrix": self.consensus_similarity_matrix,
+            "de_results_all": self.de_results_all
+        }
+
+    def __setstate__(self, state):
+
+        self.__dict__.update(state)
+
+        """
+        self.name = state.name
+        self.region_array = state.region_array
+        self.idx2mass = state.idx2mass
+        self.spectra_similarity = state.spectra_similarity
+        self.dist_pixel = state.dist_pixel
+        self.pixel2idx = state.pixel2idx
+        self.elem_matrix = state.elem_matrix
+        self.dimred_elem_matrix = state.dimred_elem_matrix
+        self.dimred_labels = state.dimred_labels
+        self.segmented = state.segmented
+        self.segmented_method = state.segmented_method
+        self.cluster_filters = state.cluster_filters
+        self.consensus = state.consensus
+        self.consensus_method = state.consensus_method
+        self.consensus_similarity_matrix = state.consensus_similarity_matrix
+        self.de_results_all = state.de_results_all
+        """
+
+        self.logger = None
+        self.__setlogger()
+
+        self.idx2pixel = {}
+        self.pixel2idx = {}
+
+        for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
+
+            x,y = divmod(i, self.region_array.shape[1])
+
+            self.idx2pixel[i] = (x,y)
+            self.pixel2idx[(x,y)] = i
+
 
     def plot_array(self, fig, arr):
 
@@ -571,17 +636,17 @@ class SpectraRegion():
 
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
-            n_neighbors=30,
+            n_neighbors=10,
             min_dist=0.0,
-            n_components=40,
+            n_components=2,
             random_state=42,
         ).fit_transform(self.elem_matrix)
 
         self.logger.info("HDBSCAN reduction")
 
         clusterer = hdbscan.HDBSCAN(
-            min_samples=10,
-            min_cluster_size=10,
+            min_samples=5,
+            min_cluster_size=20,
         )
         self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix) + 2
 
@@ -589,20 +654,22 @@ class SpectraRegion():
 
         return self.dimred_labels
 
-    def vis_umap(self):
+    def vis_umap(self, legend=True):
 
         assert(not self.elem_matrix is None)
         assert(not self.dimred_elem_matrix is None)
         assert(not self.dimred_labels is None)
 
+
         plt.figure()
         clustered = (self.dimred_labels >= 0)
+        print("Dimred Shape", self.dimred_elem_matrix.shape)
+        print("Unassigned", self.dimred_elem_matrix[~clustered, ].shape)
         plt.scatter(self.dimred_elem_matrix[~clustered, 0],
                     self.dimred_elem_matrix[~clustered, 1],
-                    color=(0.5, 0.5, 0.5),
+                    color=(1, 0,0),
                     label="Unassigned",
-                    s=0.3,
-                    alpha=0.5)
+                    s=2.0)
 
         uniqueClusters = sorted(set([x for x in self.dimred_labels if x >= 0]))
 
@@ -615,9 +682,10 @@ class SpectraRegion():
                         self.dimred_elem_matrix[self.dimred_labels == clusterID, 1],
                         color=clusterColor,
                         label=str(clusterID),
-                        s=0.5)
+                        s=10.0)
 
-        plt.legend()
+        if legend:
+            plt.legend()
         plt.show()
         plt.close()
 
@@ -1922,6 +1990,28 @@ class IMZMLExtract:
 
         return outspectra
 
+
+    def get_avg_region_spectrum(self, regionid):
+
+        region_spects = self.get_region_array(regionid)
+
+        return self.get_avg_spectrum(region_spects)
+
+    def get_avg_spectrum(self, region_spects):
+
+        avgarray = np.zeros((1, region_spects.shape[2]))
+
+        for i in range(0, region_spects.shape[0]):
+            for j in range(0, region_spects.shape[1]):
+
+                avgarray[:] += region_spects[i,j,:]
+
+        avgarray = avgarray / (region_spects.shape[0]*region_spects.shape[1])
+
+        return avgarray[0]
+
+
+
     def get_region_range(self, regionid):
 
         allpixels = self.dregions[regionid]
@@ -2014,21 +2104,35 @@ class IMZMLExtract:
 
         return sorted(peaks)
 
+
+    def get_peaks_fast(self, spectrum, window):
+
+        peaks=set()
+
+        for i in range(window, len(spectrum)-window):
+
+            intens = spectrum[i-window:i+window]
+
+            maxelem = np.argmax(intens)
+
+            if maxelem == window:
+
+                minvalue = np.min(intens)
+                peakvalue = intens[window]
+
+                assert(peakvalue == intens[maxelem])
+
+                if peakvalue * 0.5 > minvalue:
+                    assert(spectrum[i] == intens[maxelem])
+                    peaks.add(i)
+
+        return sorted(peaks)
+
     def to_peak_region(self, region_array, peak_window = 100):
+        
+        avg_spectrum = self.get_avg_spectrum(region_array)
 
-        peaks = set()
-
-        for i in range(0, region_array.shape[0]):
-            for j in range(0, region_array.shape[1]):
-
-                spectrum = region_array[i,j,:]
-
-                sp_peaks = self.__get_peaks(spectrum, peak_window)
-                peaks = peaks.union(sp_peaks)
-
-
-        peaks = sorted(peaks)
-
+        peaks = self.get_peaks_fast(avg_spectrum, peak_window)
         peak_region = np.zeros((region_array.shape[0], region_array.shape[1], len(peaks)))
 
         for i in range(0, region_array.shape[0]):
@@ -2037,8 +2141,7 @@ class IMZMLExtract:
                 pspectrum = region_array[i,j,peaks]
                 peak_region[i,j,:] = pspectrum
 
-
-        return peak_region
+        return peak_region, peaks
 
 
 
@@ -2081,23 +2184,62 @@ class IMZMLExtract:
                 for i in range(region_array.shape[0]):
                     for j in range(region_array.shape[1]):
                         median = np.median(region_array[i,j,:]/ref_spectra)
-                        intra_norm[i,j,:] = region_array[i,j, :]/median
+
+                        if median != 0:
+                            intra_norm[i,j,:] = region_array[i,j, :]/median
+                        else:
+                            intra_norm[i,j,:] = region_array[i,j,:]
 
                 return intra_norm
 
             if normalize == "inter_median":
-                global_fcs = []
+                global_fcs = Counter()
+                scalingFactor = 100000
 
+                self.logger.info("Collecting fold changes")
                 for i in range(region_array.shape[0]):
                     for j in range(region_array.shape[1]):
 
-                        foldchanges = list(region_array[i][j] / ref_spectra)
-                        global_fcs += [foldchanges]
+                        foldchanges = (scalingFactor * region_array[i][j] / ref_spectra).astype(int)
+                        for fc in foldchanges:
+                            global_fcs[fc] += 1
+
+
+                
+                totalElements = sum([global_fcs[x] for x in global_fcs])
+                self.logger.info("Got a total of {} fold changes".format(totalElements))
+                
+                if totalElements % 2 == 1:
+                    medianElements = [int(totalElements/2), int(totalElements/2)+1]
+                else:
+                    medianElements = [int(totalElements/2)]
+
+                sortedFCs = sorted([x for x in global_fcs])
+
+                self.logger.info("Median elements {}".format(medianElements))
+
+                medians = {}
+
+                currentCount = 0
+                for i in sortedFCs:
+                    fcAdd = global_fcs[i]
+                    for medElem in medianElements:
+                        if currentCount < medElem <= currentCount+fcAdd:
+                            medians[medElem] = i
+
+                    currentCount += fcAdd
+
+                self.logger.info("Median elements".format(medians))
+
+                global_median = sum([medians[x] for x in medians]) / len(medians)
+                global_median = global_median / scalingFactor
+
+                self.logger.info("Global Median".format(global_median))
 
                 inter_norm = np.array(region_array, copy=True)
-                global_median = np.concatenate(global_fcs)
 
-                inter_norm = inter_norm / np.median(global_median)
+                if global_median != 0:
+                    inter_norm = inter_norm / global_median
 
                 return inter_norm
 
@@ -2223,9 +2365,120 @@ class IMZMLExtract:
             sarray[xpos, ypos] = specIdx
 
         return sarray
+    
+    
+    
+    def __findBestShift( self, refspectrum, allspectra, maxshift ):
+        idx2shift = {}
+        idx2shifted = {}
+        
+        bar = progressbar.ProgressBar()
+        
+        for idx, aspec in enumerate(bar(allspectra)):
+            
+            bestsim = 0
+            bestshift = -maxshift
+            
+            for ishift in range(-maxshift, maxshift, 1):
+                shifted = aspec[maxshift+ishift:-maxshift+ishift]
+                newsim = self.__cos_similarity(refspectrum, shifted)
+                
+                if newsim > bestsim:
+                    bestsim = newsim
+                    bestshift = ishift
+                    
+            idx2shift[idx] = bestshift
+            idx2shifted[idx] = aspec[maxshift+bestshift:-maxshift+bestshift]
+            
+        return idx2shift, idx2shifted
+
+    def __cos_similarity(self, vA, vB):
+        assert(len(vA) == len(vB))
+        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
-    def get_region_array(self, regionid, makeNullLine=True):
+    def shift_region_array(self, reg_array, masses, maxshift, ref_coord=(0,0)):
+        
+        ref_spec = reg_array[ref_coord[0], ref_coord[1], maxshift:-maxshift]
+        outarray = np.zeros((reg_array.shape[0], reg_array.shape[1], len(ref_spec)))
+        
+        idx2coord = {}
+        coord2idx = {}
+        specs = []
+        
+        for i in range(0, reg_array.shape[0]):
+            for j in range(0, reg_array.shape[1]):
+                
+                idx2coord[len(specs)] = (i,j)
+                coord2idx[(i,j)] = len(specs)
+                specs.append(reg_array[i,j,:])
+                
+        i2s, i2sp = self.__findBestShift(ref_spec, specs, maxshift)
+        
+        shifts = sorted([i2s[x] for x in i2s])
+        meanShift = np.mean(shifts)
+        medianShift = np.median(shifts)
+        
+        print("Shifts: mean: {}, median: {}".format(meanShift, medianShift))
+        
+        for idx in i2sp:
+            idxcoords = idx2coord[idx]
+            shspec = i2sp[idx]
+            outarray[idxcoords[0], idxcoords[1],] = shspec
+            
+        return outarray, masses[maxshift:-maxshift]
+    
+
+    def remove_background_spec_aligned(self, array, bgSpec, masses, maxshift):
+        assert(not bgSpec is None)
+        print(bgSpec.shape)
+        print(array.shape)
+        assert(len(bgSpec) == array.shape[2])
+
+        outarray = np.zeros((array.shape[0], array.shape[1], array.shape[2]-2*maxshift))
+        bspec = bgSpec[maxshift:-maxshift]
+
+        
+
+        for i in range(0, array.shape[0]):
+            for j in range(0, array.shape[1]):
+
+                aspec = array[i,j,:]
+                bestsim = 0
+                for ishift in range(-maxshift, maxshift, 1):
+                    shifted = aspec[maxshift+ishift:-maxshift+ishift]
+                    newsim = self.__cos_similarity(bspec, shifted)
+                    
+                    if newsim > bestsim:
+                        bestsim = newsim
+                        bestshift = ishift
+                        
+                aspec = aspec[maxshift+bestshift:-maxshift+bestshift]
+                aspec = aspec - bspec
+                aspec[aspec < 0.0] = 0.0
+
+                outarray[i,j,:] = aspec
+
+        return outarray, masses[maxshift:-maxshift]
+
+
+    def remove_background_spec(self, array, bgSpec):
+        assert(not bgSpec is None)
+        print(bgSpec.shape)
+        print(array.shape)
+        assert(len(bgSpec) == array.shape[2])
+
+        for i in range(0, array.shape[0]):
+            for j in range(0, array.shape[1]):
+                newspec = array[i,j,:] - bgSpec
+                newspec[newspec < 0.0] = 0.0
+
+                array[i,j,:] = newspec
+
+        return array
+
+
+    def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
 
         xr,yr,zr,sc = self.get_region_range(regionid)
         rs = self.get_region_shape(regionid)
@@ -2246,6 +2499,9 @@ class IMZMLExtract:
 
             spectra = np.array(spectra, copy=True)
 
+            if not bgspec is None:
+                spectra = spectra - bgspec
+
             if makeNullLine:
                 spectra[spectra < 0.0] = 0.0
                 spectra = spectra - np.min(spectra)
@@ -2260,6 +2516,7 @@ class IMZMLExtract:
         allMaxX = 0
         allMaxY = 0
 
+        allregionInfo = {}
         for regionid in self.dregions:
 
             allpixels = self.dregions[regionid]
@@ -2273,7 +2530,9 @@ class IMZMLExtract:
             allMaxX = max(maxx, allMaxX)
             allMaxY = max(maxy, allMaxY)
 
-            print(regionid, minx, maxx, miny, maxy)
+            infotuple = ((minx, maxx, miny, maxy), len(allpixels))
+            print(regionid, infotuple)
+            allregionInfo[regionid] = infotuple
 
         outimg = np.zeros((allMaxY, allMaxX))
 
@@ -2307,6 +2566,8 @@ class IMZMLExtract:
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
+
+        return allregionInfo
         
 
 

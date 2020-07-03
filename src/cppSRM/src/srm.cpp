@@ -66,11 +66,6 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
 
             pCurData = &(pImage[iCurIndex]);
 
-            if (iCurElement % 1000 == 0)
-            {
-                std::cerr << "Starting processing of element " << iCurElement << std::endl;
-            }
-
             for (uint32_t iix = 0; iix < xcount; ++iix)    
             {
                 for (uint32_t iiy = 0; iiy < ycount; ++iiy)    
@@ -83,6 +78,7 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
 
                     pSim[ iCurElement * iElements + iCompareElement ] = (float) simValue;
 
+                    /*
                     if ((ix == iix) && (iy == iiy))
                     {
                         if (!this->fequals(1.0f, simValue))
@@ -93,6 +89,7 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
                         }
                         assert(this->fequals(1.0f, simValue));
                     }
+                    */
                 }
             }
         }
@@ -112,7 +109,7 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     */
 
 
-    std::cerr << "Finished processing. Created matrix with " << iNumFields << " Fields." << std::endl;
+    std::cout << "Finished processing. Created matrix with " << iNumFields << " Fields." << std::endl;
 
 
     return pSim;
@@ -135,7 +132,6 @@ float SRM::dotProduct(float* pData1, float* pData2, uint32_t icount, bool verbos
     for (uint32_t i=0; i < icount; ++i)
     {
         outVal += (float) pData1[i]* (float) pData2[i];
-
         ldat1 += (float) pData1[i]* (float) pData1[i];
         ldat2 += (float) pData2[i]* (float) pData2[i];
     }
