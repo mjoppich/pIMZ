@@ -15,7 +15,7 @@ import subprocess
 from collections import defaultdict, Counter
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import logging
-import _pickle as pickle
+import dill as pickle
 import math
 import scipy.ndimage as ndimage
 import diffxpy.api as de
@@ -40,11 +40,28 @@ import hdbscan
 
 class CombinedSpectra():
 
+    def __setlogger(self):
+        self.logger = logging.getLogger('CombinedSpectra')
+
+        if len(self.logger.handlers) == 0:
+            self.logger.setLevel(logging.INFO)
+
+            consoleHandler = logging.StreamHandler()
+            consoleHandler.setLevel(logging.INFO)
+
+            self.logger.addHandler(consoleHandler)
+
+            formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+            consoleHandler.setFormatter(formatter)
+
     def __init__(self, regions):
 
         self.regions = {}
         self.consensus_similarity_matrix = None
         self.region_cluster2cluster = None
+
+        self.logger = None
+        self.__setlogger()
 
         for x in regions:
             
@@ -203,8 +220,291 @@ class CombinedSpectra():
         plt.show()
         plt.close()
 
+    def __make_de_res_key(self, region0, clusters0, region1, clusters1):
+
+        return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
+
+    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}):
+
+        assert(region0 in self.regions)
+        assert(region1 in self.regions)
+
+        assert([x for x in self.regions[region0].idx2mass] == [x for x in self.regions[region1].idx2mass])
+
+        if not isinstance(clusters0, (list, tuple, set)):
+            clusters0 = [clusters0]
+
+        if not isinstance(clusters1, (list, tuple, set)):
+            clusters1 = [clusters1]
+
+        assert(len(clusters0) > 0)
+        assert(len(clusters1) > 0)
+
+        cluster2coords_0 = self.regions[region0].getCoordsForSegmented()
+        assert(all([x in cluster2coords_0 for x in clusters0]))
+
+        cluster2coords_1 = self.regions[region1].getCoordsForSegmented()
+        assert(all([x in cluster2coords_1 for x in clusters1]))
+
+        self.logger.info("DE data for case: {} {}".format(region0, clusters0))
+        self.logger.info("DE data for control: {} {}".format(region1, clusters1))
+        print("Running {} {} against {} {}".format(region0, clusters0,region1, clusters1))
+
+        de_results_all = defaultdict(lambda: dict())
+
+        resKey = self.__make_de_res_key(region0, clusters0, region1, clusters1)
+        
+        sampleVec = []
+        conditionVec = []
+
+        exprData = pd.DataFrame()
+        masses = [("mass_" + str(x)).replace(".", "_") for x in self.regions[region0].idx2mass]
+
+        for clus in clusters0:
+
+            allPixels = cluster2coords_0[clus]
+
+            self.logger.info("Processing region {} cluster: {}".format(region0, clus))
+
+            for pxl in allPixels:
+                pxl_name = "{}__{}__{}".format(region0, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+                sampleVec.append(pxl_name)
+                conditionVec.append(0)
+                exprData[pxl_name] = self.regions[region0].region_array[pxl[0], pxl[1], :]#.astype('int')
+
+
+        for clus in clusters1:
+            self.logger.info("Processing region {} cluster: {}".format(region1, clus))
+
+            allPixels = cluster2coords_1[clus]
+            for pxl in allPixels:
+                pxl_name = "{}__{}__{}".format(region1, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+                sampleVec.append(pxl_name)
+                conditionVec.append(1)
+                exprData[pxl_name] = self.regions[region1].region_array[pxl[0], pxl[1], :]#.astype('int')
+
+
+        self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
+
+        pData = pd.DataFrame()
+
+        pData["sample"] = sampleVec
+        pData["condition"] = conditionVec
+        pData["batch"] = 0
+
+        self.logger.info("DE Sample DataFrame ready. Shape {}".format(pData.shape))
+
+
+        diffxPyTests = set(["ttest", "rank"])
+        if len(diffxPyTests.intersection(use_methods)) > 0:
+
+            for testMethod in use_methods:
+
+                if not testMethod in diffxPyTests:
+                    continue
+
+                self.logger.info("Performing DE-test: {}".format(testMethod))
+
+                ttExprData = exprData.copy(deep=True)
+
+                if count_scale != None and testMethod in count_scale:
+                    ttExprData = ttExprData * count_scale[testMethod]
+
+                    if count_scale[testMethod] > 1:
+                        ttExprData = ttExprData.astype(int)
+
+                pdat = pData.copy()
+                del pdat["sample"]
+
+                deData = anndata.AnnData(
+                    X=exprData.values.transpose(),
+                    var=pd.DataFrame(index=masses),
+                    obs=pdat
+                )
+
+                if testMethod == "ttest":
+
+                    test = de.test.t_test(
+                        data=deData,
+                        grouping="condition"
+                    )
+
+                elif testMethod == "rank":
+                    test = de.test.rank_test(
+                        data=deData,
+                        grouping="condition"
+                    )
+
+                
+                de_results_all[testMethod][resKey] = test.summary()
+                self.logger.info("DE-test ({}) finished. Results available: {}".format(testMethod, resKey))
+
+        deresDFs = defaultdict(lambda: dict())
+
+        for test in de_results_all:
+            for rkey in de_results_all[test]:
+
+                deresDFs[test][rkey] = self.deres_to_df(de_results_all[test][rkey], rkey, protWeights)
+
+
+        return deresDFs, exprData, pData
+
+    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+
+        clusterVec = []
+        geneIdentVec = []
+        massVec = []
+        foundProtVec = []
+        lfcVec = []
+        qvalVec = []
+        detMassVec = []
+
+        avgExpressionVec = []
+        medianExpressionVec = []
+        totalSpectraVec = []
+        measuredSpectraVec = []
+
+        avgExpressionBGVec = []
+        medianExpressionBGVec = []
+        totalSpectraBGVec = []
+        measuredSpectraBGVec = []
+
+        ttr = deResDF.copy(deep=True)#self.de_results[resKey]      
+        self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
+        #ttr = deRes.summary()
+
+        log2fcCol = "log2fc"
+        massCol = "gene"
+        adjPvalCol = "qval"
+
+        ttrColNames = list(ttr.columns.values)
+
+
+        if log2fcCol in ttrColNames and massCol in ttrColNames and adjPvalCol in ttrColNames:
+            dfColType = "diffxpy"
+
+        else:
+            #id	numFeatures	pval	abs.log2FC	log2FC	fdr	SDcorr	fc.pval	fc.fdr	nonde.fcwidth	fcCI.90.start	fcCI.90.end	fcCI.95.start	fcCI.95.end	fcCI.99.start	fcCI.99.end
+            if "id" in ttrColNames and "log2FC" in ttrColNames and "fc.fdr" in ttrColNames:
+                log2fcCol = "log2FC"
+                massCol = "id"
+                adjPvalCol = "fc.fdr"
+                dfColType = "empire"
+
+
+        if inverse_fc:
+            self.logger.info("DE result logFC inversed")
+            ttr[log2fcCol] = -ttr[log2fcCol]
+
+        fttr = ttr[ttr[adjPvalCol].lt(max_adj_pval) & ttr[log2fcCol].abs().gt(min_log2fc)]
+
+        self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
+
+
+        targetSpectraMatrix = self.regions[resKey[0]].get_spectra_matrix(resKey[1])
+        bgSpectraMatrix = self.regions[resKey[2]].get_spectra_matrix(resKey[3])
+
+        self.logger.info("Created matrices with shape {} and {} (target, bg)".format(targetSpectraMatrix.shape, bgSpectraMatrix.shape))
+
+        
+        for row in fttr.iterrows():
+            geneIDent = row[1][massCol]
+            
+            ag = geneIDent.split("_")
+            massValue = float("{}.{}".format(ag[1], ag[2]))
+
+            foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+
+            if keepOnlyProteins and len(foundProt) == 0:
+                continue
+
+            lfc = row[1][log2fcCol]
+            qval = row[1][adjPvalCol]
+
+            expT, totalSpectra, measuredSpecta = self.regions[resKey[0]].get_expression_from_matrix(targetSpectraMatrix, massValue, resKey[0], ["avg", "median"])
+            exprBG, totalSpectraBG, measuredSpectaBG = self.regions[resKey[2]].get_expression_from_matrix(bgSpectraMatrix, massValue, resKey[2], ["avg", "median"])
+
+            avgExpr, medianExpr = expT
+            avgExprBG, medianExprBG = exprBG
+
+            if len(foundProt) > 0:
+
+                for protMassTuple in foundProt:
+                    
+                    prot,protMass = protMassTuple
+            
+                    clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                    geneIdentVec.append(geneIDent)
+                    massVec.append(massValue)
+                    foundProtVec.append(prot)
+                    detMassVec.append(protMass)
+                    lfcVec.append(lfc)
+                    qvalVec.append(qval)
+
+                    avgExpressionVec.append(avgExpr)
+                    medianExpressionVec.append(medianExpr)
+                    totalSpectraVec.append(totalSpectra)
+                    measuredSpectraVec.append(measuredSpecta)
+
+                    avgExpressionBGVec.append(avgExprBG)
+                    medianExpressionBGVec.append(medianExprBG)
+                    totalSpectraBGVec.append(totalSpectraBG)
+                    measuredSpectraBGVec.append(measuredSpectaBG)
+
+            else:
+                clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                geneIdentVec.append(geneIDent)
+                massVec.append(massValue)
+                foundProtVec.append("")
+                detMassVec.append("-1")
+                lfcVec.append(lfc)
+                qvalVec.append(qval)
+
+                avgExpressionVec.append(avgExpr)
+                medianExpressionVec.append(medianExpr)
+                totalSpectraVec.append(totalSpectra)
+                measuredSpectraVec.append(measuredSpecta)
+
+
+        #requiredColumns = ["gene", "clusterID", "avg_logFC", "p_val_adj", "mean", "num", "anum"]
+        df = pd.DataFrame()
+        df["clusterID"] = clusterVec
+        df["gene_ident"] = geneIdentVec
+        df["gene_mass"] = massVec
+        df["gene"] = foundProtVec
+        df["protein_mass"] = detMassVec
+        df["avg_logFC"] = lfcVec
+        df["qvalue"] = qvalVec
+        
+        df["num"] = totalSpectraVec
+        df["anum"]= measuredSpectraVec
+        df["mean"] = avgExpressionVec
+        df["median"] = medianExpressionVec
+
+        df["num_bg"] = totalSpectraBGVec
+        df["anum_bg"]= measuredSpectraBGVec
+        df["mean_bg"] = avgExpressionBGVec
+        df["median_bg"] = medianExpressionBGVec
+
+        return df
+
+
 
 class SpectraRegion():
+
+    @classmethod
+    def from_pickle(cls, path):
+
+        obj = None
+        with open(path, "rb") as fin:
+            obj = pickle.load(fin)
+
+        return obj
+
+    def to_pickle(self, path):
+
+        with open(path, "wb") as fout:
+            pickle.dump(self, fout)
 
     def __init__(self, region_array, idx2mass, name=None):
 
@@ -1136,7 +1436,7 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-    def __get_spectra_matrix(self,segments):
+    def get_spectra_matrix(self,segments):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1152,7 +1452,7 @@ class SpectraRegion():
         return spectraMatrix
 
 
-    def __get_expression_from_matrix(self, matrix, massValue, segments, mode="avg"):
+    def get_expression_from_matrix(self, matrix, massValue, segments, mode="avg"):
 
         assert(massValue != None)
         assert(segments != None)
@@ -1235,8 +1535,8 @@ class SpectraRegion():
         self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
 
 
-        targetSpectraMatrix = self.__get_spectra_matrix(resKey[0])
-        bgSpectraMatrix = self.__get_spectra_matrix(resKey[1])
+        targetSpectraMatrix = self.get_spectra_matrix(resKey[0])
+        bgSpectraMatrix = self.get_spectra_matrix(resKey[1])
 
         self.logger.info("Created matrices with shape {} and {} (target, bg)".format(targetSpectraMatrix.shape, bgSpectraMatrix.shape))
 
@@ -1255,8 +1555,8 @@ class SpectraRegion():
             lfc = row[1][log2fcCol]
             qval = row[1][adjPvalCol]
 
-            expT, totalSpectra, measuredSpecta = self.__get_expression_from_matrix(targetSpectraMatrix, massValue, resKey[0], ["avg", "median"])
-            exprBG, totalSpectraBG, measuredSpectaBG = self.__get_expression_from_matrix(bgSpectraMatrix, massValue, resKey[0], ["avg", "median"])
+            expT, totalSpectra, measuredSpecta = self.get_expression_from_matrix(targetSpectraMatrix, massValue, resKey[0], ["avg", "median"])
+            exprBG, totalSpectraBG, measuredSpectaBG = self.get_expression_from_matrix(bgSpectraMatrix, massValue, resKey[0], ["avg", "median"])
 
             avgExpr, medianExpr = expT
             avgExprBG, medianExprBG = exprBG
