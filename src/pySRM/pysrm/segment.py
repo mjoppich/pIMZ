@@ -488,7 +488,7 @@ class CombinedSpectra():
 
         return df
 
-
+from numpy.ctypeslib import ndpointer
 
 class SpectraRegion():
 
@@ -506,6 +506,29 @@ class SpectraRegion():
         with open(path, "wb") as fout:
             pickle.dump(self, fout)
 
+    def ctypesCloseLibrary(self):
+        dlclose_func = ctypes.CDLL(None).dlclose
+        dlclose_func.argtypes = [ctypes.c_void_p]
+        dlclose_func.restype = ctypes.c_int
+        dlclose_func(self.lib._handle)
+
+
+    def loadLib(self):
+        self.lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
+
+        self.lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
+        self.lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
+
+        self.lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
+        self.lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
+
+        self.lib.StatisticalRegionMerging_mode_dot.argtypes = [ctypes.c_void_p]
+        self.lib.StatisticalRegionMerging_mode_dot.restype = None
+
+        self.lib.StatisticalRegionMerging_mode_eucl.argtypes = [ctypes.c_void_p]
+        self.lib.StatisticalRegionMerging_mode_eucl.restype = None
+
+
     def __init__(self, region_array, idx2mass, name=None):
 
         assert(not region_array is None)
@@ -513,18 +536,8 @@ class SpectraRegion():
 
         assert(len(region_array[0,0,:]) == len(idx2mass))
 
-
-        lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
-        lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
-
-        lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
-        lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
-
-        lib.StatisticalRegionMerging_mode_dot.argtypes = [ctypes.c_void_p]
-        lib.StatisticalRegionMerging_mode_dot.restype = None
-
-        lib.StatisticalRegionMerging_mode_eucl.argtypes = [ctypes.c_void_p]
-        lib.StatisticalRegionMerging_mode_eucl.restype = None
+        self.lib = None
+        self.loadLib()
 
         self.logger = None
         self.__setlogger()
@@ -633,28 +646,31 @@ class SpectraRegion():
             self.pixel2idx[(x,y)] = i
 
 
-    def plot_array(self, fig, arr):
+    def plot_array(self, fig, arr, discrete_legend=True):
 
 
         valid_vals = np.unique(arr)
         heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
 
-        # calculate the POSITION of the tick labels
-        min_ = min(valid_vals)
-        max_ = max(valid_vals)
+        if discrete_legend:
+            # calculate the POSITION of the tick labels
+            min_ = min(valid_vals)
+            max_ = max(valid_vals)
 
-        positions = np.linspace(min_, max_, len(valid_vals))
-        val_lookup = dict(zip(positions, valid_vals))
+            positions = np.linspace(min_, max_, len(valid_vals))
+            val_lookup = dict(zip(positions, valid_vals))
 
-        def formatter_func(x, pos):
-            'The two args are the value and tick position'
-            val = val_lookup[x]
-            return val
+            def formatter_func(x, pos):
+                'The two args are the value and tick position'
+                val = val_lookup[x]
+                return val
 
-        formatter = plt.FuncFormatter(formatter_func)
+            formatter = plt.FuncFormatter(formatter_func)
 
-        # We must be sure to specify the ticks matching our target names
-        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+            # We must be sure to specify the ticks matching our target names
+            plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+        else:
+            plt.colorbar(heatmap)
         
         return fig
 
@@ -779,14 +795,15 @@ class SpectraRegion():
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
+
+        return image
         #return image
 
 
-    def __calc_similarity(self, inputarray):
+    def calc_similarity(self, inputarray):
         # load image
         dims = 1
 
-        inputarray = inputarray.astype(np.float32)
 
         if len(inputarray.shape) > 2:
             dims = inputarray.shape[2]
@@ -795,6 +812,7 @@ class SpectraRegion():
         qArr = (ctypes.c_float * len(qs))(*qs)
 
         self.logger.info("Creating C++ obj")
+        self.logger.info("{} {}".format(dims, inputarray.shape))
 
         # self.obj = lib.StatisticalRegionMerging_New(dims, qArr, 3)
         # print(inputarray.shape)
@@ -807,13 +825,15 @@ class SpectraRegion():
         self.logger.info("dimensions {}".format(dims))
         self.logger.info("input dimensions {}".format(inputarray.shape))
 
-        self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
+        self.obj = self.lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
         self.logger.info("Switching to dot mode")
-        lib.StatisticalRegionMerging_mode_dot(self.obj)
+        self.lib.StatisticalRegionMerging_mode_dot(self.obj)
 
+        #inputarray = inputarray.astype(np.float32)
+        inputarray = np.ascontiguousarray(inputarray, np.float32)
         image_p = inputarray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
         self.logger.info("Starting calc similarity c++")
-        retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
+        retValues = self.lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
 
         outclust = np.ctypeslib.as_array(retValues, shape=(inputarray.shape[0] * inputarray.shape[1], inputarray.shape[0] * inputarray.shape[1]))
 
@@ -846,9 +866,7 @@ class SpectraRegion():
         else:
             regArray = np.array(self.region_array, copy=True)  
 
-        print(regArray.shape)
-        self.spectra_similarity = self.__calc_similarity(regArray)
-        print(self.spectra_similarity.shape)
+        self.spectra_similarity = self.calc_similarity(regArray)
 
         if mode in ["spectra_log", "spectra_log_dist"]:
             self.logger.info("Calculating spectra similarity")
@@ -890,6 +908,27 @@ class SpectraRegion():
 
         return c
 
+    def __segment__centroid(self, number_of_regions):
+
+        ssim = 1-self.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='centroid', metric='cosine')
+        c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+
+        return c
+
+
+    def __segment__median(self, number_of_regions):
+
+        ssim = 1-self.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='median', metric='cosine')
+        c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+
+        return c
+
     def __segment__wpgma(self, number_of_regions):
 
         ssim = 1-self.spectra_similarity
@@ -909,10 +948,18 @@ class SpectraRegion():
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
-    def __segment__umap_hdbscan(self, number_of_regions):
+    def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20):
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
-        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+
+        ndims = self.region_array.shape[2]
+
+        if not dims is None:
+            ndims = len(dims)
+
+        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+
+        print("Elem Matrix", self.elem_matrix.shape)
 
         """
         
@@ -930,24 +977,28 @@ class SpectraRegion():
         for i in range(0, self.region_array.shape[0]):
             for j in range(0, self.region_array.shape[1]):
                 idx = i * self.region_array.shape[1] + j
-                self.elem_matrix[idx, :] = self.region_array[i,j,:]
+
+                if not dims is None:
+                    self.elem_matrix[idx, :] = self.region_array[i,j,dims]
+                else:
+                    self.elem_matrix[idx, :] = self.region_array[i,j,:]
 
                 idx2ij[idx] = (i,j)
 
 
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
-            n_neighbors=10,
+            n_neighbors=n_neighbors,
             min_dist=0.0,
             n_components=2,
             random_state=42,
         ).fit_transform(self.elem_matrix)
 
-        self.logger.info("HDBSCAN reduction")
+        self.logger.info("HDBSCAN reduction"), 
 
         clusterer = hdbscan.HDBSCAN(
-            min_samples=5,
-            min_cluster_size=20,
+            min_samples=min_samples,
+            min_cluster_size=min_cluster_size,
         )
         self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix) + 2
 
@@ -990,6 +1041,21 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
+    def plot_tic(self):
+        assert(not self.region_array is None)
+
+        showcopy = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        for i in range(0, showcopy.shape[0]):
+            for j in range(0, showcopy.shape[1]):
+                showcopy[i,j] = np.sum(self.region_array[i,j])
+
+
+        fig = plt.figure()
+        self.plot_array(fig, showcopy, discrete_legend=False)
+        plt.show()
+        plt.close()
+
 
     def plot_segments(self, highlight=None):
         assert(not self.segmented is None)
@@ -1017,10 +1083,10 @@ class SpectraRegion():
         plt.close()
 
 
-    def segment(self, method="UPGMA", number_of_regions=10):
+    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20):
 
         assert(not self.spectra_similarity is None)
-        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN"])
+        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN"])
 
         self.logger.info("Calculating clusters")
 
@@ -1032,10 +1098,16 @@ class SpectraRegion():
         elif method == "WPGMA":
             c = self.__segment__wpgma(number_of_regions)
 
+        elif method == "CENTROID":
+            c = self.__segment__centroid(number_of_regions)
+
+        elif method == "MEDIAN":
+            c = self.__segment__median(number_of_regions)
+
         elif method == "WARD":
             c = self.__segment__ward(number_of_regions)
         elif method == "UMAP_DBSCAN":
-            c = self.__segment__umap_hdbscan(number_of_regions)
+            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size)
 
         self.logger.info("Calculating clusters done")
 
@@ -1790,7 +1862,7 @@ class SpectraRegion():
 
             allPixels = cluster2coords[clus]
 
-            self.logger.info("Processing cluster: {}".format(clus))
+            #self.logger.info("Processing cluster: {}".format(clus))
 
             for pxl in allPixels:
 
@@ -1803,7 +1875,7 @@ class SpectraRegion():
 
 
         for clus in clusters1:
-            self.logger.info("Processing cluster: {}".format(clus))
+            #self.logger.info("Processing cluster: {}".format(clus))
 
             allPixels = cluster2coords[clus]
             for pxl in allPixels:
@@ -2051,50 +2123,6 @@ class pyIMS():
         formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
         consoleHandler.setFormatter(formatter)
 
-    def calc_similarity(self, inputarray):
-
-        #load image
-        dims = 1
-
-        inputarray = inputarray.astype(np.float32)
-        
-        if len(inputarray.shape) > 2:
-            dims = inputarray.shape[2]
-
-        qs = []
-        qArr = (ctypes.c_float * len(qs))(*qs)
-
-        self.logger.info("Creating C++ obj")
-
-        #self.obj = lib.StatisticalRegionMerging_New(dims, qArr, 3)
-        #print(inputarray.shape)
-        #testArray = np.array([[[1,2,3],[4,5,6]],[[7,8,9],[10,11,12]],[[13,14,15],[16,17,18]],[[19,20,21],[22,23,24]],[[25,26,27],[28,29,30]],[[31,32,33],[34,35,36]]], dtype=np.float32)
-        #print(testArray.shape)
-        #image_p = testArray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        #retValues = lib.SRM_test_matrix(self.obj, testArray.shape[0], testArray.shape[1], image_p)
-        #exit()
-
-        print("dimensions", dims)
-
-        self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
-        self.logger.info("Switching to dot mode")
-        lib.StatisticalRegionMerging_mode_dot(self.obj)
-
-        image_p = inputarray.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        self.logger.info("Starting calc similarity c++")
-        retValues = lib.SRM_calc_similarity(self.obj, inputarray.shape[0], inputarray.shape[1], image_p)
-
-        outclust = np.ctypeslib.as_array(retValues, shape=(inputarray.shape[0]*inputarray.shape[1], inputarray.shape[0]*inputarray.shape[1]))
-
-        print(outclust.dtype)
-        print(outclust.shape)
-
-        self.logger.info("displaying matrix")
-        plt.imshow(outclust)
-
-        plt.show()
-
-        return outclust
 
 
 
@@ -2535,7 +2563,7 @@ class IMZMLExtract:
                 global_median = sum([medians[x] for x in medians]) / len(medians)
                 global_median = global_median / scalingFactor
 
-                self.logger.info("Global Median".format(global_median))
+                self.logger.info("Global Median {}".format(global_median))
 
                 inter_norm = np.array(region_array, copy=True)
 

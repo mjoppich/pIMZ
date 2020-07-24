@@ -46,6 +46,22 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     uint32_t iCompareElement=0;
     float simValue = 0.0f;
 
+    for (uint8_t i = 0; i < 10; ++i)
+    {
+        std::cout<< "img i=" << pImage[i] << " ";
+    }
+    std::cout << std::endl;
+    
+    //omp_set_num_threads(1);
+
+    /*
+    for (uint32_t i=0; i < xcount * ycount * m_iDims; ++i)
+    {
+        std::cout << pImage[i] << " ";
+    }
+    std::cout << std::endl;
+    */
+
     #pragma omp parallel for private(ix,iCurIndex,iCompareIndex,iCurElement,iCompareElement, simValue, pCurData, pCompareData)
     for  (ix = 0; ix < xcount; ++ix)    
     {
@@ -61,22 +77,38 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
 
         for (uint32_t iy = 0; iy < ycount; ++iy)    
         {
-            iCurIndex = ix*ycount*m_iDims+iy*m_iDims;
+            iCurIndex = (ix*ycount+iy) * m_iDims;
             iCurElement = ix * ycount + iy;
 
             pCurData = &(pImage[iCurIndex]);
+
+            /*
+            std::cout << "Current Data x=" << ix << " y=" << iy << std::endl;
+            for (uint8_t ibla= 0; ibla < m_iDims; ++ibla)
+            {
+                std::cout << (float) pCurData[ibla] << " ";
+            }
+            std::cout << std::endl;
+            */
+            
 
             for (uint32_t iix = 0; iix < xcount; ++iix)    
             {
                 for (uint32_t iiy = 0; iiy < ycount; ++iiy)    
                 {
-                    iCompareIndex = iix*ycount*m_iDims+iiy*m_iDims;
+                    iCompareIndex = (iix*ycount+iiy) * m_iDims;
                     iCompareElement = iix * ycount + iiy;
                     pCompareData = &(pImage[iCompareIndex]);
 
-                    simValue = this->dotProduct(pCurData, pCompareData, m_iDims);
+                    if (iCurElement < iCompareElement)
+                    {
+                        continue;
+                    }
+
+                    simValue = this->dotProduct(pCurData, pCompareData, m_iDims, false);
 
                     pSim[ iCurElement * iElements + iCompareElement ] = (float) simValue;
+                    pSim[ iCompareElement * iElements + iCurElement ] = (float) simValue;
 
                     /*
                     if ((ix == iix) && (iy == iiy))
@@ -108,6 +140,11 @@ float* SRM::calculateSimilarity(uint32_t xcount, uint32_t ycount, float* pImage)
     }
     */
 
+    for (uint8_t i = 0; i < 10; ++i)
+    {
+        std::cout<< "i=" << pSim[i] << " ";
+    }
+    std::cout << std::endl;
 
     std::cout << "Finished processing. Created matrix with " << iNumFields << " Fields." << std::endl;
 
