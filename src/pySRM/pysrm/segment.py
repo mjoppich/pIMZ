@@ -22,6 +22,8 @@ import diffxpy.api as de
 import anndata
 import progressbar
 from mpl_toolkits.axes_grid1 import ImageGrid
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
 lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
@@ -2497,11 +2499,25 @@ class IMZMLExtract:
             return spectrum
 
 
+    def baseline_als(self, y, lam, p, niter=10):
+        L = len(y)
+        D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
+        w = np.ones(L)
+        for i in range(niter):
+            W = sparse.spdiags(w, 0, L, L)
+            Z = W + lam * D.dot(D.transpose())
+            z = spsolve(Z, w*y)
+            w = p * (y > z) + (1-p) * (y < z)
+        return z
 
-    def normalize_region_array(self, region_array, normalize=None):
+    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median"])
+        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
 
+
+        if normalize in ["baseline_cor"]:
+            outarray = np.array([[self.baseline_als(y, lam, p, iters) for y in x] for x in region_array])
+            return outarray
 
         if normalize in ["inter_median", "intra_median"]:
             
@@ -2596,7 +2612,6 @@ class IMZMLExtract:
             for idx, _ in enumerate(self.parser.coordinates):
                 mzs, intensities = p.getspectrum(idx)
                 maxInt = max(maxInt, np.max(intensities))
-
 
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
