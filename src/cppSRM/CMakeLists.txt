@@ -36,13 +36,14 @@ ENDIF()
 MESSAGE(WARNING ${OpenMP_C_FLAGS})
 MESSAGE(WARNING ${OpenMP_CXX_FLAGS})
 
-#SET( OpenMP_CXX_FLAGS "-fopenmp" )
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     # using Clang
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     # using GCC
-    SET( CMAKE_OPENMP_LIBRARY_NAME "omp")
+    #SET( CMAKE_OPENMP_LIBRARY_NAME "omp")
+    SET( OpenMP_CXX_FLAGS "-fopenmp" )
+
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
     # using Intel C++
     SET( CMAKE_OPENMP_LIBRARY_NAME "")

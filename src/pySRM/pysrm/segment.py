@@ -29,7 +29,7 @@ baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
 
 from sklearn.metrics.pairwise import cosine_similarity
-from scipy.spatial.distance import squareform
+from scipy.spatial.distance import squareform, pdist
 
 import scipy.cluster as spc
 
@@ -753,6 +753,11 @@ class SpectraRegion():
         
 
 
+    def idx_for_mass(self, mass):
+        emass, eidx = self.__get_exmass_for_mass(mass)
+
+        return eidx
+
     def __get_exmass_for_mass(self, mass, threshold=None):
         
         dist2mass = float('inf')
@@ -950,6 +955,68 @@ class SpectraRegion():
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
+    def __segment__umap_ward(self, number_of_regions, dims=None, n_neighbors=10):
+
+        self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+
+        ndims = self.region_array.shape[2]
+
+        if not dims is None:
+            if type(dims) == int:
+                ndims = dims
+            else:
+                ndims = len(dims)
+
+        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+
+        print("Elem Matrix", self.elem_matrix.shape)
+
+        """
+        
+        ----------> spectra ids
+        |
+        |
+        | m/z values
+        |
+        v
+        
+        """
+
+        idx2ij = {}
+
+        for i in range(0, self.region_array.shape[0]):
+            for j in range(0, self.region_array.shape[1]):
+                idx = i * self.region_array.shape[1] + j
+
+                if not dims is None:
+                    self.elem_matrix[idx, :] = self.region_array[i,j,dims]
+                else:
+                    self.elem_matrix[idx, :] = self.region_array[i,j,:]
+
+                idx2ij[idx] = (i,j)
+
+
+        self.logger.info("UMAP reduction")
+        self.dimred_elem_matrix = umap.UMAP(
+            n_neighbors=n_neighbors,
+            min_dist=0.0,
+            n_components=2,
+            random_state=42,
+        ).fit_transform(self.elem_matrix)
+
+        self.logger.info("HDBSCAN reduction"), 
+
+        print(self.dimred_elem_matrix.shape)
+
+        pwdist = pdist(self.dimred_elem_matrix, metric="euclidean")
+
+        print(pwdist.shape)
+
+        Z = spc.hierarchy.ward(pwdist)
+        c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+        return c
+
+
     def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20):
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
@@ -1043,20 +1110,34 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
-    def plot_tic(self):
+    def plot_tic(self, masses=None):
         assert(not self.region_array is None)
 
         showcopy = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
 
+        massIndices = [x for x in range(self.region_array.shape[2])]
+
+        if masses != None:
+
+            massIndices = []
+            
+            for mass in masses:
+                mx, idx = self.__get_exmass_for_mass(mass)
+                massIndices.append(idx)
+
+        massIndices = sorted(massIndices)
+
         for i in range(0, showcopy.shape[0]):
             for j in range(0, showcopy.shape[1]):
-                showcopy[i,j] = np.sum(self.region_array[i,j])
+                showcopy[i,j] = np.sum(self.region_array[i,j, massIndices])
 
 
         fig = plt.figure()
         self.plot_array(fig, showcopy, discrete_legend=False)
         plt.show()
         plt.close()
+
+        return showcopy
 
 
     def plot_segments(self, highlight=None):
@@ -1088,7 +1169,7 @@ class SpectraRegion():
     def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20):
 
         assert(not self.spectra_similarity is None)
-        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN"])
+        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD"])
 
         self.logger.info("Calculating clusters")
 
@@ -1108,8 +1189,12 @@ class SpectraRegion():
 
         elif method == "WARD":
             c = self.__segment__ward(number_of_regions)
+
         elif method == "UMAP_DBSCAN":
             c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size)
+
+        elif method == "UMAP_WARD":
+            c = self.__segment__umap_ward(number_of_regions, dims=dims, n_neighbors=n_neighbors)
 
         self.logger.info("Calculating clusters done")
 
@@ -2606,7 +2691,7 @@ class IMZMLExtract:
                     outarray[i, j, :] = spectrum
 
         if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
-            return None
+            return outarray
 
         if normalize in ["max_intensity_all_regions"]:
             for idx, _ in enumerate(self.parser.coordinates):
