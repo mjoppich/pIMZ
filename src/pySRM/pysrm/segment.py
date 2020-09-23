@@ -2359,7 +2359,7 @@ class IMZMLExtract:
         for idx, x in enumerate(self.mzValues):
             dist = abs(x-value)
 
-            if dist < curIdxDist and (threhsold==None or dist < threshold):
+            if dist < curIdxDist and (threshold==None or dist < threshold):
                 curIdx = idx
                 curIdxDist = dist
             
