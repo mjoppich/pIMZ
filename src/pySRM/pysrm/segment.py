@@ -1069,7 +1069,8 @@ class SpectraRegion():
             min_samples=min_samples,
             min_cluster_size=min_cluster_size,
         )
-        self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix) + 2
+        self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix)
+        self.dimred_labels[self.dimred_labels >= 0] += 1
 
         #c = spc.hierarchy.fcluster(clusterer.single_linkage_tree_.to_numpy(), t=10, criterion='maxclust')
 
@@ -1077,7 +1078,6 @@ class SpectraRegion():
 
     def vis_umap(self, legend=True):
 
-        assert(not self.elem_matrix is None)
         assert(not self.dimred_elem_matrix is None)
         assert(not self.dimred_labels is None)
 
@@ -1219,7 +1219,7 @@ class SpectraRegion():
         return self.segmented
 
 
-    def filter_clusters(self, method='remove_singleton'):
+    def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4):
 
         assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands"])
 
@@ -1280,8 +1280,8 @@ class SpectraRegion():
             # which clusters are in 3x3 border boxes and not in 10x10 middle box?
             borderSegments = set()
 
-            xdim = 4
-            ydim = 4
+            xdim = bg_x
+            ydim = bg_y
 
             for i in range(0, min(xdim, self.segmented.shape[0])):
                 for j in range(0, min(ydim, self.segmented.shape[1])):
@@ -2579,7 +2579,11 @@ class IMZMLExtract:
         elif normalize == "vector":
 
             slen = np.linalg.norm(spectrum)
-            spectrum = spectrum / slen
+
+            if slen < 0.01:
+                spectrum = spectrum * 0
+            else:
+                spectrum = spectrum / slen
 
             return spectrum
 
@@ -2823,7 +2827,14 @@ class IMZMLExtract:
 
     def __cos_similarity(self, vA, vB):
         assert(len(vA) == len(vB))
-        return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
+
+        vAL = np.dot(vA,vA)
+        vBL = np.dot(vB,vB)
+
+        if vAL < 0.0000001 or vBL < 0.0000001:
+            return 0
+
+        return np.dot(vA, vB) / (np.sqrt( vAL ) * np.sqrt( vBL ))
 
 
     def shift_region_array(self, reg_array, masses, maxshift, ref_coord=(0,0)):
@@ -2858,11 +2869,14 @@ class IMZMLExtract:
         return outarray, masses[maxshift:-maxshift]
     
 
-    def remove_background_spec_aligned(self, array, bgSpec, masses, maxshift):
+    def remove_background_spec_aligned(self, array, bgSpec, masses=None, maxshift=20):
         assert(not bgSpec is None)
         print(bgSpec.shape)
         print(array.shape)
         assert(len(bgSpec) == array.shape[2])
+
+        if masses is None:
+            masses = self.mzValues
 
         outarray = np.zeros((array.shape[0], array.shape[1], array.shape[2]-2*maxshift))
         bspec = bgSpec[maxshift:-maxshift]
