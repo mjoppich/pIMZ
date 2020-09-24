@@ -1221,11 +1221,44 @@ class SpectraRegion():
 
     def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4):
 
-        assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands"])
+        assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss"])
 
         cluster2coords = self.getCoordsForSegmented()
 
-        if method == "remove_islands":
+        if method == "gauss":
+            result = np.zeros(self.segmented.shape)
+    
+            for i in range(result.shape[0]):
+                for j in range(result.shape[1]):
+                    neighbours = list()
+                    
+                    if i-1>=0:
+                        neighbours.append(self.segmented[i-1][j])
+                    if j-1>=0:
+                        neighbours.append(self.segmented[i][j-1])
+                    if i-1>=0 and j-1>=0:
+                        neighbours.append(self.segmented[i-1][j-1])
+                    if i+1<result.shape[0]:
+                        neighbours.append(self.segmented[i+1][j])
+                    if j+1<result.shape[1]:
+                        neighbours.append(self.segmented[i][j+1])
+                    if i+1<result.shape[0] and j+1<result.shape[1]:
+                        neighbours.append(self.segmented[i+1][j+1])
+                    
+                    d = {x:neighbours.count(x) for x in neighbours}
+                    key, freq = d.keys(), d.values()
+                    
+                    keys = np.asarray(list(key))
+                    freqs = np.asarray(list(freq))
+                    
+                    if len(np.unique(keys))<=2:
+                        result[i,j] = keys[np.argmax(freqs)]
+                    else:
+                        result[i,j] = self.segmented[i,j]
+
+            self.segmented = result
+
+        elif method == "remove_islands":
 
             exarray = self.segmented.copy()
             exarray[exarray >= 1] = 1
