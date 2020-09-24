@@ -2881,7 +2881,7 @@ class IMZMLExtract:
         outarray = np.zeros((array.shape[0], array.shape[1], array.shape[2]-2*maxshift))
         bspec = bgSpec[maxshift:-maxshift]
 
-        
+        bgShifts = 0
 
         for i in range(0, array.shape[0]):
             for j in range(0, array.shape[1]):
@@ -2895,13 +2895,16 @@ class IMZMLExtract:
                     if newsim > bestsim:
                         bestsim = newsim
                         bestshift = ishift
-                        
+
+                bgShifts += bestshift    
+                    
                 aspec = aspec[maxshift+bestshift:-maxshift+bestshift]
                 aspec = aspec - bspec
                 aspec[aspec < 0.0] = 0.0
 
                 outarray[i,j,:] = aspec
 
+        print("avg shift", bgShifts / (array.shape[0]*array.shape[1]))
         return outarray, masses[maxshift:-maxshift]
 
 
@@ -2911,14 +2914,16 @@ class IMZMLExtract:
         print(array.shape)
         assert(len(bgSpec) == array.shape[2])
 
+        outarray = np.zeros(array.shape)
+
         for i in range(0, array.shape[0]):
             for j in range(0, array.shape[1]):
                 newspec = array[i,j,:] - bgSpec
                 newspec[newspec < 0.0] = 0.0
 
-                array[i,j,:] = newspec
+                outarray[i,j,:] = newspec
 
-        return array
+        return outarray
 
 
     def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
