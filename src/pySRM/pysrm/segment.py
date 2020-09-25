@@ -24,8 +24,11 @@ import progressbar
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
-baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
+import ms_peak_picker
+
+
+baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
 
 from sklearn.metrics.pairwise import cosine_similarity
@@ -2870,6 +2873,72 @@ class IMZMLExtract:
         return np.dot(vA, vB) / (np.sqrt( vAL ) * np.sqrt( vBL ))
 
 
+    def to_called_peaks(self, region, masses, resolution):
+
+        assert(len(masses) == region.shape[2])
+
+        minMZ = round(min(masses)*resolution)/resolution
+        maxMZ = round(max(masses)*resolution)/resolution
+        stepSize = 1/resolution
+        requiredFields = int( (maxMZ-minMZ)/stepSize )
+
+        startSteps = minMZ / stepSize
+
+        outarray = np.zeros((region.shape[0], region.shape[1], requiredFields+1))
+        outmasses = np.array([minMZ + x*stepSize for x in range(0, requiredFields+1)])
+
+        print(min(masses), max(masses))
+        print(min(outmasses), max(outmasses))
+
+        print(outarray.shape)
+        print(outmasses.shape)
+
+        bar = progressbar.ProgressBar()
+        
+        px2res = {}
+        for i in bar(range(0, region.shape[0])):
+            for j in range(0, region.shape[1]):
+
+                pixel = (i,j)
+                intensity_array, mz_array = region[i,j,:], masses
+
+                peak_list = ms_peak_picker.pick_peaks(mz_array, intensity_array, fit_type="quadratic")
+                #retlist.append(peak_list)
+
+                rpeak2peaks = defaultdict(list)
+                for peak in peak_list:
+                    if peak.area > 0.0:
+                        rpeak2peaks[round(peak.mz*resolution)/resolution].append(peak)
+
+
+                rpeak2peak = {}
+                fpeaklist = []
+
+                for rmz in rpeak2peaks:
+                    if len(rpeak2peaks[rmz]) > 1:
+                        rpeak2peak[rmz] = sorted(rpeak2peaks[rmz], key=lambda x: x.area, reverse=True)[0]
+                    else:
+                        rpeak2peak[rmz] = rpeak2peaks[rmz][0]
+
+                    selPeak = rpeak2peak[rmz]
+
+                    fpeak = ms_peak_picker.peak_set.FittedPeak(rmz, selPeak.intensity, selPeak.signal_to_noise, selPeak.peak_count, selPeak.index, selPeak.full_width_at_half_max, selPeak.area,
+                        left_width=0, right_width=0)
+
+                    fpeaklist.append(fpeak)
+                
+                for peak in fpeaklist:
+                    idx = int((peak.mz / stepSize) - startSteps)
+
+                    if idx >= outarray.shape[2]:
+                        print(peak.mz)
+
+                    outarray[i,j,idx] = peak.intensity
+
+        return outarray, outmasses
+
+
+
     def shift_region_array(self, reg_array, masses, maxshift, ref_coord=(0,0)):
         
         ref_spec = reg_array[ref_coord[0], ref_coord[1], maxshift:-maxshift]
@@ -2916,7 +2985,12 @@ class IMZMLExtract:
 
         bgShifts = 0
 
-        for i in range(0, array.shape[0]):
+        bar = progressbar.ProgressBar(widgets=[
+        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
+        ])
+
+
+        for i in bar(range(0, array.shape[0])):
             for j in range(0, array.shape[1]):
 
                 aspec = array[i,j,:]
@@ -2957,6 +3031,36 @@ class IMZMLExtract:
                 outarray[i,j,:] = newspec
 
         return outarray
+
+    def integrate_masses(self, array, masses=None, window=10):
+
+        if masses is None:
+            masses = self.mzValues
+
+        outarray = np.zeros((array.shape[0], array.shape[1], array.shape[2]-2*window))
+
+        bar = progressbar.ProgressBar(widgets=[
+        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
+        ])
+
+
+        for i in bar(range(0, array.shape[0])):
+            for j in range(0, array.shape[1]):
+                aspec = array[i,j,:]
+
+                initValue = 0
+                for k in range(-window,window):
+                    initValue += aspec[window+k]
+                outarray[i,j,0] = initValue
+
+                for p in range(window+1, array.shape[2]-window):
+
+                    initValue += aspec[p+window]
+                    initValue -= aspec[p-window-1]
+
+                    outarray[i,j,p-window] = initValue
+
+        return outarray, masses[window:-window]
 
 
     def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
