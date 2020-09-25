@@ -499,6 +499,14 @@ class SpectraRegion():
 
     @classmethod
     def from_pickle(cls, path):
+        """Loads a SpectraRegion from pickle file
+
+        Args:
+            path (str): Path to pickle file to load spectra region from.
+
+        Returns:
+            SpectraRegion: SpectraRegion from pickle
+        """
 
         obj = None
         with open(path, "rb") as fin:
@@ -507,11 +515,18 @@ class SpectraRegion():
         return obj
 
     def to_pickle(self, path):
+        """Pickles the current object
+
+        Args:
+            path (str): Path to save the pickle file in.
+        """
 
         with open(path, "wb") as fout:
             pickle.dump(self, fout)
 
     def ctypesCloseLibrary(self):
+        """Unloads the C++ library
+        """
         dlclose_func = ctypes.CDLL(None).dlclose
         dlclose_func.argtypes = [ctypes.c_void_p]
         dlclose_func.restype = ctypes.c_int
@@ -519,6 +534,8 @@ class SpectraRegion():
 
 
     def loadLib(self):
+        """Prepares everything for the usage of the C++ library
+        """
         self.lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
 
         self.lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
@@ -535,6 +552,13 @@ class SpectraRegion():
 
 
     def __init__(self, region_array, idx2mass, name=None):
+        """Initializes a SpectraRegion
+
+        Args:
+            region_array (np.array): Array of spectra defining one region
+            idx2mass (np.array): m/u Values for spectra
+            name (str, optional): Name of this region (required if you want to do a comparative analysis). Defaults to None.
+        """
 
         assert(not region_array is None)
         assert(not idx2mass is None)
@@ -580,6 +604,9 @@ class SpectraRegion():
             self.pixel2idx[(x,y)] = i
 
     def __setlogger(self):
+        """Sets up logging facilities for SpectraRegion
+        """
+
         self.logger = logging.getLogger('SpectraRegion')
 
         if len(self.logger.handlers) == 0:
@@ -595,6 +622,11 @@ class SpectraRegion():
 
 
     def __getstate__(self):
+        """Returns all data necessary to reconstruct the current state.
+
+        Returns:
+            dict: all data in one dict
+        """
         return {
             "name": self.name,
             "region_array": self.region_array,
@@ -615,27 +647,13 @@ class SpectraRegion():
         }
 
     def __setstate__(self, state):
+        """Reconstructs the current state from a dictionary with all data, and sets up idx2pixel.
+
+        Args:
+            state (dict of data): data required to reconstruct state
+        """
 
         self.__dict__.update(state)
-
-        """
-        self.name = state.name
-        self.region_array = state.region_array
-        self.idx2mass = state.idx2mass
-        self.spectra_similarity = state.spectra_similarity
-        self.dist_pixel = state.dist_pixel
-        self.pixel2idx = state.pixel2idx
-        self.elem_matrix = state.elem_matrix
-        self.dimred_elem_matrix = state.dimred_elem_matrix
-        self.dimred_labels = state.dimred_labels
-        self.segmented = state.segmented
-        self.segmented_method = state.segmented_method
-        self.cluster_filters = state.cluster_filters
-        self.consensus = state.consensus
-        self.consensus_method = state.consensus_method
-        self.consensus_similarity_matrix = state.consensus_similarity_matrix
-        self.de_results_all = state.de_results_all
-        """
 
         self.logger = None
         self.__setlogger()
@@ -652,6 +670,16 @@ class SpectraRegion():
 
 
     def plot_array(self, fig, arr, discrete_legend=True):
+        """Plots an array of values (e.g. segment IDs) into the given figure and adds a discrete legend.
+
+        Args:
+            fig (matplotlib figure): Figure to plot to.
+            arr (array): array to visualize
+            discrete_legend (bool, optional): Plot a discrete legend for values of array?. Defaults to True.
+
+        Returns:
+            [matplotlib figure]: Figure with plotted figure
+        """
 
 
         valid_vals = np.unique(arr)
@@ -757,11 +785,28 @@ class SpectraRegion():
 
 
     def idx_for_mass(self, mass):
+        """Returns the closest index for a specific mass.
+
+        Args:
+            mass (float): mass to look up index for
+
+        Returns:
+            int: index in m/z array for mass (or closest mass if not exactly found).
+        """
         emass, eidx = self.__get_exmass_for_mass(mass)
 
         return eidx
 
     def __get_exmass_for_mass(self, mass, threshold=None):
+        """Returns the closest mass and index for a specific mass.
+
+        Args:
+            mass (float): mass to look up index for
+            threshold ([float], optional): Maximal distance from mass to contained m/z. Defaults to None.
+
+        Returns:
+            [float, int]: mass and index of closest contained m/z for mass
+        """
         
         dist2mass = float('inf')
         curMass = -1
@@ -777,7 +822,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -801,10 +846,11 @@ class SpectraRegion():
         if min_cut_off != None:
             image[image <= min_cut_off] = min_cut_off
 
-        heatmap = plt.matshow(image)
-        plt.colorbar(heatmap)
-        plt.show()
-        plt.close()
+        if plot:
+            heatmap = plt.matshow(image)
+            plt.colorbar(heatmap)
+            plt.show()
+            plt.close()
 
         return image
         #return image
@@ -2450,6 +2496,16 @@ class IMZMLExtract:
         return self.get_avg_spectrum(region_spects)
 
     def get_avg_spectrum(self, region_spects):
+        """Returns the average spectrum for an array of spectra.
+
+        The average spectrum is the mean intensity value for all m/z values
+
+        Args:
+            region_spects (np.array): 2D array of spectra
+
+        Returns:
+            np.array: average spectrium
+        """
 
         avgarray = np.zeros((1, region_spects.shape[2]))
 
@@ -2465,6 +2521,14 @@ class IMZMLExtract:
 
 
     def get_region_range(self, regionid):
+        """returns the shape of the queried region id in all dimensions, x,y and spectra
+
+        Args:
+            regionid (int): the region id from the overview
+
+        Returns:
+            [3 tuples]: x-range, y-range and spectra dimension
+        """
 
         allpixels = self.dregions[regionid]
 
@@ -2493,6 +2557,14 @@ class IMZMLExtract:
         return (minx, maxx), (miny, maxy), (minz, maxz), spectraLength
 
     def get_region_shape(self, regionid):
+        """Returns the shape of the queried region. The shape is always rectangular
+
+        Args:
+            regionid ([type]): The region id as seen in the regions overview
+
+        Returns:
+            [tuple]: x,y dimensions of regioin
+        """
 
         rr = self.get_region_range(regionid)
         xr,yr,zr,sc = rr
@@ -2598,33 +2670,58 @@ class IMZMLExtract:
 
 
     def normalize_spectrum(self, spectrum, normalize=None, max_region_value=None):
+        """normalize a single spectrum
+
+        Args:
+            spectrum ([np.array]): spectrum to normalize
+            normalize ([str], optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector". Defaults to None.
+            max_region_value ([type], optional): Value to normalize to for max-region-intensity norm. Defaults to None.
+
+        Returns:
+            [np.array]: normalized spectrum
+        """
 
         assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
+
+        retSpectrum = np.array(spectrum, copy=True)
 
         if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             assert(max_region_value != None)
 
         if normalize == "max_intensity_spectrum":
-            spectrum = spectrum / np.max(spectrum)
-            return spectrum
+            retSpectrum = retSpectrum / np.max(retSpectrum)
+            return retSpectrum
 
         elif normalize in ["max_intensity_region", "max_intensity_all_regions"]:
-            spectrum = spectrum / max_region_value
-            return spectrum
+            retSpectrum = retSpectrum / max_region_value
+            return retSpectrum
 
         elif normalize == "vector":
 
-            slen = np.linalg.norm(spectrum)
+            slen = np.linalg.norm(retSpectrum)
 
             if slen < 0.01:
-                spectrum = spectrum * 0
+                retSpectrum = retSpectrum * 0
             else:
-                spectrum = spectrum / slen
+                retSpectrum = retSpectrum / slen
 
-            return spectrum
+            return retSpectrum
 
 
     def baseline_als(self, y, lam, p, niter=10):
+        """[summary]
+
+        Args:
+            y ([type]): [description]
+            lam ([type]): [description]
+            p ([type]): [description]
+            niter (int, optional): [description]. Defaults to 10.
+
+        Returns:
+            [type]: [description]
+        """
+        
+
         L = len(y)
         D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
         w = np.ones(L)
@@ -2636,8 +2733,24 @@ class IMZMLExtract:
         return z
 
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
+        """[summary]
+
+        Args:
+            region_array ([np.array]): array of spectra to normlaize
+            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.
+            lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
+            p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
+            iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
+
+        Returns:
+            [np.array]: normalized region_array / array of spectra
+        """
+        
 
         assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
+
+        if normalize in ["vector"]:
+            outarray = np.zeros(region_array.shape)
 
 
         if normalize in ["baseline_cor"]:
@@ -2651,14 +2764,19 @@ class IMZMLExtract:
             if normalize == "intra_median":
 
                 intra_norm = np.zeros(region_array.shape)
+                medianPixel = 0
                 for i in range(region_array.shape[0]):
                     for j in range(region_array.shape[1]):
-                        median = np.median(region_array[i,j,:]/ref_spectra)
+                        res = region_array[i,j,:]/ref_spectra
+                        median = np.median(res)
 
                         if median != 0:
+                            medianPixel += 1
                             intra_norm[i,j,:] = region_array[i,j, :]/median
                         else:
                             intra_norm[i,j,:] = region_array[i,j,:]
+
+                self.logger.info("Got {} median-enabled pixels".format(medianPixel))
 
                 return intra_norm
 
@@ -2721,14 +2839,14 @@ class IMZMLExtract:
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
 
-                spectrum = region_array[i, j, :]
+                procSpectrum = region_array[i, j, :]
 
                 if normalize in ['max_intensity_region', 'max_intensity_all_regions']:
-                    maxInt = max(maxInt, np.max(spectrum))
+                    maxInt = max(maxInt, np.max(procSpectrum))
 
                 else:
-                    spectrum = self.normalize_spectrum(spectrum, normalize=normalize)
-                    outarray[i, j, :] = spectrum
+                    retSpectrum = self.normalize_spectrum(procSpectrum, normalize=normalize)
+                    outarray[i, j, :] = retSpectrum
 
         if not normalize in ['max_intensity_region', 'max_intensity_all_regions']:
             return outarray
@@ -2748,6 +2866,11 @@ class IMZMLExtract:
         return outarray
 
     def plot_toc(self, region_array):
+        """For each pixel in region_array, plot the collected intensity/sum over all m/z
+
+        Args:
+            region_array (np.array): array of spectra
+        """
         region_dims = region_array.shape
         peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
         for i in range(0, region_dims[0]):
@@ -2755,6 +2878,25 @@ class IMZMLExtract:
 
                 spectrum = region_array[i, j, :]
                 peakplot[i,j] = sum(spectrum)
+
+        heatmap = plt.matshow(peakplot)
+        plt.colorbar(heatmap)
+        plt.show()
+        plt.close()
+
+    def plot_tnc(self, region_array):
+        """For each pixel in region_array, plot the norm count over all m/z
+
+        Args:
+            region_array (np.array): array of spectra
+        """
+        region_dims = region_array.shape
+        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        for i in range(0, region_dims[0]):
+            for j in range(0, region_dims[1]):
+
+                spectrum = region_array[i, j, :]
+                peakplot[i,j] = np.linalg.norm(spectrum)
 
         heatmap = plt.matshow(peakplot)
         plt.colorbar(heatmap)
@@ -2862,6 +3004,16 @@ class IMZMLExtract:
         return idx2shift, idx2shifted
 
     def __cos_similarity(self, vA, vB):
+        """Calculates cosine similarity for two vectors.
+
+        Args:
+            vA (vector): vector for cosine sim.
+            vB (vector): vector for cosine sim.
+
+        Returns:
+            float: cosine similarity
+        """
+
         assert(len(vA) == len(vB))
 
         vAL = np.dot(vA,vA)
@@ -2874,6 +3026,23 @@ class IMZMLExtract:
 
 
     def to_called_peaks(self, region, masses, resolution):
+        """
+        Transforms an array of spectra into an array of called peaks.
+
+        The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4).
+
+        Peaks are found using ms_peak_picker.
+
+        If there are multiple peaks for one m/z value, the highest one is chosen.
+
+        Args:
+            region (np.array): region/array of spectra
+            masses (np.array): m/z values for region
+            resolution (int): Resolution to return
+
+        Returns:
+            np.array, np.array: new array of spectra, corresponding masses
+        """
 
         assert(len(masses) == region.shape[2])
 
@@ -2939,7 +3108,18 @@ class IMZMLExtract:
 
 
 
-    def shift_region_array(self, reg_array, masses, maxshift, ref_coord=(0,0)):
+    def shift_region_array(self, reg_array, masses, maxshift=20, ref_coord=(0,0)):
+        """Shift spectra in reg_array such that the match best with reg_array[reg_coord, :]
+
+        Args:
+            reg_array (np.array): array of spectra
+            masses (np.array): m/z values for reg_array spectra
+            maxshift (int): maximal shift in each direction, Defaults to 20.
+            ref_coord (tuple, optional): [description]. Defaults to (0,0).
+
+        Returns:
+            (np.array, np.array): shifted reg_array, corresponding masses
+        """
         
         ref_spec = reg_array[ref_coord[0], ref_coord[1], maxshift:-maxshift]
         outarray = np.zeros((reg_array.shape[0], reg_array.shape[1], len(ref_spec)))
@@ -2972,6 +3152,18 @@ class IMZMLExtract:
     
 
     def remove_background_spec_aligned(self, array, bgSpec, masses=None, maxshift=20):
+        """Subtracts bgSpec from all spectra in array region. For each pixel, the pixel spectrum and bgSpec are aligned (maxshift)
+
+        Args:
+            array (np.array): Array of spectra to subtract from.
+            bgSpec (np.array): Spectrum to subtract
+            masses (np.array, optional): Masses of array. Defaults to None.
+            maxshift (int, optional): Maximal shift in any direction for alignment. Defaults to 20.
+
+        Returns:
+            np.array, np.array: subtracted array spectra, corresponding masses
+        """
+
         assert(not bgSpec is None)
         print(bgSpec.shape)
         print(array.shape)
@@ -3016,6 +3208,15 @@ class IMZMLExtract:
 
 
     def remove_background_spec(self, array, bgSpec):
+        """Subtracts bgSpec from all spectra in array region.
+
+        Args:
+            array (np.array): input array of spectra
+            bgSpec (np.array): spectrum to subtract
+
+        Returns:
+            np.array: array - bgSpec
+        """
         assert(not bgSpec is None)
         print(bgSpec.shape)
         print(array.shape)
@@ -3033,6 +3234,16 @@ class IMZMLExtract:
         return outarray
 
     def integrate_masses(self, array, masses=None, window=10):
+        """Returns an array of spectra with (2*window less values) where for postion p, the intensity value is the sum from p-window to p+window.
+
+        Args:
+            array (np.array): Input Array
+            masses (np.array, optional): Input Masses. Defaults to None.
+            window (int, optional): Window to use for integration. Defaults to 10.
+
+        Returns:
+            tuple of np.array: integrated input array, matching masses
+        """
 
         if masses is None:
             masses = self.mzValues
@@ -3064,6 +3275,20 @@ class IMZMLExtract:
 
 
     def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
+        """Returns a 2D array of spectra for the specified regionid.
+
+        Subtracts the minimal intensity to accomodate for intensity shifts (due to different heights of the sample).
+
+        Can subtract a background spectrum for all loaded spectra.
+
+        Args:
+            regionid ([int]): 
+            makeNullLine (bool, optional): Subtracts the minimal intensity. Defaults to True.
+            bgspec ([type], optional): spectrum (list, 1D array) to subtract from all spectra. Defaults to None.
+
+        Returns:
+            [np.array]: 2D-Array of spectra
+        """
 
         xr,yr,zr,sc = self.get_region_range(regionid)
         rs = self.get_region_shape(regionid)
@@ -3096,7 +3321,15 @@ class IMZMLExtract:
         return sarray
 
 
-    def list_regions(self):
+    def list_regions(self, plot=True):
+        """Lists all contained regions and creates a visualization of their location
+
+        Args:
+            plot (bool, optional): Plot overview of spectra?. Defaults to True.
+
+        Returns:
+            [dict]: Dictionary of info tuples (x range, y range, #spectra) for each region ID
+        """
 
         allMaxX = 0
         allMaxY = 0
@@ -3119,38 +3352,39 @@ class IMZMLExtract:
             print(regionid, infotuple)
             allregionInfo[regionid] = infotuple
 
-        outimg = np.zeros((allMaxY, allMaxX))
+        if plot:
+            outimg = np.zeros((allMaxY, allMaxX))
 
-        for regionid in self.dregions:
+            for regionid in self.dregions:
 
-            allpixels = self.dregions[regionid]
+                allpixels = self.dregions[regionid]
 
-            minx = min([x[0] for x in allpixels])
-            maxx = max([x[0] for x in allpixels])
+                minx = min([x[0] for x in allpixels])
+                maxx = max([x[0] for x in allpixels])
 
-            miny = min([x[1] for x in allpixels])
-            maxy = max([x[1] for x in allpixels])
+                miny = min([x[1] for x in allpixels])
+                maxy = max([x[1] for x in allpixels])
 
-            outimg[miny:maxy, minx:maxx] = regionid+1
+                outimg[miny:maxy, minx:maxx] = regionid+1
 
-        heatmap = plt.matshow(outimg)
-        for regionid in self.dregions:
-            allpixels = self.dregions[regionid]
+            heatmap = plt.matshow(outimg)
+            for regionid in self.dregions:
+                allpixels = self.dregions[regionid]
 
-            minx = min([x[0] for x in allpixels])
-            maxx = max([x[0] for x in allpixels])
+                minx = min([x[0] for x in allpixels])
+                maxx = max([x[0] for x in allpixels])
 
-            miny = min([x[1] for x in allpixels])
-            maxy = max([x[1] for x in allpixels])
+                miny = min([x[1] for x in allpixels])
+                maxy = max([x[1] for x in allpixels])
 
-            middlex = minx + (maxx-minx)/ 2.0
-            middley = miny + (maxy-miny)/ 2.0
+                middlex = minx + (maxx-minx)/ 2.0
+                middley = miny + (maxy-miny)/ 2.0
 
-            plt.text(middlex, middley, str(regionid))
+                plt.text(middlex, middley, str(regionid))
 
-        plt.colorbar(heatmap)
-        plt.show()
-        plt.close()
+            plt.colorbar(heatmap)
+            plt.show()
+            plt.close()
 
         return allregionInfo
         
@@ -3296,50 +3530,3 @@ class IMZMLExtract:
 
         return outregions
 
-
-if __name__ == '__main__':
-
-    #img = Image.open("/Users/rita/Uni/bachelor_thesis/test2.tiff")
-    #img = np.asarray(img, dtype=np.float32)
-    #img = cv2.resize(img, (320, 240), interpolation = cv2.INTER_AREA) 
-    #imageio.imwrite("/Users/rita/Uni/bachelor_thesis/test2_smaller.png", img)
-    #seg = Segmenter()
-
-    #imze = IMZMLExtract("/mnt/d/dev/data/msi/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML")
-    imze = IMZMLExtract("/mnt/d/dev/data/msi/slideD/181114_AT1_Slide_D_Proteins.imzML")
-    spectra = imze.get_region_array(0)
-
-
-    print("Got spectra", spectra.shape)
-    print("mz index", imze.get_mz_index(6662))
-
-    imze.normalize_region_array(spectra, normalize="max_intensity_region")
-    spectra.spectra_log_dist()
-
-    exit()
-
-    seg = Segmenter()
-    #seg.calc_similarity(spectra)
-
-    #exit(0)
-
-    #image, regions = seg.segment_image("/mnt/d/dev/data/mouse_pictures/segmented/test1_smaller.png", qs=[256, 0.5, 0.25, 0.0001, 0.00001])
-    image, regions = seg.segment_array(spectra, qs=[1,0.5, 0.25, 0.1, 0.01], imagedim=imze.get_mz_index(6662), dotMode=True)
-
-    f, axarr = plt.subplots(len(regions), 2)
-
-    for i,q in enumerate(regions):
-
-        curdata = regions[q]
-        uniques = np.unique(curdata)
-        print("Q", q, len(uniques))
-
-        if len(uniques) < 100:
-            print(uniques)
-        print()
-
-        axarr[i, 0].imshow( image )
-        axarr[i, 1].imshow( curdata )
-
-    plt.show()
-    plt.close()
