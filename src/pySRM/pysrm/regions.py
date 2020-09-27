@@ -344,11 +344,11 @@ class SpectraRegion():
         Returns:
             int: index in m/z array for mass (or closest mass if not exactly found).
         """
-        emass, eidx = self.__get_exmass_for_mass(mass)
+        emass, eidx = self._get_exmass_for_mass(mass)
 
         return eidx
 
-    def __get_exmass_for_mass(self, mass, threshold=None):
+    def _get_exmass_for_mass(self, mass, threshold=None):
         """Returns the closest mass and index for a specific mass.
 
         Args:
@@ -382,7 +382,7 @@ class SpectraRegion():
 
         for mass in masses:
             
-            bestExMassForMass, bestExMassIdx = self.__get_exmass_for_mass(mass)
+            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
             self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
             for i in range(self.region_array.shape[0]):
@@ -414,7 +414,8 @@ class SpectraRegion():
 
         if len(inputarray.shape) > 2:
             dims = inputarray.shape[2]
-        print(dims)
+        
+        self.logger.info("dimensions inputarray: {}".format(dims))
         qs = []
         qArr = (ctypes.c_float * len(qs))(*qs)
 
@@ -462,7 +463,7 @@ class SpectraRegion():
             for neighbor in range(neighbors):
                 features = features + [i + neighbor for i in features] + [i - neighbor for i in features]
             features = np.unique(features)
-            featureIndex = [self.__get_exmass_for_mass(x) for x in features]
+            featureIndex = [self._get_exmass_for_mass(x) for x in features]
             featureIndex = [y for (x,y) in featureIndex if y != None]
             featureIndex = sorted(np.unique(featureIndex))
             regArray = np.zeros((self.region_array.shape[0], self.region_array.shape[1], len(featureIndex)))
@@ -604,7 +605,7 @@ class SpectraRegion():
             random_state=42,
         ).fit_transform(self.elem_matrix)
 
-        self.logger.info("HDBSCAN reduction"), 
+        self.logger.info("Ward reduction"), 
 
         print(self.dimred_elem_matrix.shape)
 
@@ -628,7 +629,7 @@ class SpectraRegion():
 
         self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
 
-        print("Elem Matrix", self.elem_matrix.shape)
+        self.logger.info("Elem Matrix of shape: {}".format(self.elem_matrix.shape))
 
         """
         
@@ -654,7 +655,6 @@ class SpectraRegion():
 
                 idx2ij[idx] = (i,j)
 
-
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
             n_neighbors=n_neighbors,
@@ -665,42 +665,71 @@ class SpectraRegion():
 
         self.logger.info("HDBSCAN reduction"), 
 
-        clusterer = hdbscan.HDBSCAN(
-            min_samples=min_samples,
-            min_cluster_size=min_cluster_size,
-        )
-        self.dimred_labels = clusterer.fit_predict(self.dimred_elem_matrix)
-        self.dimred_labels[self.dimred_labels >= 0] += 1
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, prediction_data=True,gen_min_span_tree=True).fit(self.dimred_elem_matrix)
+        soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
+        self.dimred_labels = np.array([np.argmax(x) for x in soft_clusters])+1 # +1 avoids 0
 
-        #c = spc.hierarchy.fcluster(clusterer.single_linkage_tree_.to_numpy(), t=10, criterion='maxclust')
+        if len(np.unique(self.dimred_labels)) > number_of_regions:
+            self.logger.info("Cluster Reduction for UMAP Result")
+            self.segmented = np.reshape(self.dimred_labels, (self.region_array.shape[0], self.region_array.shape[1]))
+
+            self.reduce_clusters(number_of_regions)
+            self.dimred_labels = np.reshape(self.segmented, (self.region_array.shape[0] * self.region_array.shape[1],))
+
+        self.dimred_labels = list(self.dimred_labels)
 
         return self.dimred_labels
+
+
+    def reduce_clusters(self, number_of_clusters):
+
+        self.logger.info("Cluster Reduction")
+
+        _ = self.consensus_spectra()
+        self.consensus_similarity()
+
+        Z = spc.hierarchy.ward(self.consensus_similarity_matrix)
+        c = spc.hierarchy.fcluster(Z, t=number_of_clusters, criterion='maxclust')
+
+        dimred_labels = np.reshape(self.segmented, (self.region_array.shape[0] * self.region_array.shape[1],))
+        origlabels = np.array(dimred_labels, copy=True)
+
+        for cidx, cval in enumerate(c):
+            dimred_labels[origlabels == (cidx+1)] = cval
+
+        self.segmented = np.reshape(dimred_labels, (self.region_array.shape[0], self.region_array.shape[1]))
+
+        self.consensus = None
+        self.consensus_similarity_matrix = None
+
+
 
     def vis_umap(self, legend=True):
 
         assert(not self.dimred_elem_matrix is None)
         assert(not self.dimred_labels is None)
 
+        nplabels = np.array(self.dimred_labels)
 
         plt.figure()
-        clustered = (self.dimred_labels >= 0)
-        print("Dimred Shape", self.dimred_elem_matrix.shape)
-        print("Unassigned", self.dimred_elem_matrix[~clustered, ].shape)
+        clustered = (nplabels >= 0)
+        self.logger.info("Pixels    : {}".format(self.dimred_elem_matrix.shape[0]))
+        self.logger.info("Unassigned: {}".format(self.dimred_elem_matrix[~clustered, ].shape[0]))
         plt.scatter(self.dimred_elem_matrix[~clustered, 0],
                     self.dimred_elem_matrix[~clustered, 1],
                     color=(1, 0,0),
                     label="Unassigned",
                     s=2.0)
 
-        uniqueClusters = sorted(set([x for x in self.dimred_labels if x >= 0]))
+        uniqueClusters = sorted(set([x for x in nplabels if x >= 0]))
 
         for cidx, clusterID in enumerate(uniqueClusters):
             cmap = matplotlib.cm.get_cmap('Spectral')
 
             clusterColor = cmap(cidx / len(uniqueClusters))
 
-            plt.scatter(self.dimred_elem_matrix[self.dimred_labels == clusterID, 0],
-                        self.dimred_elem_matrix[self.dimred_labels == clusterID, 1],
+            plt.scatter(self.dimred_elem_matrix[nplabels == clusterID, 0],
+                        self.dimred_elem_matrix[nplabels == clusterID, 1],
                         color=clusterColor,
                         label=str(clusterID),
                         s=10.0)
@@ -722,7 +751,7 @@ class SpectraRegion():
             massIndices = []
             
             for mass in masses:
-                mx, idx = self.__get_exmass_for_mass(mass)
+                mx, idx = self._get_exmass_for_mass(mass)
                 massIndices.append(idx)
 
         massIndices = sorted(massIndices)
@@ -1022,7 +1051,7 @@ class SpectraRegion():
 
         for mass in masses:
             
-            bestExMassForMass, bestExMassIdx = self.__get_exmass_for_mass(mass)
+            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
             self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
             
@@ -1155,9 +1184,6 @@ class SpectraRegion():
 
 
     def consensus_similarity(self ):
-        """
-            calculates the similarity for consensus spectra
-        """
 
         assert(not self.consensus is None)
 
@@ -1204,7 +1230,7 @@ class SpectraRegion():
         assert(all([y in cluster2coords for y in segments]))
 
         # best matchng massvalue - rounding difference, etc
-        massValue, massIndex = self.__get_exmass_for_mass(massValue)
+        massValue, massIndex = self._get_exmass_for_mass(massValue)
 
         allExprValues = []
         for segment in segments:
@@ -1258,7 +1284,7 @@ class SpectraRegion():
         assert(all([x in ["avg", "median"] for x in mode]))
 
         # best matchng massvalue - rounding difference, etc
-        massValue, massIndex = self.__get_exmass_for_mass(massValue)
+        massValue, massIndex = self._get_exmass_for_mass(massValue)
 
         allExprValues = list(matrix[:, massIndex])
 
@@ -1416,6 +1442,21 @@ class SpectraRegion():
 
 
     def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
+        """[summary]
+
+        Args:
+            protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
+            keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
+            replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
+            includeBackground (bool, optional): If True, the cluster specific expression data are compared to all other clusters incl. background cluster. Defaults to True.
+            out_prefix (str, optional): Prefix for results file. Defaults to "nldiffreg".
+            outdirectory ([type], optional): Directory used for empire files. Defaults to None.
+            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].
+            count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1, "empire": 10000}.
+
+        Returns:
+            dict of pd.dataframe: for each test conducted, one data frame with all marker masses for each cluster
+        """
         cluster2coords = self.getCoordsForSegmented()
 
         dfbyMethod = defaultdict(lambda: pd.DataFrame())
@@ -1459,6 +1500,8 @@ class SpectraRegion():
         
 
     def clear_de_results(self):
+        """Removes all sotred differential expression results.
+        """
         self.de_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
@@ -1561,7 +1604,7 @@ class SpectraRegion():
 
         self.logger.info("DE data for case: {}".format(clusters0))
         self.logger.info("DE data for control: {}".format(clusters1))
-        print("Running {} against {}".format(clusters0, clusters1))
+        self.logger.info("Running {} against {}".format(clusters0, clusters1))
 
         resKey = self.__make_de_res_key(clusters0, clusters1)
         self.logger.info("DE result key: {}".format(resKey))

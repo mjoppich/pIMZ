@@ -154,25 +154,87 @@ class CombinedSpectra():
 
         self.region_cluster2cluster = region2cluster
 
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True):
 
-    def plot_common_segments(self):
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+        region2segments = {}
+        for regionName in self.regions:
+
+            cregion = self.regions[regionName]
+
+            image = np.zeros((cregion.region_array.shape[0], cregion.region_array.shape[1]))
+
+            for mass in masses:
+                
+                bestExMassForMass, bestExMassIdx = cregion._get_exmass_for_mass(mass)
+                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+                for i in range(cregion.region_array.shape[0]):
+                    for j in range(cregion.region_array.shape[1]):
+
+                        image[i,j] += cregion.region_array[i,j,bestExMassIdx]
+
+
+            if log:
+                image = np.log(image)
+
+            if min_cut_off != None:
+                image[image <= min_cut_off] = min_cut_off
+
+            region2segments[regionName] = image
+
+        if plot:
+
+            fig = plt.figure(figsize=(12, 12))
+
+            grid = ImageGrid(fig, 111,          # as in plt.subplot(111)
+                            nrows_ncols=(1,len(region2segments)),
+                            axes_pad=0.15,
+                            share_all=True,
+                            cbar_location="right",
+                            cbar_mode="single",
+                            cbar_size="7%",
+                            cbar_pad=0.15,
+                            )
+
+            # Add data to image grid
+            axes = [ax for ax in grid]
+
+            allMin, allMax = 0,0
+
+            for regionName in region2segments:
+                allMin = min(allMin, np.min(region2segments[regionName]))
+                allMax = max(allMax, np.max(region2segments[regionName]))
+
+            for didx, regionName in enumerate(region2segments):
+                ax = axes[didx]
+
+                heatmap = ax.matshow(region2segments[regionName], vmin=allMin, vmax=allMax)
+
+                # We must be sure to specify the ticks matching our target names
+                ax.set_title(regionName, y=0.1)
+
+
+            ax.cax.colorbar(heatmap)
+            ax.cax.toggle_label(True)
+
+            plt.show()
+            plt.close()
+
+
+        return image
+
+
+
+    def plot_common_segments(self, highlight=None):
 
         assert(not self.region_cluster2cluster is None)
 
         allClusters = [self.region_cluster2cluster[x] for x in self.region_cluster2cluster]
         valid_vals = sorted(set(allClusters))
 
-        min_ = min(valid_vals)
-        max_ = max(valid_vals)
-
-        positions = np.linspace(min_, max_, len(valid_vals))
-        val_lookup = dict(zip(positions, valid_vals))
-        print(val_lookup)
-
-        def formatter_func(x, pos):
-            'The two args are the value and tick position'
-            val = val_lookup[x]
-            return val
 
         region2segments = {}
         for regionName in self.regions:
@@ -194,6 +256,27 @@ class CombinedSpectra():
             region2segments[regionName] = newSegments
 
 
+        if highlight != None:
+            if not isinstance(highlight, (list, tuple, set)):
+                highlight = [highlight]
+
+            for regionName in region2segments:
+
+                showcopy = np.copy(region2segments[regionName])
+                
+                for i in range(0, showcopy.shape[0]):
+                    for j in range(0, showcopy.shape[1]):
+
+                        if showcopy[i,j] != 0:
+
+                            if showcopy[i,j] in highlight:
+                                showcopy[i,j] = 2
+                            elif showcopy[i,j] != 0:
+                                showcopy[i,j] = 1
+
+                region2segments[regionName] = showcopy
+
+
         fig = plt.figure(figsize=(12, 12))
 
 
@@ -209,6 +292,25 @@ class CombinedSpectra():
 
         # Add data to image grid
         axes = [ax for ax in grid]
+
+        valid_vals = set()
+        for regionName in region2segments:
+            plotarray = region2segments[regionName]
+
+            valid_vals = valid_vals.union(list(np.unique(plotarray)))
+
+        valid_vals = sorted(valid_vals)
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+        print(val_lookup)
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
 
         for didx, regionName in enumerate(region2segments):
             ax = axes[didx]
@@ -438,7 +540,7 @@ class CombinedSpectra():
                     
                     prot,protMass = protMassTuple
             
-                    clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                    clusterVec.append("".join([str(x) for x in resKey[0]]))
                     geneIdentVec.append(geneIDent)
                     massVec.append(massValue)
                     foundProtVec.append(prot)
@@ -457,7 +559,7 @@ class CombinedSpectra():
                     measuredSpectraBGVec.append(measuredSpectaBG)
 
             else:
-                clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                clusterVec.append("".join([str(x) for x in resKey[0]]))
                 geneIdentVec.append(geneIDent)
                 massVec.append(massValue)
                 foundProtVec.append("")
