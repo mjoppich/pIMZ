@@ -60,6 +60,7 @@ class IMZMLExtract:
         self.dregions = None
 
         self.mzValues = self.parser.getspectrum(0)[0]
+        self.coord2index = self._coord2index()
 
         self.specStart = 0
 
@@ -68,6 +69,15 @@ class IMZMLExtract:
             print("WARNING: SPECTRA STARTING AT POSITION", self.specStart)
 
         self.find_regions()
+
+
+    def _coord2index(self):
+
+        retDict = {}
+        for sidx, coord in enumerate(self.parser.coordinates):
+            retDict[coord] = sidx
+        return retDict
+
 
     def get_spectrum(self, specid, normalize=False):
         spectra1 = self.parser.getspectrum(specid)
@@ -124,7 +134,7 @@ class IMZMLExtract:
 
         for coord in self.dregions[regionid]:
 
-            spectID = self.parser.coordinates.index(coord)
+            spectID = self.coord2index.get(coord, None)
 
             if spectID == None or spectID < 0:
                 print("Invalid coordinate", coord)
@@ -141,9 +151,11 @@ class IMZMLExtract:
         
         outspectra = {}
 
-        for coord in self.dregions[regionid]:
+        bar = progressbar.ProgressBar()
 
-            spectID = self.parser.coordinates.index(coord)
+        for coord in bar(self.dregions[regionid]):
+
+            spectID = self.coord2index.get(coord)
 
             if spectID == None or spectID < 0:
                 print("Invalid coordinate", coord)
@@ -212,7 +224,7 @@ class IMZMLExtract:
         spectraLength = 0
         for coord in self.dregions[regionid]:
 
-            spectID = self.parser.coordinates.index(coord)
+            spectID = self.coord2index.get(coord, None)
 
             if spectID == None or spectID < 0:
                 print("Invalid coordinate", coord)
@@ -400,6 +412,82 @@ class IMZMLExtract:
             w = p * (y > z) + (1-p) * (y < z)
         return z
 
+    def _get_median_spectrum(self, region_array):
+        """
+        Calculates the median spectrum from all spectra in region_array
+
+        Args:
+            region_array (np.array): Array of spectra
+        """
+
+        median_profile = np.array([0.0] * region_array.shape[2])
+
+        for i in range(0, region_array.shape[2]):
+
+            median_profile[i] = np.median(region_array[:,:,i])
+
+        startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
+        if startedLog == 0:
+            startedLog = 0.001
+
+        self.logger.info("Started Log Value: {}".format(startedLog))
+
+        median_profile += startedLog
+
+        return median_profile
+
+
+    def _fivenumber(self, valuelist):
+        """Creates five number statistics for values in valuelist
+
+        Args:
+            valuelist (list/tuple/np.array (1D)): list of values to use for statistics
+
+        Returns:
+            tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
+        """
+
+        min_ = np.min(valuelist)
+        max_ = np.max(valuelist)
+
+        (quan25_, quan50_, quan75_) = np.quantile(valuelist, [0.25, 0.5, 0.75])
+
+        return (len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_)
+
+
+    def plot_fcs(self, region_array, positions):
+        """Plots the fold-changes of the spectra for each position regarding the median profile for this region
+
+        Args:
+            region_array (np.array of spectra): Array of spectra
+            positions (list of tuple): 2D position to evaluate
+        """
+
+        fig = plt.figure()
+
+        allData = []
+        allLabels = []
+
+        refspec = self._get_median_spectrum(region_array)
+        for p, position in enumerate(positions):
+            rspec = region_array[position[0], position[1], :]
+            res = rspec/refspec
+
+            allData.append(res)
+            allLabels.append("{}".format(position))
+
+
+        bplot2 = plt.boxplot(allData,
+                    notch=True,  # notch shape
+                    vert=False,  # vertical box alignment
+                    patch_artist=True,  # fill with color
+                    labels=allLabels)  # will be used to label x-ticks
+
+        plt.show()
+        plt.close()
+
+
+
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
         """[summary]
 
@@ -427,16 +515,22 @@ class IMZMLExtract:
 
         if normalize in ["inter_median", "intra_median"]:
             
-            ref_spectra = region_array[0,0,:] + 0.01
+            ref_spectra = self._get_median_spectrum(region_array)
 
             if normalize == "intra_median":
 
+                allMedians = []
+
                 intra_norm = np.zeros(region_array.shape)
                 medianPixel = 0
-                for i in range(region_array.shape[0]):
+
+                bar = progressbar.ProgressBar()
+
+                for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
                         res = region_array[i,j,:]/ref_spectra
                         median = np.median(res)
+                        allMedians.append(median)
 
                         if median != 0:
                             medianPixel += 1
@@ -445,6 +539,7 @@ class IMZMLExtract:
                             intra_norm[i,j,:] = region_array[i,j,:]
 
                 self.logger.info("Got {} median-enabled pixels".format(medianPixel))
+                self.logger.info("5-Number stats for medians: {}".format(self._fivenumber(allMedians)))
 
                 return intra_norm
 
@@ -452,8 +547,10 @@ class IMZMLExtract:
                 global_fcs = Counter()
                 scalingFactor = 100000
 
+                bar = progressbar.ProgressBar()
+
                 self.logger.info("Collecting fold changes")
-                for i in range(region_array.shape[0]):
+                for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
 
                         foldchanges = (scalingFactor * region_array[i][j] / ref_spectra).astype(int)
@@ -617,7 +714,7 @@ class IMZMLExtract:
         
         totalCoords = (specCoords[0]+xr[0], specCoords[1]+yr[0], 1)
 
-        spectID = self.parser.coordinates.index(totalCoords)
+        spectID = self.coord2index.get(totalCoords, None)
 
         if spectID == None or spectID < 0:
             print("Invalid coordinate", totalCoords)
@@ -958,15 +1055,20 @@ class IMZMLExtract:
             [np.array]: 2D-Array of spectra
         """
 
+        self.logger.info("Fetching region range")
         xr,yr,zr,sc = self.get_region_range(regionid)
+        self.logger.info("Fetching region shape")
         rs = self.get_region_shape(regionid)
         self.logger.info("Found region {} with shape {}".format(regionid, rs))
 
         sarray = np.zeros( rs, dtype=np.float32 )
 
+        self.logger.info("Fetching region spectra")
         coord2spec = self.get_region_spectra(regionid)
+        bar = progressbar.ProgressBar()
 
-        for coord in coord2spec:
+
+        for coord in bar(coord2spec):
             xpos = coord[0]-xr[0]
             ypos = coord[1]-yr[0]
 
@@ -1100,6 +1202,15 @@ class IMZMLExtract:
     
     
     def __dist(self, x,y):
+        """Calculates manhatten distance between two pixels
+
+        Args:
+            x (tuple): pixel x
+            y (tuple): pixel y
+
+        Returns:
+            number: manhatten distance between pixels
+        """
 
         assert(len(x)==len(y))
 
@@ -1115,15 +1226,55 @@ class IMZMLExtract:
 
     def __detectRegions(self, allpixels):
 
+        self.logger.info("Detecting Regions")
+
+        maxX = 0
+        maxY = 0
+
+        for coord in self.parser.coordinates:
+            maxX = max(maxX, coord[0])
+            maxY = max(maxY, coord[1])
+        
+        img = np.zeros((maxX+1, maxY+1))
+
+        for coord in self.parser.coordinates:
+            img[coord[0], coord[1]] = 1
+    
+        labeledArr, num_ids = ndimage.label(img, structure=np.ones((3,3)))
+
+        outregions = defaultdict(list)
+        for x in range(0, labeledArr.shape[0]):
+            for y in range(0, labeledArr.shape[1]):
+                
+                if img[x,y] == 0:
+                    # background pixels ;)
+                    continue
+
+                outregions[labeledArr[x,y]].append((x,y,1))
+
+        plt.imshow(labeledArr)
+        plt.show()
+        plt.close()
+
+        self.logger.info("Detecting Regions Finished")
+
+        return outregions
+
+
+    def __detectRegions__old(self, allpixels):
+
         allregions = []
 
-        for idx, pixel in enumerate(allpixels):
+        bar = progressbar.ProgressBar()
+
+
+        for idx, pixel in enumerate(bar(allpixels)):
 
             if len(allregions) == 0:
                 allregions.append([pixel])
                 continue
 
-            if idx % 1000 == 0:
+            if idx % 10000 == 0:
                 print("At pixel", idx , "of", len(allpixels), "with", len(allregions), "regions")
 
 
@@ -1131,40 +1282,12 @@ class IMZMLExtract:
 
             for ridx, region in enumerate(allregions):
 
-                #minx = min([x[0] for x in region])
-                #maxx = max([x[0] for x in region])
-
-                #miny = min([x[1] for x in region])
-                #maxy = max([x[1] for x in region])
-
-                #if pixel[0] - maxx > 100:
-                #    continue
-
-                #if pixel[0] - minx > 100:
-                #    continue
-
-                #if pixel[1] - maxy > 100:
-                #    continue
-
-                #if pixel[1] - miny > 100:
-                #    continue
-
-                if pixel[0] == 693 and pixel[1] == 317:
-                    print("proc pixel")
-
                 pixelAdded = False
                 for coord in region:
                     if self.__dist(coord, pixel) <= 1:
                         accRegions.append(ridx)
                         pixelAdded = False
                         break
-
-                if not pixelAdded:
-                    if pixel[0] == 693 and pixel[1] == 317:
-                        print("Pixel not added", pixel)
-
-            if pixel[0] == 693 and pixel[1] == 317:
-                print("Pixel acc regions", accRegions)
 
             if len(accRegions) == 0:
                 allregions.append([pixel])

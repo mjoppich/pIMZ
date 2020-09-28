@@ -26,7 +26,8 @@ from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
 import ms_peak_picker
-
+import regex as re
+import random
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
@@ -618,7 +619,7 @@ class SpectraRegion():
         return c
 
 
-    def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20):
+    def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
@@ -663,10 +664,31 @@ class SpectraRegion():
             random_state=42,
         ).fit_transform(self.elem_matrix)
 
-        self.logger.info("HDBSCAN reduction"), 
+        self.redo_hdbscan_on_dimred(number_of_regions, min_cluster_size, num_samples)
 
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, prediction_data=True,gen_min_span_tree=True).fit(self.dimred_elem_matrix)
-        soft_clusters = hdbscan.all_points_membership_vectors(clusterer)
+        return self.dimred_labels
+
+    def redo_hdbscan_on_dimred(self, number_of_regions, min_cluster_size=15, num_samples=10000, set_segmented=True):
+
+        if num_samples == -1 or self.dimred_elem_matrix.shape[0] < num_samples:
+            selIndices = [x for x in range(0, self.dimred_elem_matrix.shape[0])]
+        else:
+            selIndices = random.sample([x for x in range(0, self.dimred_elem_matrix.shape[0])], num_samples)
+
+        dr_matrix = self.dimred_elem_matrix[selIndices, :]
+
+        self.logger.info("HDBSCAN reduction")
+        self.logger.info("HDBSCAN Clusterer with matrix {}".format(dr_matrix.shape))
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, prediction_data=True).fit(dr_matrix)
+        clusterer.generate_prediction_data()
+        self.logger.info("HDBSCAN Soft Clusters with matrix {}".format(self.dimred_elem_matrix.shape))
+        soft_clusters = hdbscan.prediction.membership_vector(clusterer, self.dimred_elem_matrix)
+        self.logger.info("HDBSCAN Soft Clusters as output matrix {}".format(soft_clusters.shape))
+
+        self.logger.info("HDBSCAN Soft Clusters: {}".format(soft_clusters.shape))
+        print(soft_clusters)
+
+        self.logger.info("HDBSCAN Labeling")
         self.dimred_labels = np.array([np.argmax(x) for x in soft_clusters])+1 # +1 avoids 0
 
         if len(np.unique(self.dimred_labels)) > number_of_regions:
@@ -678,7 +700,22 @@ class SpectraRegion():
 
         self.dimred_labels = list(self.dimred_labels)
 
-        return self.dimred_labels
+
+        if set_segmented:
+            image_UPGMA = np.zeros(self.region_array.shape, dtype=np.int16)
+            image_UPGMA = image_UPGMA[:,:,0]
+
+
+            # cluster 0 has special meaning: not assigned !
+            assert(not 0 in [self.dimred_labels[x] for x in self.dimred_labels])
+
+            for i in range(0, image_UPGMA.shape[0]):
+                for j in range(0, image_UPGMA.shape[1]):
+                    image_UPGMA[i,j] = self.dimred_labels[self.pixel2idx[(i,j)]]
+
+
+            self.segmented = image_UPGMA
+            self.segmented_method = "UMAP_DBSCAN"
 
 
     def reduce_clusters(self, number_of_clusters):
@@ -795,10 +832,11 @@ class SpectraRegion():
         plt.close()
 
 
-    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20):
+    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=1000):
 
-        assert(not self.spectra_similarity is None)
         assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD"])
+        if method in ["UPGMA", "WPGMA", "WARD", "KMEANS","CENTROID", "MEDIAN"]:
+            assert(not self.spectra_similarity is None)
 
         self.logger.info("Calculating clusters")
 
@@ -820,7 +858,7 @@ class SpectraRegion():
             c = self.__segment__ward(number_of_regions)
 
         elif method == "UMAP_DBSCAN":
-            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size)
+            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size, num_samples=num_samples)
 
         elif method == "UMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, dims=dims, n_neighbors=n_neighbors)
@@ -848,7 +886,7 @@ class SpectraRegion():
         return self.segmented
 
 
-    def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4):
+    def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4, minIslandSize=10):
 
         assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss"])
 
@@ -898,7 +936,7 @@ class SpectraRegion():
 
                 labelCells = np.count_nonzero(labeledArr == i)
 
-                if labelCells <= 10:
+                if labelCells <= minIslandSize:
                     self.segmented[labeledArr == i] = 0
 
 
@@ -1014,10 +1052,60 @@ class SpectraRegion():
         return cluster2coords
 
 
-    def consensus_spectra(self, method="avg"):
+    def _get_median_spectrum(self, region_array):
+        """
+        Calculates the median spectrum from all spectra in region_array
+
+        Args:
+            region_array (np.array): Array of spectra
+        """
+
+        median_profile = np.array([0.0] * region_array.shape[2])
+
+        for i in range(0, region_array.shape[2]):
+
+            median_profile[i] = np.median(region_array[:,:,i])
+
+        startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
+        if startedLog == 0:
+            startedLog = 0.001
+
+        self.logger.info("Started Log Value: {}".format(startedLog))
+
+        median_profile += startedLog
+
+        return median_profile
+
+    def __cons_spectra__median(self, cluster2coords):
+
+        cons_spectra = {}
+        for clusID in cluster2coords:
+
+            spectraCoords = cluster2coords[clusID]
+
+            if len(spectraCoords) == 1:
+                coord = spectraCoords[0]
+                # get spectrum, return spectrum
+                medianSpectrum = self.region_array[coord[0], coord[1], :]
+            else:
+
+                clusterSpectra = np.zeros((1, len(spectraCoords), self.region_array.shape[2]))
+
+                for cIdx, coord in enumerate(spectraCoords):
+                    clusterSpectra[0, cIdx, :] = self.region_array[coord[0], coord[1], :]
+
+                medianSpectrum = self._get_median_spectrum(clusterSpectra)
+
+            cons_spectra[clusID] = medianSpectrum
+
+        return cons_spectra
+
+
+
+    def consensus_spectra(self, method="avg", set_consensus=True):
 
         assert(not self.segmented is None)
-        assert(method in ["avg"])
+        assert(method in ["avg", "median"])
 
         self.logger.info("Calculating consensus spectra")
 
@@ -1027,10 +1115,15 @@ class SpectraRegion():
         cons_spectra = None
         if method == "avg":
             cons_spectra = self.__cons_spectra__avg(cluster2coords)
+        elif method == "median":
+            cons_spectra = self.__cons_spectra__median(cluster2coords)
 
 
-        self.consensus = cons_spectra
-        self.consensus_method = method
+        if set_consensus:
+            self.logger.info("Setting consensus spectra")
+            self.consensus = cons_spectra
+            self.consensus_method = method
+        
         self.logger.info("Calculating consensus spectra done")
 
         return self.consensus
@@ -1495,6 +1588,15 @@ class SpectraRegion():
                     
 
     def __make_de_res_key(self, clusters0, clusters1):
+        """Generates the storage key for two sets of clusters
+
+        Args:
+            clusters0 (list): list of cluster ids 1
+            clusters1 (list): list of cluster ids 2
+
+        Returns:
+            tuple: tuple of both sorted cluster ids, as tuple
+        """
 
         return (tuple(sorted(clusters0)), tuple(sorted(clusters1)))
         
@@ -1505,7 +1607,7 @@ class SpectraRegion():
         self.de_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
-        import regex as re
+        
         def run(cmd):
             print(" ".join(cmd))
             proc = subprocess.Popen(cmd,

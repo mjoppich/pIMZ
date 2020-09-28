@@ -65,6 +65,9 @@ class CombinedSpectra():
         self.consensus_similarity_matrix = None
         self.region_cluster2cluster = None
 
+        self.region_array_scaled = {}
+        self.de_results_all = defaultdict(lambda: dict())
+
         self.logger = None
         self.__setlogger()
 
@@ -154,27 +157,104 @@ class CombinedSpectra():
 
         self.region_cluster2cluster = region2cluster
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True):
+    def check_scaled(self):
+        hasToReprocess = False
+        for regionName in self.regions:
+            if not regionName in self.region_array_scaled:
+                hasToReprocess = True
+                break
+
+        if hasToReprocess:
+            self.logger.info("Calculating internormed regions")
+            self.get_internormed_regions()
+
+
+    def mass_intensity(self, masses, regions=None, scaled=False):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
-        region2segments = {}
+        if scaled:
+            self.check_scaled()
+
         for regionName in self.regions:
+
+            if not regions is None and not regionName in regions:
+                continue
 
             cregion = self.regions[regionName]
 
-            image = np.zeros((cregion.region_array.shape[0], cregion.region_array.shape[1]))
+            cluster2coords = cregion.getCoordsForSegmented()
+
+            if not scaled:
+                dataArray = cregion.region_array
+            else:
+                dataArray = self.region_array_scaled[regionName]
 
             for mass in masses:
                 
                 bestExMassForMass, bestExMassIdx = cregion._get_exmass_for_mass(mass)
                 self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
-                for i in range(cregion.region_array.shape[0]):
-                    for j in range(cregion.region_array.shape[1]):
+                clusterIntensities = defaultdict(list)
 
-                        image[i,j] += cregion.region_array[i,j,bestExMassIdx]
+                for clusterid in cluster2coords:
+                    for coord in cluster2coords[clusterid]:
+                        intValue = dataArray[coord[0], coord[1], bestExMassIdx]
+                        clusterIntensities[clusterid].append(intValue)
+
+
+                clusterVec = []
+                intensityVec = []
+                massVec = []
+                specIdxVec = []
+                for x in clusterIntensities:
+                    
+                    elems = clusterIntensities[x]
+                    specIdxVec += [i for i in range(0, len(elems))]
+
+                    clusterVec += ["Cluster " + str(x)] * len(elems)
+                    intensityVec += elems
+                    massVec += [mass] * len(elems)
+                        
+                dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
+                sns.boxplot(data=dfObj, x="cluster", y="intensity")
+                plt.xticks(rotation=90)
+                plt.title("Intensities for Region {}".format(regionName))
+                plt.show()
+                plt.close()
+
+
+
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False):
+
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+        if scaled:
+            self.check_scaled()
+
+        region2segments = {}
+        for regionName in self.regions:
+
+            cregion = self.regions[regionName]
+
+            if scaled == False:
+                dataArray = self.regions[regionName].region_array
+            else:
+                dataArray = self.region_array_scaled[regionName]
+
+            image = np.zeros((dataArray.shape[0], dataArray.shape[1]))
+
+            for mass in masses:
+                
+                bestExMassForMass, bestExMassIdx = cregion._get_exmass_for_mass(mass)
+                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+                for i in range(dataArray.shape[0]):
+                    for j in range(dataArray.shape[1]):
+
+                        image[i,j] += dataArray[i,j,bestExMassIdx]
 
 
             if log:
@@ -331,7 +411,7 @@ class CombinedSpectra():
 
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
-    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}):
+    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True):
 
         assert(region0 in self.regions)
         assert(region1 in self.regions)
@@ -353,11 +433,15 @@ class CombinedSpectra():
         cluster2coords_1 = self.regions[region1].getCoordsForSegmented()
         assert(all([x in cluster2coords_1 for x in clusters1]))
 
+        if scaled:
+            self.check_scaled()
+
         self.logger.info("DE data for case: {} {}".format(region0, clusters0))
         self.logger.info("DE data for control: {} {}".format(region1, clusters1))
         print("Running {} {} against {} {}".format(region0, clusters0,region1, clusters1))
 
-        de_results_all = defaultdict(lambda: dict())
+        if self.de_results_all is None:
+            self.de_results_all = defaultdict(lambda: dict())
 
         resKey = self.__make_de_res_key(region0, clusters0, region1, clusters1)
         
@@ -377,7 +461,13 @@ class CombinedSpectra():
                 pxl_name = "{}__{}__{}".format(region0, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
                 sampleVec.append(pxl_name)
                 conditionVec.append(0)
-                exprData[pxl_name] = self.regions[region0].region_array[pxl[0], pxl[1], :]#.astype('int')
+
+                if scaled:
+                    dataArray = self.region_array_scaled[region0]
+                else:
+                    dataArray = self.regions[region0].region_array
+
+                exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
 
 
         for clus in clusters1:
@@ -388,7 +478,13 @@ class CombinedSpectra():
                 pxl_name = "{}__{}__{}".format(region1, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
                 sampleVec.append(pxl_name)
                 conditionVec.append(1)
-                exprData[pxl_name] = self.regions[region1].region_array[pxl[0], pxl[1], :]#.astype('int')
+
+                if scaled:
+                    dataArray = self.region_array_scaled[region1]
+                else:
+                    dataArray = self.regions[region1].region_array
+
+                exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
 
 
         self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
@@ -443,20 +539,48 @@ class CombinedSpectra():
                     )
 
                 
-                de_results_all[testMethod][resKey] = test.summary()
+                self.de_results_all[testMethod][resKey] = test.summary()
                 self.logger.info("DE-test ({}) finished. Results available: {}".format(testMethod, resKey))
 
         deresDFs = defaultdict(lambda: dict())
 
-        for test in de_results_all:
-            for rkey in de_results_all[test]:
+        for test in self.de_results_all:
+            for rkey in self.de_results_all[test]:
 
-                deresDFs[test][rkey] = self.deres_to_df(de_results_all[test][rkey], rkey, protWeights)
+                deresDFs[test][rkey] = self.deres_to_df(self.de_results_all[test][rkey], rkey, protWeights, scaled=scaled)
 
 
         return deresDFs, exprData, pData
 
-    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+
+    def list_de_results(self):
+        
+        allDERes = []
+        for x in self.de_results_all:
+            for y in self.de_results_all[x]:
+                allDERes.append((x,y))
+
+        return allDERes
+
+    def get_spectra_matrix(self, region_array, segments, cluster2coords):
+
+        relPixels = []
+        for x in segments:
+            relPixels += cluster2coords.get(x, [])
+
+        spectraMatrix = np.zeros((len(relPixels), region_array.shape[2]))
+
+        for pidx, px in enumerate(relPixels):
+            spectraMatrix[pidx, :] = region_array[px[0], px[1], :]
+
+        return spectraMatrix
+
+
+    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5, scaled=True):
+
+
+        if scaled:
+            self.check_scaled()
 
         clusterVec = []
         geneIdentVec = []
@@ -507,9 +631,19 @@ class CombinedSpectra():
 
         self.logger.info("DE result for case {} with {} results (filtered)".format(resKey, fttr.shape))
 
+        if scaled:
+            targetDataArray = self.region_array_scaled[resKey[0]]
+        else:
+            targetDataArray = self.regions[resKey[0]].region_array
 
-        targetSpectraMatrix = self.regions[resKey[0]].get_spectra_matrix(resKey[1])
-        bgSpectraMatrix = self.regions[resKey[2]].get_spectra_matrix(resKey[3])
+        targetSpectraMatrix = self.get_spectra_matrix(targetDataArray, resKey[1], self.regions[resKey[0]].getCoordsForSegmented())
+
+        if scaled:
+            bgDataArray = self.region_array_scaled[resKey[0]]
+        else:
+            bgDataArray = self.regions[resKey[0]].region_array
+
+        bgSpectraMatrix = self.get_spectra_matrix(bgDataArray, resKey[3], self.regions[resKey[2]].getCoordsForSegmented())
 
         self.logger.info("Created matrices with shape {} and {} (target, bg)".format(targetSpectraMatrix.shape, bgSpectraMatrix.shape))
 
@@ -594,3 +728,56 @@ class CombinedSpectra():
         df["median_bg"] = medianExpressionBGVec
 
         return df
+
+    def _fivenumber(self, valuelist):
+        """Creates five number statistics for values in valuelist
+
+        Args:
+            valuelist (list/tuple/np.array (1D)): list of values to use for statistics
+
+        Returns:
+            tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
+        """
+
+        min_ = np.min(valuelist)
+        max_ = np.max(valuelist)
+
+        (quan25_, quan50_, quan75_) = np.quantile(valuelist, [0.25, 0.5, 0.75])
+
+        return (len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_)
+
+
+    def get_internormed_regions(self, method="avg"):
+
+        assert (method in ["avg", "median"])
+
+        allRegionNames = [x for x in self.regions]
+
+        # get reference background spec
+        referenceMedianSpectra = self.regions[allRegionNames[0]].consensus_spectra(method="median", set_consensus=False)
+
+        self.region_array_scaled[allRegionNames[0]] = np.copy(self.regions[allRegionNames[0]].region_array)
+
+        for rIdx, regionName in enumerate(allRegionNames):
+
+            if rIdx == 0:
+                # this is the reference =)
+                continue
+
+            regionElement = self.regions[regionName]
+            regionMedianSpectra = regionElement.consensus_spectra(method="median", set_consensus=False)
+
+            scaledRegionArray = np.array(regionElement.region_array, copy=True)
+
+            bgFoldChanges = referenceMedianSpectra[0] / regionMedianSpectra[0]
+
+            if method == "avg":
+                scaleFactor = np.mean(bgFoldChanges)
+            if method == "median":
+                scaleFactor = np.median(bgFoldChanges)
+
+            self.logger.info("FiveNumber Stats for bgFoldChanges: {}".format(self._fivenumber(bgFoldChanges)))
+
+            scaledRegionArray = scaleFactor * regionElement.region_array
+
+            self.region_array_scaled[regionName] = scaledRegionArray
