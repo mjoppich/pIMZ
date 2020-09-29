@@ -24,7 +24,7 @@ import progressbar
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
-
+import random
 import ms_peak_picker
 
 
@@ -267,20 +267,11 @@ class CombinedSpectra():
 
         if plot:
 
-            fig = plt.figure(figsize=(12, 12))
 
-            grid = ImageGrid(fig, 111,          # as in plt.subplot(111)
-                            nrows_ncols=(1,len(region2segments)),
-                            axes_pad=0.15,
-                            share_all=True,
-                            cbar_location="right",
-                            cbar_mode="single",
-                            cbar_size="7%",
-                            cbar_pad=0.15,
-                            )
+            rows = math.ceil(len(self.regions) / 2)
+            fig, axes = plt.subplots(rows, 2)
+            axes =np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
 
-            # Add data to image grid
-            axes = [ax for ax in grid]
 
             allMin, allMax = 0,0
 
@@ -294,11 +285,9 @@ class CombinedSpectra():
                 heatmap = ax.matshow(region2segments[regionName], vmin=allMin, vmax=allMax)
 
                 # We must be sure to specify the ticks matching our target names
-                ax.set_title(regionName, y=0.1)
+                ax.set_title(regionName, color="w", y=0.1)
 
-
-            ax.cax.colorbar(heatmap)
-            ax.cax.toggle_label(True)
+            fig.colorbar(heatmap, ax=axes[-1])
 
             plt.show()
             plt.close()
@@ -357,21 +346,8 @@ class CombinedSpectra():
                 region2segments[regionName] = showcopy
 
 
-        fig = plt.figure(figsize=(12, 12))
-
-
-        grid = ImageGrid(fig, 111,          # as in plt.subplot(111)
-                        nrows_ncols=(1,len(region2segments)),
-                        axes_pad=0.15,
-                        share_all=True,
-                        cbar_location="right",
-                        cbar_mode="single",
-                        cbar_size="7%",
-                        cbar_pad=0.15,
-                        )
-
-        # Add data to image grid
-        axes = [ax for ax in grid]
+        rows = math.ceil(len(self.regions) / 2)
+        fig, axes = plt.subplots(rows, 2)
 
         valid_vals = set()
         for regionName in region2segments:
@@ -392,6 +368,8 @@ class CombinedSpectra():
             val = val_lookup[x]
             return val
 
+        axes =np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
+
         for didx, regionName in enumerate(region2segments):
             ax = axes[didx]
 
@@ -399,10 +377,9 @@ class CombinedSpectra():
             formatter = plt.FuncFormatter(formatter_func)
 
             # We must be sure to specify the ticks matching our target names
-            ax.set_title(regionName, y=0.1)
+            ax.set_title(regionName, color="w", y=0.1)
 
-        ax.cax.colorbar(im,ticks=positions, format=formatter, spacing='proportional')
-        ax.cax.toggle_label(True)
+        plt.colorbar(im, ax=axes[-1], ticks=positions, format=formatter, spacing='proportional')
 
         plt.show()
         plt.close()
@@ -411,7 +388,7 @@ class CombinedSpectra():
 
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
-    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True):
+    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
 
         assert(region0 in self.regions)
         assert(region1 in self.regions)
@@ -456,16 +433,21 @@ class CombinedSpectra():
             allPixels = cluster2coords_0[clus]
 
             self.logger.info("Processing region {} cluster: {}".format(region0, clus))
+            bar = progressbar.ProgressBar()
 
-            for pxl in allPixels:
+            if scaled:
+                dataArray = self.region_array_scaled[region0]
+            else:
+                dataArray = self.regions[region0].region_array
+
+
+            if sample_max > 0 and len(allPixels) > sample_max:
+                allPixels = random.sample(allPixels, sample_max)
+
+            for pxl in bar(allPixels):
                 pxl_name = "{}__{}__{}".format(region0, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
                 sampleVec.append(pxl_name)
                 conditionVec.append(0)
-
-                if scaled:
-                    dataArray = self.region_array_scaled[region0]
-                else:
-                    dataArray = self.regions[region0].region_array
 
                 exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
 
@@ -474,15 +456,21 @@ class CombinedSpectra():
             self.logger.info("Processing region {} cluster: {}".format(region1, clus))
 
             allPixels = cluster2coords_1[clus]
-            for pxl in allPixels:
+            
+            bar = progressbar.ProgressBar()
+
+            if scaled:
+                dataArray = self.region_array_scaled[region1]
+            else:
+                dataArray = self.regions[region1].region_array
+
+            if sample_max > 0 and len(allPixels) > sample_max:
+                allPixels = random.sample(allPixels, sample_max)
+
+            for pxl in bar(allPixels):
                 pxl_name = "{}__{}__{}".format(region1, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
                 sampleVec.append(pxl_name)
                 conditionVec.append(1)
-
-                if scaled:
-                    dataArray = self.region_array_scaled[region1]
-                else:
-                    dataArray = self.regions[region1].region_array
 
                 exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
 
@@ -547,7 +535,7 @@ class CombinedSpectra():
         for test in self.de_results_all:
             for rkey in self.de_results_all[test]:
 
-                deresDFs[test][rkey] = self.deres_to_df(self.de_results_all[test][rkey], rkey, protWeights, scaled=scaled)
+                deresDFs[test][rkey] = self.deres_to_df(self.de_results_all[test][rkey], rkey, protWeights, keepOnlyProteins=protWeights != None, scaled=scaled)
 
 
         return deresDFs, exprData, pData
@@ -569,6 +557,12 @@ class CombinedSpectra():
             relPixels += cluster2coords.get(x, [])
 
         spectraMatrix = np.zeros((len(relPixels), region_array.shape[2]))
+
+        #print(spectraMatrix.shape)
+        #print(region_array.shape)
+
+        #print(np.min([x[0] for x in relPixels]), np.max([x[0] for x in relPixels]))
+        #print(np.min([x[1] for x in relPixels]), np.max([x[1] for x in relPixels]))
 
         for pidx, px in enumerate(relPixels):
             spectraMatrix[pidx, :] = region_array[px[0], px[1], :]
@@ -639,9 +633,9 @@ class CombinedSpectra():
         targetSpectraMatrix = self.get_spectra_matrix(targetDataArray, resKey[1], self.regions[resKey[0]].getCoordsForSegmented())
 
         if scaled:
-            bgDataArray = self.region_array_scaled[resKey[0]]
+            bgDataArray = self.region_array_scaled[resKey[2]]
         else:
-            bgDataArray = self.regions[resKey[0]].region_array
+            bgDataArray = self.regions[resKey[2]].region_array
 
         bgSpectraMatrix = self.get_spectra_matrix(bgDataArray, resKey[3], self.regions[resKey[2]].getCoordsForSegmented())
 
@@ -654,7 +648,9 @@ class CombinedSpectra():
             ag = geneIDent.split("_")
             massValue = float("{}.{}".format(ag[1], ag[2]))
 
-            foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+            foundProt = []
+            if protWeights != None:
+                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
 
             if keepOnlyProteins and len(foundProt) == 0:
                 continue
@@ -706,8 +702,34 @@ class CombinedSpectra():
                 totalSpectraVec.append(totalSpectra)
                 measuredSpectraVec.append(measuredSpecta)
 
+                avgExpressionBGVec.append(avgExprBG)
+                medianExpressionBGVec.append(medianExprBG)
+                totalSpectraBGVec.append(totalSpectraBG)
+                measuredSpectraBGVec.append(measuredSpectaBG)
+
 
         #requiredColumns = ["gene", "clusterID", "avg_logFC", "p_val_adj", "mean", "num", "anum"]
+        """
+        print("clusterID", len(clusterVec))
+        print("gene_ident", len(geneIdentVec))
+        print("gene_mass", len(massVec))
+        print("gene", len(foundProtVec))
+        print("protein_mass", len(detMassVec))
+        print("avg_logFC", len(lfcVec))
+        print("qvalue", len(qvalVec))
+
+        print("num", len(totalSpectraVec))
+        print("anum", len(measuredSpectraVec))
+        print("mean", len(avgExpressionVec))
+        print("median", len(medianExpressionVec))
+
+        print("num_bg", len(totalSpectraBGVec))
+        print("anum_bg", len(measuredSpectraBGVec))
+        print("mean_bg", len(avgExpressionBGVec))
+        print("median_bg", len(medianExpressionBGVec))
+
+        """
+
         df = pd.DataFrame()
         df["clusterID"] = clusterVec
         df["gene_ident"] = geneIdentVec
@@ -747,7 +769,7 @@ class CombinedSpectra():
         return (len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_)
 
 
-    def get_internormed_regions(self, method="avg"):
+    def get_internormed_regions(self, method="median"):
 
         assert (method in ["avg", "median"])
 
@@ -758,7 +780,10 @@ class CombinedSpectra():
 
         self.region_array_scaled[allRegionNames[0]] = np.copy(self.regions[allRegionNames[0]].region_array)
 
-        for rIdx, regionName in enumerate(allRegionNames):
+
+        fcDict = {}
+        bar = progressbar.ProgressBar()
+        for rIdx, regionName in bar(enumerate(allRegionNames)):
 
             if rIdx == 0:
                 # this is the reference =)
@@ -771,13 +796,29 @@ class CombinedSpectra():
 
             bgFoldChanges = referenceMedianSpectra[0] / regionMedianSpectra[0]
 
+            fcDict["{}_before".format(regionName)] = bgFoldChanges
+
             if method == "avg":
                 scaleFactor = np.mean(bgFoldChanges)
             if method == "median":
                 scaleFactor = np.median(bgFoldChanges)
 
-            self.logger.info("FiveNumber Stats for bgFoldChanges: {}".format(self._fivenumber(bgFoldChanges)))
+            self.logger.info("FiveNumber Stats for bgFoldChanges before: {}".format(self._fivenumber(bgFoldChanges)))
+            self.logger.info("scaleFactor: {}".format(scaleFactor))
 
-            scaledRegionArray = scaleFactor * regionElement.region_array
+            scaledRegionArray = regionElement.region_array * scaleFactor
+
+
+            scaledRegionMedianSpectra = regionElement.consensus_spectra(method="median", set_consensus=False, array=scaledRegionArray)
+            scaledbgFoldChanges = referenceMedianSpectra[0] / scaledRegionMedianSpectra[0]
+            self.logger.info("FiveNumber Stats for scaledbgFoldChanges after: {}".format(self._fivenumber(scaledbgFoldChanges)))
+            fcDict["{}_after".format(regionName)] = scaledbgFoldChanges 
 
             self.region_array_scaled[regionName] = scaledRegionArray
+
+        fig, ax = plt.subplots()
+        ax.boxplot(fcDict.values())
+        ax.set_xticklabels(fcDict.keys())
+        plt.xticks(rotation=90)
+        plt.show()
+        plt.close()

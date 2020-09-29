@@ -374,7 +374,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -397,6 +397,9 @@ class SpectraRegion():
 
         if min_cut_off != None:
             image[image <= min_cut_off] = min_cut_off
+
+        if max_cut_off != None:
+            image[image >= max_cut_off] = max_cut_off
 
         if plot:
             heatmap = plt.matshow(image)
@@ -776,7 +779,7 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
-    def plot_tic(self, masses=None):
+    def plot_tic(self, min_cut_off=None, max_cut_off=None, masses=None, hist=False):
         assert(not self.region_array is None)
 
         showcopy = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
@@ -792,10 +795,21 @@ class SpectraRegion():
                 massIndices.append(idx)
 
         massIndices = sorted(massIndices)
+        allCounts = []
 
         for i in range(0, showcopy.shape[0]):
             for j in range(0, showcopy.shape[1]):
-                showcopy[i,j] = np.sum(self.region_array[i,j, massIndices])
+                pixelcount = np.sum(self.region_array[i,j, massIndices])
+
+                showcopy[i,j] = pixelcount
+                allCounts.append(pixelcount)
+
+
+        if min_cut_off != None:
+            showcopy[showcopy <= min_cut_off] = min_cut_off
+
+        if max_cut_off != None:
+            showcopy[showcopy >= max_cut_off] = max_cut_off
 
 
         fig = plt.figure()
@@ -803,7 +817,25 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
+
+        if hist:
+            fig = plt.figure()
+            plt.hist(allCounts, bins=len(allCounts), cumulative=True, histtype="step")
+            plt.show()
+            plt.close()
+
         return showcopy
+
+
+    def set_null_spectra(self, condition):
+
+        bar = progressbar.Bar()
+
+        for i in bar(range(0, self.region_array.shape[0])):
+            for j in range(0, self.region_array.shape[1]):
+                if condition(self.region_array[i,j, :]):
+
+                    self.region_array[i,j,:] = 0
 
 
     def plot_segments(self, highlight=None):
@@ -830,6 +862,18 @@ class SpectraRegion():
         self.plot_array(fig, showcopy)
         plt.show()
         plt.close()
+
+    def list_segment_counts(self):
+
+        regionCounts = Counter()
+
+        for i in range(0, self.segmented.shape[0]):
+            for j in range(0, self.segmented.shape[1]):
+
+                regionCounts[ self.segmented[i,j] ] += 1
+
+        for region in natsorted([x for x in regionCounts]):
+            print(region, ": ", regionCounts[region])
 
 
     def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=1000):
@@ -884,6 +928,14 @@ class SpectraRegion():
         self.logger.info("Calculating clusters saved")
 
         return self.segmented
+
+    def set_background(self, clusterIDs):
+
+        if not type(clusterIDs) in [tuple, list, set]:
+            clusterIDs = [clusterIDs]
+
+        for clusterID in clusterIDs:
+            self.segmented[ self.segmented == clusterID ] = 0
 
 
     def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4, minIslandSize=10):
@@ -1012,7 +1064,10 @@ class SpectraRegion():
 
         return self.segmented
 
-    def __cons_spectra__avg(self, cluster2coords):
+    def __cons_spectra__avg(self, cluster2coords, array):
+
+        if array is None:
+            array = self.region_array
 
         cons_spectra = {}
         for clusID in cluster2coords:
@@ -1022,13 +1077,13 @@ class SpectraRegion():
             if len(spectraCoords) == 1:
                 coord = spectraCoords[0]
                 # get spectrum, return spectrum
-                avgSpectrum = self.region_array[coord[0], coord[1]]
+                avgSpectrum = array[coord[0], coord[1]]
             else:
 
-                avgSpectrum = np.zeros((1, self.region_array.shape[2]))
+                avgSpectrum = np.zeros((1, array.shape[2]))
 
                 for coord in spectraCoords:
-                    avgSpectrum += self.region_array[coord[0], coord[1]]
+                    avgSpectrum += array[coord[0], coord[1]]
 
                 avgSpectrum = avgSpectrum / len(spectraCoords)
 
@@ -1063,10 +1118,17 @@ class SpectraRegion():
         median_profile = np.array([0.0] * region_array.shape[2])
 
         for i in range(0, region_array.shape[2]):
-
             median_profile[i] = np.median(region_array[:,:,i])
 
-        startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
+        medProfAbove = [x for x in median_profile if x > 0]
+
+        if len(medProfAbove) == 0:
+            self.logger.info("Mostly Zero Median Profile!")
+            startedLog = 0.0
+        else:
+            startedLog = np.quantile(medProfAbove, [0.05])[0]
+
+
         if startedLog == 0:
             startedLog = 0.001
 
@@ -1076,7 +1138,10 @@ class SpectraRegion():
 
         return median_profile
 
-    def __cons_spectra__median(self, cluster2coords):
+    def __cons_spectra__median(self, cluster2coords, array=None):
+
+        if array is None:
+            array = self.region_array
 
         cons_spectra = {}
         for clusID in cluster2coords:
@@ -1086,13 +1151,13 @@ class SpectraRegion():
             if len(spectraCoords) == 1:
                 coord = spectraCoords[0]
                 # get spectrum, return spectrum
-                medianSpectrum = self.region_array[coord[0], coord[1], :]
+                medianSpectrum = array[coord[0], coord[1], :]
             else:
 
-                clusterSpectra = np.zeros((1, len(spectraCoords), self.region_array.shape[2]))
+                clusterSpectra = np.zeros((1, len(spectraCoords), array.shape[2]))
 
                 for cIdx, coord in enumerate(spectraCoords):
-                    clusterSpectra[0, cIdx, :] = self.region_array[coord[0], coord[1], :]
+                    clusterSpectra[0, cIdx, :] = array[coord[0], coord[1], :]
 
                 medianSpectrum = self._get_median_spectrum(clusterSpectra)
 
@@ -1102,7 +1167,12 @@ class SpectraRegion():
 
 
 
-    def consensus_spectra(self, method="avg", set_consensus=True):
+    def consensus_spectra(self, method="avg", set_consensus=True, array=None):
+
+        if array is None:
+            array = self.region_array
+        else:
+            pass#print("Using array argument")
 
         assert(not self.segmented is None)
         assert(method in ["avg", "median"])
@@ -1114,9 +1184,9 @@ class SpectraRegion():
 
         cons_spectra = None
         if method == "avg":
-            cons_spectra = self.__cons_spectra__avg(cluster2coords)
+            cons_spectra = self.__cons_spectra__avg(cluster2coords, array=array)
         elif method == "median":
-            cons_spectra = self.__cons_spectra__median(cluster2coords)
+            cons_spectra = self.__cons_spectra__median(cluster2coords, array=array)
 
 
         if set_consensus:
@@ -1126,7 +1196,7 @@ class SpectraRegion():
         
         self.logger.info("Calculating consensus spectra done")
 
-        return self.consensus
+        return cons_spectra
 
     def mass_dabest(self, masses, background=0):
 
