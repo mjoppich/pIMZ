@@ -45,6 +45,21 @@ import hdbscan
 class IMZMLExtract:
 
     def __init__(self, fname):
+        """Constructs an IMZMLExtract object with the following attributes:
+        -logger (logging.Logger): Reference to the Logger object.
+        -fname (str): Absolute path to the .imzML file.
+        -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object,
+            which opens the two files corresponding to the file name,
+            reads the entire .imzML file and extracts required attributes.
+        -dregions (collections.defaultdict): Enumerated regions mapped to the
+            corresponding list of pixel coordinates.
+        -mzValues (numpy.ndarray): Sequence of m/z values representing the
+            horizontal axis of the desired mass spectrum.
+        -specStart (int): Strating position of the spectra.
+
+        Args:
+            fname (str): Absolute path to the .imzML file. Must end with .imzML.
+        """
         #fname = "/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML"
 
         self.logger = logging.getLogger('IMZMLExtract')
@@ -80,6 +95,17 @@ class IMZMLExtract:
 
 
     def get_spectrum(self, specid, normalize=False):
+        """Reads the spectrum at specified index and can be normalized by
+            dividing each intensity value by the maximum value observed.
+
+        Args:
+            specid (int): Index of the desired spectrum in the .imzML file.
+            normalize (bool, optional): [description]. Defaults to False.
+
+        Returns:
+            numpy.ndarray: Sequence of intensity values corresponding to
+            mz_array of given specid.
+        """
         spectra1 = self.parser.getspectrum(specid)
         spectra1 = spectra1[1]
 
@@ -89,7 +115,15 @@ class IMZMLExtract:
         return spectra1
 
     def compare_spectra(self, specid1, specid2):
+        """Calculates cosine similarity between two desired spectra.
 
+        Args:
+            specid1 (int): Index of the first desired spectrum in the .imzML file.
+            specid2 (int): Index of the second desired spectrum in the .imzML file.
+
+        Returns:
+            float: Cosine similarity between two desired spectra.
+        """
         spectra1 = self.parser.getspectrum(specid1)[1]
         spectra2 = self.parser.getspectrum(specid2)[1]
 
@@ -112,7 +146,16 @@ class IMZMLExtract:
 
 
     def get_mz_index(self, value, threshold=None):
+        """Returns the closest existing m/z to the given mass value.
 
+        Args:
+            value (float): Mass for which the m/z is needed.
+            threshold (float, optional): Allowed maximum distance of the discovered m/z index.
+            Defaults to None.
+
+        Returns:
+            int: m/z index of the given mass.
+        """
         curIdxDist = 1000000
         curIdx = None
 
@@ -126,7 +169,17 @@ class IMZMLExtract:
         return curIdx
 
     def get_region_indices(self, regionid):
+        """Returns a dictionary with the location of the region specific pixels
+            mapped to their spectral id in the .imzML file.
 
+        Args:
+            regionid (int): Id of the desired region in the .imzML file,
+            as specified in dregions dictionary.
+
+        Returns:
+            dict: Dictionary of spatial (x, y, 1) coordinates to the index of the
+            corresponding spectrum in the .imzML file.
+        """
         if not regionid in self.dregions:
             return None
         
@@ -145,7 +198,17 @@ class IMZMLExtract:
         return outindices
 
     def get_region_spectra(self, regionid):
+        """Returns a dictionary with the location of the region specific pixels
+            mapped to their spectra in the .imzML file.
 
+        Args:
+            regionid (int): Id of the desired region in the .imzML file,
+            as specified in dregions dictionary.
+
+        Returns:
+            dict: Dictionary of spatial (x, y, 1) coordinates to the each
+            corresponding spectrum in the .imzML file.
+        """
         if not regionid in self.dregions:
             return None
         
@@ -170,7 +233,15 @@ class IMZMLExtract:
 
 
     def get_avg_region_spectrum(self, regionid):
+        """Returns an average spectrum for spectra that belong to a given region.
 
+        Args:
+            regionid (int): Id of the desired region in the .imzML file,
+            as specified in dregions dictionary.
+
+        Returns:
+            numpy.ndarray: Sequence of intensity values of the average spectrum.
+        """
         region_spects = self.get_region_array(regionid)
 
         return self.get_avg_spectrum(region_spects)
@@ -181,10 +252,12 @@ class IMZMLExtract:
         The average spectrum is the mean intensity value for all m/z values
 
         Args:
-            region_spects (np.array): 2D array of spectra
+            region_spects (np.array): Three dimensional array (x, y, s),
+            where x and y are positional coordinates and s corresponds to the
+            spectrum.
 
         Returns:
-            np.array: average spectrium
+            np.array: Sequence of intensity values of the average spectrum.
         """
 
         avgarray = np.zeros((1, region_spects.shape[2]))
@@ -243,7 +316,7 @@ class IMZMLExtract:
             regionid ([type]): The region id as seen in the regions overview
 
         Returns:
-            [tuple]: x,y dimensions of regioin
+            [tuple]: x,y dimensions of regioin. Exclusive ends.
         """
 
         rr = self.get_region_range(regionid)
@@ -265,7 +338,18 @@ class IMZMLExtract:
 
 
     def __get_peaks(self, spectrum, window):
+        """Calculates m/z values that correspond to the peaks with at least
+        five times higher intensity as median value within the sliding window
+        and extra test within an epsilon hull of the expectant.
 
+
+        Args:
+            spectrum (numpy.ndarray): Sequence of intensity values of the spectrum.
+            window (int): Size of the sliding windowing within the peaks should be compared.
+
+        Returns:
+            list: sorted m/z indexes that were selected as peaks.
+        """
         peaks=set()
 
         for i in range(0, len(spectrum)-window):
@@ -310,7 +394,17 @@ class IMZMLExtract:
 
 
     def get_peaks_fast(self, spectrum, window):
+        """Calculates m/z values that correspond to the peaks with at least
+        twice as high intensity as minimum value within the sliding window.
 
+
+        Args:
+            spectrum (numpy.ndarray): Sequence of intensity values of the spectrum.
+            window (int): Size of the sliding windowing within the peaks should be compared.
+
+        Returns:
+            list: sorted m/z indexes that were selected as peaks.
+        """
         peaks=set()
 
         for i in range(window, len(spectrum)-window):
