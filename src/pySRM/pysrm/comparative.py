@@ -270,7 +270,8 @@ class CombinedSpectra():
 
             rows = math.ceil(len(self.regions) / 2)
             fig, axes = plt.subplots(rows, 2)
-            axes =np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
+            if len(axes.shape) > 1:
+                axes = np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
 
 
             allMin, allMax = 0,0
@@ -368,7 +369,9 @@ class CombinedSpectra():
             val = val_lookup[x]
             return val
 
-        axes =np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
+
+        if len(axes.shape) > 1:
+            axes = np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
 
         for didx, regionName in enumerate(region2segments):
             ax = axes[didx]
