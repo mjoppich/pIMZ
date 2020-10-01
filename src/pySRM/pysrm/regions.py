@@ -261,10 +261,25 @@ class SpectraRegion():
 
 
 
-    def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None):
+    def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None):
+
+        cluster2celltype = None# { str(x): str(x) for x in np.unique(self.segmented)}
+        if ctpred != None:
+            with open(ctpred, 'r') as fin:
+                cluster2celltype = {}
+                for line in fin:
+                    line = line.strip().split("\t")
+                    clusterID = line[0]
+                    clusterType = line[1]
+
+                    cluster2celltype[clusterID] = clusterType
+
+            for x in cluster2celltype:
+                self.logger.info("Cell-type assigned: {} -> {}".format(x, cluster2celltype[x]))
+
+
 
         cluster2coords = self.getCoordsForSegmented()
-
         os.makedirs(folder, exist_ok=True)
         segmentsPath = prefix + "." + str(regionID) + ".upgma.png"
 
@@ -311,6 +326,12 @@ class SpectraRegion():
                 "type_det": [clusterType],
                 "coordinates": [[x[1], x[0]] for x in cluster2coords[cluster]],
             }
+
+            if cluster2celltype != None:
+                if str(cluster) in cluster2celltype:
+                    regionInfo["type_det"].append( cluster2celltype[str(cluster)] )
+                else:
+                    self.logger.info("No cell type info for cluster: '{}'".format(cluster))
 
             if cluster in cluster2deData:
                 regionInfo["de_data"] = cluster2deData[cluster]
@@ -1605,7 +1626,8 @@ class SpectraRegion():
 
 
     def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
-        """[summary]
+        """
+        Finds all marker proteins for a specific clustering.
 
         Args:
             protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
@@ -1975,10 +1997,32 @@ class SpectraRegion():
 
 
 class ProteinWeights():
+    """This class serves as lookup class for protein<->mass lookups for DE comparisons of IMS analyses.
+    """
 
-    def __init__(self, filename):
+    def __set_logger(self):
+        self.logger = logging.getLogger('ProteinWeights')
+        self.logger.setLevel(logging.INFO)
 
-        self.protein2mass = {}
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setLevel(logging.INFO)
+
+        self.logger.addHandler(consoleHandler)
+
+        formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+        consoleHandler.setFormatter(formatter)
+
+    def __init__(self, filename, max_mass):
+        """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
+
+        Args:
+            filename (str): File with at least the following columns: protein_id	gene_symbol	mol_weight_kd	mol_weight
+            max_mass (float): maximal mass to consider. Masses above threshold will be discarded.
+        """
+
+        self.__set_logger()
+
+        self.protein2mass = defaultdict(set)
         self.protein_name2id = {}
 
 
@@ -1997,31 +2041,138 @@ class ProteinWeights():
 
                 #protein_id	gene_symbol	mol_weight_kd	mol_weight
 
-                if len(line) != 4:
+                if len(line) < 4:
                     continue
 
                 proteinIDs = line[col2idx["protein_id"]].split(";")
                 proteinNames = line[col2idx["gene_symbol"]].split(";")
                 molWeight = float(line[col2idx["mol_weight"]])
 
+                if max_mass >= 0 and molWeight > max_mass:
+                    continue    
 
                 if len(proteinNames) == 0:
                     proteinNames = proteinIDs
 
                 for proteinName in proteinNames:
-                    self.protein2mass[proteinName] = molWeight
+                    self.protein2mass[proteinName].add(molWeight)
                     self.protein_name2id[proteinName] = proteinIDs
 
+            allMasses = self.get_all_masses()
+
+            self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+
+    def get_all_masses(self):
+        """Returns all masses contained in the lookup-dict
+
+        Returns:
+            set: set of all masses used by this object
+        """
+        allMasses = set()
+        for x in self.protein2mass:
+            for mass in self.protein2mass[x]:
+                allMasses.add(mass)
+
+        return allMasses
+
+    def get_mass_to_protein(self):
+        """Returns a dictionary of a mass to proteins with this mass. Remember that floats can be quite exact: no direct comparisons!
+
+        Returns:
+            dict: dictionary mass => set of proteins
+        """
+
+        mass2prot = defaultdict(set)
+        for x in self.protein2mass:
+            for mass in self.protein2mass[x]:
+                mass2prot[mass].add(x)
+
+        return mass2prot
+
+    def print_collisions(self, maxdist=2.0, print_proteins=False):
+        """Prints number of proteins with collision, as well as mean and median number of collisions.
+
+        For each recorded mass it is checked how many other proteins are in the (mass-maxdist, mass+maxdist) range.
+
+        Args:
+            maxdist (float, optional): Mass range in order to still accept a protein. Defaults to 2.
+            print_proteins (bool, optional): If True, all collision proteins are printed. Defaults to False.
+        """
+
+        allProts = [x for x in self.protein2mass]
+        mass2prot = self.get_mass_to_protein()            
+        
+        protsWithCollision = Counter()
+        sortedMasses = sorted([x for x in mass2prot])
+
+        for mass in sortedMasses:
+
+            lmass, umass = mass-maxdist, mass+maxdist
+            currentProts = mass2prot[mass]
+
+            massProts = set()
+
+            for tmass in sortedMasses:
+                if lmass <= tmass <= umass:
+                    massProts = massProts.union(mass2prot[tmass])
+
+                if umass < tmass:
+                    break
+
+            if len(currentProts) == 1:
+                for prot in currentProts:
+                    if prot in massProts:
+                        massProts.remove(prot)
+
+            if len(massProts) > 0:
+                for prot in massProts:
+                    protsWithCollision[prot] += 1
+
+        self.logger.info("         Number of total proteins: {}".format(len(self.protein2mass)))
+        self.logger.info("           Number of total masses: {}".format(len(mass2prot)))
+        self.logger.info("Number of proteins with collision: {}".format(len(protsWithCollision)))
+        self.logger.info("        Mean Number of Collidings: {}".format(np.mean([protsWithCollision[x] for x in protsWithCollision])))
+        self.logger.info("      Median Number of Collidings: {}".format(np.median([protsWithCollision[x] for x in protsWithCollision])))
+
+        if print_proteins:
+            self.logger.info("Proteins with collision: {}".format([x for x in protsWithCollision]))
+        else:
+            self.logger.info("Proteins with collision: {}".format(protsWithCollision.most_common(10)))
+        
+
     def get_protein_from_mass(self, mass, maxdist=2):
+        """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
+
+        Args:
+            mass (float): mass to search for
+            maxdist (float, optional): allowed offset for lookup. Defaults to 2.
+
+        Returns:
+            list: list of all (protein, weight) tuple which have a protein in the given mass range
+        """
 
         possibleMatches = []
 
         for protein in self.protein2mass:
-            protMass = self.protein2mass[protein]
-            if abs(mass-protMass) < maxdist:
-                possibleMatches.append((protein, protMass))
+            protMasses = self.protein2mass[protein]
+
+            for protMass in protMasses:
+                if abs(mass-protMass) < maxdist:
+                    possibleMatches.append((protein, protMass))
 
         return possibleMatches
+
+    def get_masses_for_protein(self, protein):
+        """Returns all recorded masses for a given protein. Return None if protein not found
+
+        Args:
+            protein (str): protein to search for in database (exact matching)
+
+        Returns:
+            set: set of masses for protein
+        """
+
+        return self.protein2mass.get(protein, None)
 
 
 
