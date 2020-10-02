@@ -278,23 +278,31 @@ class SpectraRegion():
                 self.logger.info("Cell-type assigned: {} -> {}".format(x, cluster2celltype[x]))
 
 
-
+        # segments images
         cluster2coords = self.getCoordsForSegmented()
         os.makedirs(folder, exist_ok=True)
-        segmentsPath = prefix + "." + str(regionID) + ".upgma.png"
-
-        # plot image
-        cmap = plt.cm.jet
+        segmentsPath = os.path.join(folder, prefix + "." + str(regionID) + ".clustering.png")
+        self.logger.info("Segment Image: {}".format(segmentsPath))
+        cmap = plt.cm.viridis
         norm = plt.Normalize(vmin=self.segmented.min(), vmax=self.segmented.max())
         image = cmap(norm(self.segmented))
-        plt.imsave(os.path.join(folder, segmentsPath), image)
+        plt.imsave(segmentsPath, image)
 
-        if pathPrefix != None:
-            segmentsPath = os.path.join(pathPrefix, segmentsPath)
+
+        # segment matrix
+        
+        matrixPath = os.path.abspath(os.path.join(folder, prefix + "." + str(regionID) + ".matrix.npy"))
+        self.logger.info("Segment Matrix: {}".format(matrixPath))
+        with open(matrixPath, "wb") as fout:
+            np.save(fout, self.segmented)
+
+
 
         cluster2deData = {}
         # write DE data
         if protWeights != None:
+
+            self.logger.info("Starting Marker Proteins Analysis")
 
             if not nodf:
                 markerGenes = self.find_all_markers(protWeights, use_methods=["ttest"], includeBackground=True)
@@ -344,7 +352,8 @@ class SpectraRegion():
         infoDict = {
             "region": regionID,
             "path_upgma": segmentsPath,
-            "info": regionInfos
+            "info": regionInfos,
+            "segment_file": matrixPath
         }
 
 
@@ -1514,6 +1523,7 @@ class SpectraRegion():
         adjPvalCol = "qval"
 
         ttrColNames = list(ttr.columns.values)
+        self.logger.info("DF column names {}".format(ttrColNames))
 
 
         if log2fcCol in ttrColNames and massCol in ttrColNames and adjPvalCol in ttrColNames:
@@ -1549,7 +1559,9 @@ class SpectraRegion():
             ag = geneIDent.split("_")
             massValue = float("{}.{}".format(ag[1], ag[2]))
 
-            foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+            foundProt = []
+            if protWeights != None:
+                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
 
             if keepOnlyProteins and len(foundProt) == 0:
                 continue
@@ -1569,7 +1581,7 @@ class SpectraRegion():
                     
                     prot,protMass = protMassTuple
             
-                    clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                    clusterVec.append("_".join([str(x) for x in resKey[0]]))
                     geneIdentVec.append(geneIDent)
                     massVec.append(massValue)
                     foundProtVec.append(prot)
@@ -1588,7 +1600,7 @@ class SpectraRegion():
                     measuredSpectraBGVec.append(measuredSpectaBG)
 
             else:
-                clusterVec.append(",".join([str(x) for x in resKey[0]]))
+                clusterVec.append("_".join([str(x) for x in resKey[0]]))
                 geneIdentVec.append(geneIDent)
                 massVec.append(massValue)
                 foundProtVec.append("")
@@ -1600,6 +1612,11 @@ class SpectraRegion():
                 medianExpressionVec.append(medianExpr)
                 totalSpectraVec.append(totalSpectra)
                 measuredSpectraVec.append(measuredSpecta)
+
+                avgExpressionBGVec.append(avgExprBG)
+                medianExpressionBGVec.append(medianExprBG)
+                totalSpectraBGVec.append(totalSpectraBG)
+                measuredSpectraBGVec.append(measuredSpectaBG)
 
 
         #requiredColumns = ["gene", "clusterID", "avg_logFC", "p_val_adj", "mean", "num", "anum"]
@@ -1781,7 +1798,7 @@ class SpectraRegion():
 
 
 
-    def find_markers(self, clusters0, clusters1=None, out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
+    def find_markers(self, clusters0, clusters1=None, out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}, sample_max=-1):
 
         cluster2coords = self.getCoordsForSegmented()
 
@@ -1821,7 +1838,11 @@ class SpectraRegion():
 
             #self.logger.info("Processing cluster: {}".format(clus))
 
-            for pxl in allPixels:
+            if sample_max > 0 and len(allPixels) > sample_max:
+                allPixels = random.sample(allPixels, sample_max)
+
+            bar = progressbar.ProgressBar()
+            for pxl in bar(allPixels):
 
                 pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
 
@@ -1835,7 +1856,12 @@ class SpectraRegion():
             #self.logger.info("Processing cluster: {}".format(clus))
 
             allPixels = cluster2coords[clus]
-            for pxl in allPixels:
+
+            if sample_max > 0 and len(allPixels) > sample_max:
+                allPixels = random.sample(allPixels, sample_max)
+            
+            bar = progressbar.ProgressBar()
+            for pxl in bar(allPixels):
 
                 pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
 
