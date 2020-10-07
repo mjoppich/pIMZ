@@ -1,8 +1,10 @@
-==================================================================
+======================================================================
 pIMZ:  an integrative framework for imaging mass spectrometry analysis
-==================================================================
+======================================================================
 
 No idea what this framework does ...
+
+... it's not yet ready. But once it is, you will get to know a lot more here!
 
 This is a "long description" file for the package that you are creating.
 If you submit your package to PyPi, this text will be presented on the `public page <http://pypi.python.org/pypi/python_package_boilerplate>`_ of your package.

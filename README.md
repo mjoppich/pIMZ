@@ -1,34 +1,14 @@
 pIMZ
 ==========================
 
-This is boilerplate code for your project, generated using the `python_boilerplate` paster template. It provides simple starting points for using some of the popular best-practices:
-
-  * Proper [setuptools](https://pypi.python.org/pypi/setuptools)-compatible package layout.
-  * [py.test](http://pytest.org/)-based tests.
-  * [buildout](http://www.buildout.org/) for managing development tools or developing multiple-package projects
-  * Usage of the [Travis-CI](https://travis-ci.org/) continuous integration service.
-
-Preparation
------------
-
-
-**If you decided in favor of Option 2**:
-
-  - Create a version control repository under the project root (i.e. in this directory). The Git/Github example above applies, except for the first `cd` line.
-  - Drop `.travis.yml` from the `src/pIMZ` directory (leave the one in the project root).
-
-
-Once you are done with the preparation, you can start developing by running `python bootstrap.py` and `buildout`. See next section.
+This package is still in development. It's not (yet) intended to be used and the pip install may go totally wrong!
 
 Common development tasks
 ------------------------
 
   * **Setting up the development environment before first use**
   
-        > python bootstrap.py
-        > export PATH=$PWD/bin:$PATH  
-            (in Windows: set PATH=%CD%\bin;%PATH%)
-        > buildout
+        > python3 setup.py build
        
   * **Running tests**  
     Tests are kept in the `tests` directory and are run using
@@ -43,8 +23,6 @@ Common development tasks
         
     (See [this guide](http://sphinx-doc.org/tutorial.html) for more details)
     
-  * **Specifying dependencies for your package**  
-    Edit the `install_requires` line in `src/pIMZ/setup.py` by listing all the dependent packages.
 
   * **Producing executable scripts**  
     Edit the `console_scripts` section of `entry_points` in `src/pIMZ/setup.py`. Then run `buildout`. The corresponding scripts will be created in the `bin/` subdirectory. Note that the boilerplate project already contains one dummy script as an example.
