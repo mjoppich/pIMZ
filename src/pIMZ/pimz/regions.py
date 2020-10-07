@@ -2243,8 +2243,8 @@ class ProteinWeights():
 
             selProtDiff = min(protDiffs)
 
-            #if selProtDiff > 100:
-            #    print(x,selMassDiff, selfMasses, otherMasses)
+            if selProtDiff > 500:
+                print(x,selMassDiff, selfMasses, otherMasses)
 
             dists += [selProtDiff]
 

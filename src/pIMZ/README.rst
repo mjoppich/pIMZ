@@ -1,8 +1,8 @@
 ==================================================================
-pySRM: Statistical Region Merging for python3 (C++ backend)
+pIMZ:  an integrative framework for imaging mass spectrometry analysis
 ==================================================================
 
-TODO: Modify the whole file as necessary.
+No idea what this framework does ...
 
 This is a "long description" file for the package that you are creating.
 If you submit your package to PyPi, this text will be presented on the `public page <http://pypi.python.org/pypi/python_package_boilerplate>`_ of your package.
@@ -14,7 +14,7 @@ Installation
 
 The easiest way to install most Python packages is via ``easy_install`` or ``pip``::
 
-    $ easy_install pySRM
+    $ easy_install pIMZ
 
 Usage
 -----

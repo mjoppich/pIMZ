@@ -24,20 +24,23 @@ class PyTest(TestCommand):
         sys.exit(pytest.main(self.test_args))
 
 
-version = "0.1"
+version = "1.0"
 
-setup(name="pySRM",
+setup(name="pIMZ",
       version=version,
-      description="Statistical Region Merging for python3 (C++ backend)",
+      description="pIMZ: an integrative framework for imaging mass spectrometry analysis",
       long_description=open("README.rst").read(),
       classifiers=[ # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 1 - Planning',
-        'Programming Language :: Python'
+        'Development Status :: 3 - Alpha',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Topic :: Scientific/Engineering :: Bio-Informatics',
+        'Topic :: Scientific/Engineering :: Medical Science Apps.'
       ],
-      keywords="image-segmentation srm", # Separate with spaces
+      keywords="IMS MSI imaging mass-spectrometry interactive integrative", # Separate with spaces
       author="Markus Joppich",
       author_email="pypi@mjoppich.net",
-      url="https://github.com/mjoppich/pySRM",
+      url="https://github.com/mjoppich/pIMZ",
       license="MIT",
       packages=find_packages(exclude=['examples', 'tests']),
       include_package_data=True,
@@ -46,10 +49,10 @@ setup(name="pySRM",
       cmdclass={'test': PyTest},
       
       # TODO: List of packages that this one depends upon:   
-      install_requires=['numpy'],
+      install_requires=['numpy', 'pandas', 'ctypes', 'globus_sdk', 'progressbar', 'anndata', 'diffxpy', 'scipy', 'dill', 'pathos', 'pyimzml', 'natsort', 'seaborn', 'matplotlib', 'dabest', 'imageio', 'Pillow'],
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
         'console_scripts': 
-            ['pySRM=pysrm:main']
+            []
       }
 )
