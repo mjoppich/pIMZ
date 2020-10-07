@@ -33,7 +33,7 @@ import glob
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
-libfile = glob.glob(os.path.join(baseFolder, "libPIMZ*.so"))[0]
+libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
 lib = ctypes.cdll.LoadLibrary(libfile)
 
 

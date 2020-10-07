@@ -3,9 +3,9 @@
 /parts/
 /.installed.cfg
 
-src/cIMZ/build
-src/cIMZ/lib
-src/cIMZ/bin
+cIMZ/build
+cIMZ/lib
+cIMZ/bin
 
 .ipynb_checkpoints
 .vscode

@@ -32,12 +32,13 @@ srm_sources = ['cimz/src/srm.cpp']
 
 compileArgs = ["-std=c++1z", "-Wall", "-fopenmp", "-fPIC", "-std=gnu++17",'-O3']
 
-libPIMZ=Extension('libPIMZ',
+libPIMZ=Extension('pIMZ.libPIMZ',
                       sources=srm_sources+imageregion_sources+segment_sources,
                       language='c++',
-                      libraries=['z'],
+                      libraries=['z', 'gomp'],
                       extra_compile_args=compileArgs,
-                      extra_objects=[]
+                      extra_objects=[],
+                      
                       )
 
 version = "1.0"
