@@ -29,7 +29,6 @@ import ms_peak_picker
 
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
-lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
 
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import squareform, pdist

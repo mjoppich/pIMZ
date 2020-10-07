@@ -88,7 +88,7 @@ class SpectraRegion():
     def loadLib(self):
         """Prepares everything for the usage of the C++ library
         """
-        self.lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
+        self.lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cIMZ/lib/libSRM.so')
 
         self.lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
         self.lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
@@ -2038,12 +2038,12 @@ class ProteinWeights():
         formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
         consoleHandler.setFormatter(formatter)
 
-    def __init__(self, filename, max_mass):
+    def __init__(self, filename, max_mass=-1):
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
             filename (str): File with at least the following columns: protein_id	gene_symbol	mol_weight_kd	mol_weight
-            max_mass (float): maximal mass to consider. Masses above threshold will be discarded.
+            max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1 .
         """
 
         self.__set_logger()
@@ -2199,6 +2199,72 @@ class ProteinWeights():
         """
 
         return self.protein2mass.get(protein, None)
+
+
+    def compare_masses(self, pw):
+        """For each protein contained in both PW objects, and for each protein mass, the distance to the best match in the other PW object is calculated.
+
+        This is meant to provide a measure of how accuracte the theoretical calculation of m/z // Da is.
+
+        Args:
+            pw (ProteinWeights): The ProteinWeights object to compare to.
+        """
+
+        dists = []
+        consideredMasses = 0
+
+        for x in self.protein2mass:
+
+            lookKey = x.upper()
+            selfMasses = self.protein2mass[x]
+
+            otherMasses = None
+            if lookKey in pw.protein2mass:
+                otherMasses = pw.protein2mass[lookKey]
+            elif x in pw.protein2mass:
+                otherMasses = pw.protein2mass[x]
+
+            if otherMasses == None:
+                continue
+
+            selfMasses = sorted(selfMasses)
+            otherMasses = sorted(otherMasses)
+
+            protDiffs = []
+            for smass in selfMasses:
+
+                sMassDiffs = []
+                for omass in otherMasses:
+                    sMassDiffs.append(abs(smass-omass))
+
+                selMassDiff = min(sMassDiffs)
+                protDiffs.append(selMassDiff)
+
+
+            selProtDiff = min(protDiffs)
+
+            #if selProtDiff > 100:
+            #    print(x,selMassDiff, selfMasses, otherMasses)
+
+            dists += [selProtDiff]
+
+            if len(protDiffs) > 0:
+                consideredMasses += 1
+
+        print("Total number of considered masses: {}".format(consideredMasses))
+        print("Total number of diffs > 100: {}".format(len([x for x in dists if x > 100])))
+        print("Total number of diffs > 5  : {}".format(len([x for x in dists if x > 5])))
+        print("Total number of diffs > 1  : {}".format(len([x for x in dists if x > 1])))
+        print("Total number of diffs <= 1  : {}".format(len([x for x in dists if x <= 1])))
+
+        print("{}\t{}\t{}\t{}\t{}\t{}".format(
+            consideredMasses, len(dists), min(dists), np.median(dists), np.mean(dists), max(dists)
+        ))
+
+            
+
+
+
 
 
 

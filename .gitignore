@@ -9,3 +9,8 @@ src/cIMZ/bin
 
 .ipynb_checkpoints
 .vscode
+
+examples/aorta3d
+examples/deresults
+examples/MetaData
+examples/slided_test
