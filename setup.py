@@ -7,8 +7,8 @@ configured setup.cfg, this will check both xxx_test modules and docstrings.
 Copyright 2019, Markus Joppich.
 Licensed under MIT.
 '''
-import sys
-from setuptools import setup, find_packages
+import sys, os
+from setuptools import setup, find_packages, Extension
 from setuptools.command.test import test as TestCommand
 
 # This is a plug-in for setuptools that will invoke py.test
@@ -23,6 +23,22 @@ class PyTest(TestCommand):
         import pytest  # import here, because outside the required eggs aren't loaded yet
         sys.exit(pytest.main(self.test_args))
 
+ext_lib_path = 'rectangle'
+include_dir = os.path.join(ext_lib_path, 'include')
+
+segment_sources = ['cimz/segment.cpp']
+imageregion_sources = ['cimz/src/imageregion.cpp']
+srm_sources = ['cimz/src/srm.cpp']
+
+compileArgs = ["-std=c++1z", "-Wall", "-fopenmp", "-fPIC", "-std=gnu++17",'-O3']
+
+libPIMZ=Extension('libPIMZ',
+                      sources=srm_sources+imageregion_sources+segment_sources,
+                      language='c++',
+                      libraries=['z'],
+                      extra_compile_args=compileArgs,
+                      extra_objects=[]
+                      )
 
 version = "1.0"
 
@@ -54,5 +70,6 @@ setup(name="pIMZ",
       entry_points={
         'console_scripts': 
             []
-      }
+      },
+      ext_modules=[libPIMZ]
 )

@@ -29,8 +29,14 @@ import ms_peak_picker
 import regex as re
 import random
 
+import glob
+
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
-lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cIMZ/lib/libSRM.so')
+
+libfile = glob.glob(os.path.join(baseFolder, "libPIMZ*.so"))[0]
+lib = ctypes.cdll.LoadLibrary(libfile)
+
+
 
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import squareform, pdist
