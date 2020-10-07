@@ -2,3 +2,10 @@
 /develop-eggs/
 /parts/
 /.installed.cfg
+
+src/cIMZ/build
+src/cIMZ/lib
+src/cIMZ/bin
+
+.ipynb_checkpoints
+.vscode

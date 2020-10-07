@@ -30,7 +30,7 @@ import regex as re
 import random
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
-lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cppSRM/lib/libSRM.so')
+lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cIMZ/lib/libSRM.so')
 
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import squareform, pdist
