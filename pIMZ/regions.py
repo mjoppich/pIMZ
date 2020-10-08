@@ -57,7 +57,7 @@ class SpectraRegion():
 
     @classmethod
     def from_pickle(cls, path):
-        """Loads a SpectraRegion from pickle file
+        """Loads a SpectraRegion from pickle file.
 
         Args:
             path (str): Path to pickle file to load spectra region from.
@@ -73,7 +73,7 @@ class SpectraRegion():
         return obj
 
     def to_pickle(self, path):
-        """Pickles the current object
+        """Pickles the current SpectraRegion object.
 
         Args:
             path (str): Path to save the pickle file in.
@@ -110,11 +110,30 @@ class SpectraRegion():
 
 
     def __init__(self, region_array, idx2mass, name=None):
-        """Initializes a SpectraRegion
+        """Initializes a SpectraRegion object with the following attributes:
+        - lib: C++ library
+        - logger (logging.Logger): Reference to the Logger object.
+        - name (str): Name of the region. Defaults to None.
+        - region_array (numpy.array): Array of spectra.
+        - idx2mass (numpy.array): m/z values.
+        - spectra_similarity (numpy.array): Pairwise similarity matrix. Initialized with None.
+        - dist_pixel (numpy.array): Pairwise coordinate distance matrix (2-norm). Initialized with None.
+        - idx2pixel (dict): Dictionary of enumerated pixels to their coordinates.
+        - pixel2idx (dict): Inverted idx2pixel dict. Dictionary of coordinates mapped to pixel numbers. Initialized with None.
+        - elem_matrix (array): A list of spectra with positional id correspond to the pixel number. Shape (n_samples, n_features). Initialized with None.
+        - dimred_elem_matrix (array): Embedding of the elem_matrix in low-dimensional space. Shape (n_samples, n_components). Initialized with None.
+        - dimred_labels (list): A list of HDBSCAN labels. Initialized with None.
+        - segmented (numpy.array): Segmeted region_array which contains cluster ids.
+        - segmented_method (str): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN" or "UMAP_WARD". Initialized with None.
+        - cluster_filters (list): A list of filters used. Can include: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".
+        - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
+        - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
+        - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
+        - de_results_all (dict): Methods mapped to their differential analysis results. Initialized with None.
 
         Args:
-            region_array (np.array): Array of spectra defining one region
-            idx2mass (np.array): m/u Values for spectra
+            region_array (numpy.array): Array of spectra defining one region.
+            idx2mass (numpy.array): m/z values for given spectra.
             name (str, optional): Name of this region (required if you want to do a comparative analysis). Defaults to None.
         """
 
@@ -162,7 +181,7 @@ class SpectraRegion():
             self.pixel2idx[(x,y)] = i
 
     def __setlogger(self):
-        """Sets up logging facilities for SpectraRegion
+        """Sets up logging facilities for SpectraRegion.
         """
 
         self.logger = logging.getLogger('SpectraRegion')
@@ -231,12 +250,12 @@ class SpectraRegion():
         """Plots an array of values (e.g. segment IDs) into the given figure and adds a discrete legend.
 
         Args:
-            fig (matplotlib figure): Figure to plot to.
+            fig (matplotlib.pyplot.figure): Figure to plot to.
             arr (array): array to visualize
-            discrete_legend (bool, optional): Plot a discrete legend for values of array?. Defaults to True.
+            discrete_legend (bool, optional): Plots a discrete legend for array values. Defaults to True.
 
         Returns:
-            [matplotlib figure]: Figure with plotted figure
+            matplotlib.pyplot.figure: Figure with plotted figure
         """
 
 
@@ -268,7 +287,21 @@ class SpectraRegion():
 
 
     def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None):
+        """Extract eveilable data and prepares files for the 3D representation. 
+        - .clustering.png: Picture of the segmented region.
+        - .matrix.npy: Matrix of the segmented region.
+        - .tsv: Marker Proteins Analysis findings. (Optional)
+        - .info: Configuration file.
 
+        Args:
+            folder (str): Desired output folder.
+            prefix (str): Desired name of the output files.
+            regionID (int): Id of the desired region in the .imzML file.
+            protWeights (ProteinWeights, optional): ProteinWeights object for translation of masses to protein name. Defaults to None.
+            nodf (bool, optional): It set to True, do not perform differential analysis. Defaults to False.
+            pathPrefix (str, optional): Desired path prefix for DE data files. Defaults to None.
+            ctpred (str, optional): Path to tsv file with cluster-cell type mapping. Defaults to None.
+        """
         cluster2celltype = None# { str(x): str(x) for x in np.unique(self.segmented)}
         if ctpred != None:
             with open(ctpred, 'r') as fin:
@@ -390,10 +423,10 @@ class SpectraRegion():
 
         Args:
             mass (float): mass to look up index for
-            threshold ([float], optional): Maximal distance from mass to contained m/z. Defaults to None.
+            threshold (float, optional): Maximal distance from mass to contained m/z. Defaults to None.
 
         Returns:
-            [float, int]: mass and index of closest contained m/z for mass
+            float, int: mass and index of closest contained m/z for mass
         """
         
         dist2mass = float('inf')
@@ -411,7 +444,6 @@ class SpectraRegion():
 
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True):
-
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
