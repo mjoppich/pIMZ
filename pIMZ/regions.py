@@ -36,7 +36,6 @@ import random
 import glob
 import shutil, io, base64
 
-baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
 
 
@@ -98,6 +97,7 @@ class SpectraRegion():
     def loadLib(self):
         """Prepares everything for the usage of the C++ library
         """
+        baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
         libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
         self.lib = ctypes.cdll.LoadLibrary(libfile)
@@ -1803,7 +1803,7 @@ document.addEventListener('readystatechange', event => {
                     shutil.copy(src_file, dst_dir)
 
 
-        sourceDir = os.path.dirname(__file__) + "/../tablefilter"
+        sourceDir = os.path.dirname(__file__) + "/tablefilter"
         targetDir = os.path.dirname(outpath) + "/tablefilter"
 
         self.logger.info("copy tablefilter files from {} to {}".format(sourceDir, targetDir))
