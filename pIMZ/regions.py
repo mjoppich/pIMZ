@@ -25,16 +25,20 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
+import operator
+
+import jinja2
+
 import ms_peak_picker
 import regex as re
 import random
 
 import glob
+import shutil, io, base64
 
 baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
-libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
-lib = ctypes.cdll.LoadLibrary(libfile)
+
 
 
 
@@ -94,7 +98,9 @@ class SpectraRegion():
     def loadLib(self):
         """Prepares everything for the usage of the C++ library
         """
-        self.lib = ctypes.cdll.LoadLibrary(baseFolder+'/../../cIMZ/lib/libSRM.so')
+
+        libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
+        self.lib = ctypes.cdll.LoadLibrary(libfile)
 
         self.lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
         self.lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
@@ -130,6 +136,7 @@ class SpectraRegion():
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
         - de_results_all (dict): Methods mapped to their differential analysis results. Initialized with None.
+        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with None.
 
         Args:
             region_array (numpy.array): Array of spectra defining one region.
@@ -172,6 +179,7 @@ class SpectraRegion():
         self.consensus_similarity_matrix = None
 
         self.de_results_all = defaultdict(lambda: dict())
+        self.df_results_all = defaultdict(lambda: dict())
 
         for i in range(self.region_array.shape[0]*self.region_array.shape[1]):
 
@@ -220,7 +228,8 @@ class SpectraRegion():
             "consensus": self.consensus,
             "consensus_method": self.consensus_method,
             "consensus_similarity_matrix": self.consensus_similarity_matrix,
-            "de_results_all": self.de_results_all
+            "de_results_all": self.de_results_all,
+            "df_results_all": self.df_results_all
         }
 
     def __setstate__(self, state):
@@ -443,7 +452,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True):
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
@@ -452,7 +461,9 @@ class SpectraRegion():
         for mass in masses:
             
             bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
-            self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+            if verbose:
+                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
             for i in range(self.region_array.shape[0]):
                 for j in range(self.region_array.shape[1]):
@@ -1532,7 +1543,276 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+
+
+    def _makeHTMLStringFilterTable(self, expDF):
+        """Transform given pandas dataframe into HTML output
+
+        Args:
+            expDF (pd.DataFrame): Values for output
+
+        Returns:
+            htmlHead, htmlBody (str): HTML code for head and body
+        """
+
+        headpart = """
+        """
+
+        bodypart = """
+        {% if title %}
+        {{title}}
+        {% endif %}
+        
+        <button id="csvButton" type="button">Save current table!</button>
+        
+        <table id="{{html_element_id}}" class="display" cellspacing="0" width="100%">
+                <thead>
+                <tr>
+                {% for column in columns %}
+                    <th>{{column}}</th>
+                {% endfor %}
+                </tr>
+                </thead>
+
+                <tbody>
+                {% for key,row in rows.iterrows() %}
+                <tr>
+                    {% for column in columns %}
+                    <td>{{ row[column] }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                </tbody>
+
+                <tfoot>
+                <tr>
+                {% for column in columns %}
+                    <th>{{column}}</th>
+                    {% endfor %}
+                </tr>
+                </tfoot>
+
+                </table>
+
+<script src="tablefilter/tablefilter.js"></script>
+
+<script data-config>
+    var filtersConfig = {
+        base_path: 'tablefilter/',
+        alternate_rows: true,
+        rows_counter: true,
+        btn_reset: true,
+        loader: true,
+        status_bar: true,
+        mark_active_columns: true,
+        highlight_keywords: true,
+        sticky_headers: true,
+        col_types: [{{coltypes}}],
+        custom_options: {
+            cols:[],
+            texts: [],
+            values: [],
+            sorts: []
+        },
+        col_widths: [],
+        extensions:[{ name: 'sort' }]
+    };
+
+    var tf = new TableFilter("{{html_element_id}}", filtersConfig);
+    tf.init();
+
+function download_csv(csv, filename) {
+    var csvFile;
+    var downloadLink;
+
+    // CSV FILE
+    csvFile = new Blob([csv], {type: "text/csv"});
+
+    // Download link
+    downloadLink = document.createElement("a");
+
+    // File name
+    downloadLink.download = filename;
+
+    // We have to create a link to the file
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+
+    // Make sure that the link is not displayed
+    downloadLink.style.display = "none";
+
+    // Add the link to your DOM
+    document.body.appendChild(downloadLink);
+
+    // Lanzamos
+    downloadLink.click();
+}
+
+function isHidden(el) {
+    var style = window.getComputedStyle(el);
+    return ((style.display === 'none') || (style.visibility === 'hidden'))
+}
+
+function export_table_to_csv(html, filename) {
+	var csv = [];
+	var rows = document.querySelectorAll("table tr");
+	
+    for (var i = 0; i < rows.length; i++) {
+		var row = [], cols = rows[i].querySelectorAll("td, th");
+
+        if (!isHidden(rows[i]))
+        {
+            for (var j = 0; j < cols.length; j++) 
+            {
+                colText = ""+cols[j].innerText;
+                colText = colText.replace(/(\\r\\n|\\n|\\r)/gm, ';')
+                row.push(colText);
+
+            }
+
+            if (row.length > 0)
+            {
+                csv.push(row.join("\\t"));
+            }		
+
+        }
+		    
+	}
+
+    // Download CSV
+    download_csv(csv.join("\\n"), filename);
+}
+
+document.addEventListener('readystatechange', event => {
+
+    if (event.target.readyState === "interactive") {      //same as:  document.addEventListener("DOMContentLoaded"...   // same as  jQuery.ready
+            console.log("Ready state");
+
+        document.getElementById("csvButton").addEventListener("click", function () {
+            var html = document.getElementById("{{html_element_id}}").outerHTML;
+            export_table_to_csv(html, "table.tsv");
+        });
+
+    }
+
+    if (event.target.readyState === "complete") {
+        console.log("Now external resources are loaded too, like css,src etc... ");
+        
+        document.getElementById("csvButton").addEventListener("click", function () {
+            var html = document.getElementById("{{html_element_id}}").outerHTML;
+            export_table_to_csv(html, "table.tsv");
+        });
+    }
+
+});
+
+                </script>
+
+        """
+        jsCols = []
+       
+        columnNames = expDF.columns.values.tolist()
+        for cname in columnNames:
+
+            if expDF[cname].dtypes in [int, float]:
+                jsCols.append("\"number\"")
+            else:
+                jsCols.append("\"string\"")
+
+
+        vHeader = [str(x) for x in columnNames]
+        #print([x for x in zip(vHeader, jsCols)])
+
+        html_element_id= None
+        if html_element_id == None:
+            html_element_id = "dftable"
+
+        jinjaTemplate = jinja2.Template(bodypart)
+        output = jinjaTemplate.render(rows=expDF, columns=vHeader, title="",
+                                      html_element_id=html_element_id, coltypes=", ".join(jsCols))
+
+        return (headpart, output)
+
+
+
+
+    def export_deres(self, method, resKey, outpath, title="DE Result"):
+        """This methods writes out a HTMl-formatted table for all found DE results.
+
+        Args:
+            method (str): Method to export result for
+            resKey (tuple): List of regions to look for result for
+            outpath (str): outpath of HTML table. Required js-sources are copied into the same folder.
+            title (str, optional): Title for result table
+        """
+        
+       
+        expDF = self.df_results_all[method][resKey].copy(deep=True)
+
+        mass2image = {}
+        requiredMasses = set(self.df_results_all[method][resKey]["gene_mass"].values)
+        self.logger.info("Fetching Mass Heatmaps for all {} required masses".format(len(requiredMasses)))
+
+        for mass in set(requiredMasses):
+            mass_data = self.mass_heatmap(mass, plot=False, verbose=False)
+
+            heatmap = plt.matshow(mass_data, fignum=100)
+            plt.colorbar(heatmap)
+
+            pic_IObytes = io.BytesIO()
+            plt.savefig(pic_IObytes,  format='png')
+            pic_IObytes.seek(0)
+            pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+            plt.close(100)
+
+            imgStr = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+            mass2image[mass] = imgStr
+
+
+        massImgValues = [mass2image.get(mass, "") for mass in expDF["gene_mass"].values]
+        pos = expDF.columns.values.tolist().index("gene_mass")+1
+
+        self.logger.info("Adding Mass Heatmap at pos {} of {} with {} entries".format(pos, len(expDF.columns.values.tolist()), len(massImgValues)))
+        
+        expDF.insert(loc = pos, 
+          column = 'Mass Heatmap', 
+          value = massImgValues) 
+
+        (headpart, bodypart) = self._makeHTMLStringFilterTable(expDF)
+
+        if title != None:
+            bodypart = "<h1>"+title+"</h1>" + bodypart
+
+        htmlfile="<html>\n<head>\n" + headpart + "</head>\n<body>\n" + bodypart + "</body>\n</html>"
+
+        with open(outpath, 'w') as outHtml:
+            outHtml.write(htmlfile)
+
+        def copyFolders(root_src_dir, root_target_dir):
+
+            for src_dir, dirs, files in os.walk(root_src_dir):
+                dst_dir = src_dir.replace(root_src_dir, root_target_dir)
+                if not os.path.exists(dst_dir):
+                    os.mkdir(dst_dir)
+                for file_ in files:
+                    src_file = os.path.join(src_dir, file_)
+                    dst_file = os.path.join(dst_dir, file_)
+                    if os.path.exists(dst_file):
+                        os.remove(dst_file)
+
+                    shutil.copy(src_file, dst_dir)
+
+
+        sourceDir = os.path.dirname(__file__) + "/../tablefilter"
+        targetDir = os.path.dirname(outpath) + "/tablefilter"
+
+        self.logger.info("copy tablefilter files from {} to {}".format(sourceDir, targetDir))
+        copyFolders(sourceDir, targetDir)
+
+
+
+
+    def deres_to_df(self, method, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
 
         clusterVec = []
         geneIdentVec = []
@@ -1551,6 +1831,8 @@ class SpectraRegion():
         medianExpressionBGVec = []
         totalSpectraBGVec = []
         measuredSpectraBGVec = []
+
+        deResDF = self.de_results_all[method][resKey]
 
         ttr = deResDF.copy(deep=True)#self.de_results[resKey]      
         self.logger.info("DE result for case {} with {} results".format(resKey, ttr.shape))
@@ -1677,6 +1959,8 @@ class SpectraRegion():
         df["mean_bg"] = avgExpressionBGVec
         df["median_bg"] = medianExpressionBGVec
 
+        self.df_results_all[method][resKey] = df.copy(deep=True)
+
         return df
 
 
@@ -1726,7 +2010,7 @@ class SpectraRegion():
                 if method in ["ttest", "rank"]:
                     inverseFC = True
 
-                resDF = self.deres_to_df(methodKeyDF, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
+                resDF = self.deres_to_df(method, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
 
                 dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)           
 
@@ -1752,6 +2036,7 @@ class SpectraRegion():
         """Removes all sotred differential expression results.
         """
         self.de_results_all = defaultdict(lambda: dict())
+        self.df_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
         
@@ -1959,6 +2244,9 @@ class SpectraRegion():
                     empireData=pd.read_csv(nlOutput, delimiter="\t")
                     self.de_results_all["empire"][resKey] = empireData
 
+                    if resKey in self.df_results_all["empire"]:
+                        del self.df_results_all["empire"][resKey]
+
             else:
                 self.logger.info("Skipping empire for: {}, {}, {}".format(resKey, replaceExisting, fillCondition))
 
@@ -2008,6 +2296,9 @@ class SpectraRegion():
                         )
 
                     self.de_results_all[testMethod][resKey] = test.summary()
+                    if resKey in self.df_results_all[testMethod]:
+                        del self.df_results_all[testMethod][resKey]
+
                     self.logger.info("DE-test ({}) finished. Results available: {}".format(testMethod, resKey))
 
                 else:

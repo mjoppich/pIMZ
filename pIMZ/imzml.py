@@ -98,7 +98,7 @@ class IMZMLExtract:
 
 
     def get_spectrum(self, specid, normalize=False):
-         """Reads the spectrum at the specified index and can be normalized by
+        """ Reads the spectrum at the specified index and can be normalized by
         dividing each intensity value by the maximum value observed.
 
         Args:
@@ -109,6 +109,7 @@ class IMZMLExtract:
             numpy.array: Sequence of intensity values corresponding to
             mz_array of the given specid.
         """
+
         spectra1 = self.parser.getspectrum(specid)
         spectra1 = spectra1[1]
 
