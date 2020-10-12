@@ -33,12 +33,10 @@ import ms_peak_picker
 import regex as re
 import random
 
+from skimage import measure as sk_measure
+
 import glob
 import shutil, io, base64
-
-
-
-
 
 
 from sklearn.metrics.pairwise import cosine_similarity
@@ -1720,7 +1718,9 @@ document.addEventListener('readystatechange', event => {
 
 
         vHeader = [str(x) for x in columnNames]
-        #print([x for x in zip(vHeader, jsCols)])
+        #print()
+
+        self.logger.info("Got Columns: {}".format([x for x in zip(vHeader, jsCols)]))
 
         html_element_id= None
         if html_element_id == None:
@@ -1733,6 +1733,16 @@ document.addEventListener('readystatechange', event => {
         return (headpart, output)
 
 
+    def get_mask(self, regions):
+        if not isinstance(regions, (list, tuple, set)):
+            regions = [regions]
+
+        outmask = np.zeros(self.segmented.shape)
+
+        for region in regions:
+            outmask[self.segmented == region] = 1
+
+        return outmask
 
 
     def export_deres(self, method, resKey, outpath, title="DE Result"):
@@ -1752,11 +1762,40 @@ document.addEventListener('readystatechange', event => {
         requiredMasses = set(self.df_results_all[method][resKey]["gene_mass"].values)
         self.logger.info("Fetching Mass Heatmaps for all {} required masses".format(len(requiredMasses)))
 
+
+        fgMask = self.get_mask(regions=resKey[0])
+        bgMask = self.get_mask(regions=resKey[1])
+
+        plt.imshow(fgMask)
+        plt.show()
+        plt.close()
+        plt.imshow(bgMask)
+        plt.show()
+        plt.close()
+
+
         for mass in set(requiredMasses):
             mass_data = self.mass_heatmap(mass, plot=False, verbose=False)
 
             heatmap = plt.matshow(mass_data, fignum=100)
             plt.colorbar(heatmap)
+
+
+            # Find contours at a constant value of 0.5
+            contours = sk_measure.find_contours(bgMask, 0.5)
+            # Display the image and plot all contours found
+            for n, contour in enumerate(contours):
+                plt.plot(contour[:, 1], contour[:, 0], linewidth=2, color="blue")
+
+
+            # Find contours at a constant value of 0.5
+            contours = sk_measure.find_contours(fgMask, 0.5)
+
+            # Display the image and plot all contours found
+            for n, contour in enumerate(contours):
+                plt.plot(contour[:, 1], contour[:, 0], linewidth=2, color="green")
+
+
 
             pic_IObytes = io.BytesIO()
             plt.savefig(pic_IObytes,  format='png')
