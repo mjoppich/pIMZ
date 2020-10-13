@@ -540,13 +540,21 @@ class SpectraRegion():
         return outclust
 
     def calculate_similarity(self, mode="spectra", features=[], neighbors = 1):
+        """Returns similarity matrix.
+
+        Args:
+            mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".
+                - "spectra": Raw similarity matrix.
+                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the
+                maximum values.
+                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the
+                maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.
+            features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
+            neighbors (int, optional): Number of neighboring masses to each feature to be included. Defaults to 1.
+
+        Returns:
+            numpy.array: Spectra similarity matrix
         """
-
-        :param mode: must be in  ["spectra", "spectra_log", "spectra_log_dist"]
-
-        :return: spectra similarity matrix
-        """
-
         assert(mode in ["spectra", "spectra_log", "spectra_log_dist"])
 
         if len(features) > 0:
