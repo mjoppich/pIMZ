@@ -12,10 +12,10 @@ pIMZ focuses on a differential setting, where masses, specific to certain areas 
 
 
 .. toctree::
-   :maxdepth: 2
    :caption: Contents:
+   :glob:
 
-   ../README.rst
+   ../*
    usage.rst
 
 

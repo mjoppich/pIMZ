@@ -16,16 +16,8 @@ Installation
 
 The easiest way to install most Python packages is via ``easy_install`` or ``pip``::
 
-    $ easy_install pIMZ
+    $ sudo pip install pIMZ
+    $ sudo pip3 install pIMZ
 
-Usage
------
-
-TODO: This is a good place to start with a couple of concrete examples of how the package should be used.
-
-The boilerplate code provides a dummy ``main`` function that prints out the word 'Hello'::
-
-    >> from pysrm import main
-    >> main()
-    
-When the package is installed via ``easy_install`` or ``pip`` this function will be bound to the ``pySRM`` executable in the Python installation's ``bin`` directory (on Windows - the ``Scripts`` directory).
+    $ pip install pIMZ --user
+    $ pip3 install pIMZ --user

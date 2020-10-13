@@ -14,3 +14,7 @@ examples/aorta3d
 examples/deresults
 examples/MetaData
 examples/slided_test
+
+build
+dist
+pIMZ.egg-info
