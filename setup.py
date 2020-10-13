@@ -78,7 +78,7 @@ setup(name="pIMZ",
       cmdclass={'test': PyTest},
       python_requires='>=3.8',
       # TODO: List of packages that this one depends upon:  
-      setup_requires=[], 
+      setup_requires=['Cython'], 
       install_requires=[
         'numpy>=1.17.5', 
         'h5py',
