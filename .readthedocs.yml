@@ -21,5 +21,8 @@ formats:
 python:
     version: 3.8
     install:
-    - requirements: docs/requirements.txt
-    setup_py_install: true
+        - requirements: docs/requirements.txt
+        - requirements: requirements.txt
+        - method: setuptools
+            path: pIMZ
+
