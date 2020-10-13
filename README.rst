@@ -2,6 +2,13 @@
 pIMZ:  an integrative framework for imaging mass spectrometry analysis
 ======================================================================
 
+.. image:: https://readthedocs.org/projects/pimz/badge/?version=latest
+:target: https://pimz.readthedocs.io/en/latest/?badge=latest
+:alt: Documentation Status
+
+.. image:: https://travis-ci.org/mjoppich/pIMZ.svg?branch=master
+    :target: https://travis-ci.org/mjoppich/pIMZ
+
 No idea what this framework does ...
 
 ... it's not yet ready. But once it is, you will get to know a lot more here!
