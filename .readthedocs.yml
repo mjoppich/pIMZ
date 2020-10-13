@@ -24,5 +24,4 @@ python:
         - requirements: docs/requirements.txt
         - requirements: requirements.txt
         - method: setuptools
-            path: pIMZ
-
+          path: pIMZ
