@@ -42,9 +42,12 @@ import umap
 import hdbscan
 
 class IMZMLExtract:
+    """IMZMLExtract class is required to access and retrieve data from an imzML file.
+    """
 
     def __init__(self, fname):
-        """Constructs an IMZMLExtract object with the following attributes:
+        """
+        Constructs an IMZMLExtract object with the following attributes:
         -logger (logging.Logger): Reference to the Logger object.
         -fname (str): Absolute path to the .imzML file.
         -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object,
@@ -59,7 +62,6 @@ class IMZMLExtract:
         Args:
             fname (str): Absolute path to the .imzML file. Must end with .imzML.
         """
-        #fname = "/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML"
 
         self.logger = logging.getLogger('IMZMLExtract')
         self.logger.setLevel(logging.INFO)
@@ -606,30 +608,24 @@ class IMZMLExtract:
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
         """Returns a normalized array of spectra.
 
-        Args:
-            region_array (numpy.array): Array of spectra to normlaize.
-            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum",
-            "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median",
-            "baseline_cor". Defaults to None.
-                - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum"
-                method in normalize_spectrum function.
-                - "max_intensity_region": normalizes each spectrum with "max_intensity_region"
-                method using the maximum intensity value within the region.
-                - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions"
-                method using the maximum intensity value within all regions.
-                - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function.
-                - "inter_median": devides each spectrum by its median to make intensities
-                consistent within each array.
-                - "intra_median": devides each spectrum by the global median to achieve consistency
-                between arrays.
-                - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing
-                by P. Eilers and H. Boelens. Requires lam, p and iters parameters.
-            lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
-            p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
-            iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
+            Args:
+                region_array (numpy.array): Array of spectra to normlaize.
+                normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.
 
-        Returns:
-            numpy.array: Normalized region_array.
+                    - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.
+                    - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.
+                    - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.
+                    - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function. 
+                    - "inter_median": devides each spectrum by its median to make intensities consistent within each array.
+                    - "intra_median": devides each spectrum by the global median to achieve consistency between arrays.
+                    - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.
+
+                lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
+                p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
+                iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
+
+            Returns:
+                numpy.array: Normalized region_array.
         """
         
         assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])

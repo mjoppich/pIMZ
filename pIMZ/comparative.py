@@ -43,6 +43,8 @@ import hdbscan
 
 
 class CombinedSpectra():
+    """CombinedSpectra class for a combined analysis
+    """
 
     def __setlogger(self):
         self.logger = logging.getLogger('CombinedSpectra')

@@ -15,7 +15,9 @@ pIMZ focuses on a differential setting, where masses, specific to certain areas 
    :caption: Contents:
    :glob:
 
-   reference/modules.rst
+   usage.rst
+   modules.rst
+   
 
 
 Indices and tables

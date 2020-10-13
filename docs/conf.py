@@ -13,7 +13,7 @@
 import os
 import sys
 # sys.path.insert(0, os.path.abspath('.'))
-sys.path.insert(0, os.path.abspath('../pIMZ'))
+sys.path.insert(0, os.path.abspath('../'))
 
 # -- Project information -----------------------------------------------------
 
@@ -34,11 +34,32 @@ extensions = [
     'sphinx.ext.mathjax',
 ]
 
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
 
-apidoc_module_dir = '../pIMZ'
-apidoc_output_dir = 'reference'
-apidoc_excluded_paths = ['../pIMZ/tablefilter', '../cIMZ', '../tests']
-apidoc_separate_modules = True
+
+autodoc_mock_imports = [
+        'numpy', 
+        'h5py',
+        'matplotlib',
+        'pandas',
+        'scipy', 
+        'scikit-image',
+        'scikit-learn', 
+        'sklearn', 'skimage',
+        'dill', 
+        'pathos',
+        'ms_peak_picker', 
+        'globus_sdk', 
+        'progressbar', 
+        'anndata', 
+        'diffxpy', 
+        'pyimzml',
+        'natsort',
+        'seaborn',
+        'llvmlite',
+        'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
+        'Pillow']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

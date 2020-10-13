@@ -55,6 +55,9 @@ import hdbscan
 from numpy.ctypeslib import ndpointer
 
 class SpectraRegion():
+    """
+    SpectraRegion class for any analysis of imzML spectra regions
+    """
 
     @classmethod
     def from_pickle(cls, path):
@@ -2397,7 +2400,7 @@ document.addEventListener('readystatechange', event => {
 
 
 class ProteinWeights():
-    """This class serves as lookup class for protein<->mass lookups for DE comparisons of IMS analyses.
+    """12343 This class serves as lookup class for protein<->mass lookups for DE comparisons of IMS analyses.
     """
 
     def __set_logger(self):
@@ -2636,124 +2639,5 @@ class ProteinWeights():
         ))
 
             
-
-
-
-
-
-
-class pyIMS():
-
-    def __init__(self):
-        lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]
-        lib.StatisticalRegionMerging_New.restype = ctypes.c_void_p
-
-        lib.SRM_processFloat.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
-        lib.SRM_processFloat.restype = ctypes.POINTER(ctypes.c_uint32)
-
-        lib.SRM_calc_similarity.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
-        lib.SRM_calc_similarity.restype = ctypes.POINTER(ctypes.c_float)
-
-        
-        lib.SRM_test_matrix.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float)]
-        lib.SRM_test_matrix.restype = None
-
-        lib.StatisticalRegionMerging_mode_dot.argtypes = [ctypes.c_void_p]
-        lib.StatisticalRegionMerging_mode_dot.restype = None
-
-        lib.StatisticalRegionMerging_mode_eucl.argtypes = [ctypes.c_void_p]
-        lib.StatisticalRegionMerging_mode_eucl.restype = None
-
-        self.logger = logging.getLogger('pyIMS')
-        self.logger.setLevel(logging.INFO)
-
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setLevel(logging.INFO)
-
-        self.logger.addHandler(consoleHandler)
-
-        formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
-        consoleHandler.setFormatter(formatter)
-
-
-
-
-    def segment_array(self, inputarray, qs=[256, 0.5, 0.25], imagedim = None, dotMode = False):
-
-        dims = 1
-
-        if len(inputarray.shape) > 2:
-            dims = inputarray.shape[2]
-
-        qArr = (ctypes.c_float * len(qs))(*qs)
-
-        self.logger.info("Creating SRM Object with {} dimensions".format(dims))
-        self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
-
-        if dotMode:
-            self.logger.info("Switching to dot mode")
-            lib.StatisticalRegionMerging_mode_dot(self.obj)
-            dimage = inputarray
-        else:
-            dimage = (inputarray / np.max(inputarray)) * 255
-
-        image_p = dimage.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        retValues = lib.SRM_processFloat(self.obj, dimage.shape[0], dimage.shape[1], image_p)
-
-        outclust = np.ctypeslib.as_array(retValues, shape=(len(qs), dimage.shape[0], dimage.shape[1]))
-
-        self.logger.debug(outclust.dtype)
-        self.logger.debug(outclust.shape)
-
-        outdict = {}
-
-        for i,q in enumerate(qs):
-            outdict[q] = outclust[i, :,:]
-
-        if imagedim == None:
-            imagedim = int(dims/3)
-
-        image = inputarray[:,:,imagedim]
-        image = image / np.max(image)
-
-        return image, outdict
-
-
-
-    def segment_image(self, imagepath, qs=[256, 0.5, 0.25]):
-
-        #load image
-        image = plt.imread(imagepath)
-        image = image.astype(np.float32)
-        image = image / np.max(image)
-
-        print(image.shape)
-        print(image.dtype)
-        print(np.min(image), np.max(image))
-
-        dims = 1
-
-        if len(image.shape) > 2:
-            dims = image.shape[2]
-
-        qArr = (ctypes.c_float * len(qs))(*qs)
-
-        self.obj = lib.StatisticalRegionMerging_New(dims, qArr, len(qs))
-        
-        dimage = image * 255
-        image_p = dimage.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-        retValues = lib.SRM_processFloat(self.obj, dimage.shape[0], dimage.shape[1], image_p)
-
-        outclust = np.ctypeslib.as_array(retValues, shape=(len(qs), dimage.shape[0], dimage.shape[1]))
-
-        print(outclust.dtype)
-        print(outclust.shape)
-
-        outdict = {}
-
-        for i,q in enumerate(qs):
-            outdict[q] = outclust[i, :,:]
-
-        return image, outdict
 
 
