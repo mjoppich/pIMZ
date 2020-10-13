@@ -586,13 +586,13 @@ class IMZMLExtract:
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
             normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.
-                - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.
-                - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.
-                - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.
-                - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function.
-                - "inter_median": devides each spectrum by its median to make intensities consistent within each array.
-                - "intra_median": devides each spectrum by the global median to achieve consistency between arrays.
-                - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.
+                - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.\n
+                - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.\n
+                - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.\n
+                - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function.\n
+                - "inter_median": devides each spectrum by its median to make intensities consistent within each array.\n
+                - "intra_median": devides each spectrum by the global median to achieve consistency between arrays.\n
+                - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.\n
             lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
             p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
             iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
