@@ -4,5 +4,5 @@ python:
 script:
   - pip3 install llvmlite numba --upgrade
   - pip3 install dabest
-  - pip3 install pandas --upgrade
+  - pip3 install pandas Cython --upgrade
   - python3 setup.py develop test
