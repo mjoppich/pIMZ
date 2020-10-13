@@ -98,7 +98,7 @@ setup(name="pIMZ",
         'natsort',
         'seaborn',
         'llvmlite',
-        'imageio',
+        'imageio', 'umap', 'jinja2',
         'Pillow'], #dabest
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
