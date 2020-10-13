@@ -6,6 +6,9 @@
 ![GitHub All Releases](https://img.shields.io/github/downloads/mjoppich/pIMZ/total)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pIMZ)
 ![PyPI - License](https://img.shields.io/pypi/l/pIMZ)
+[![DOI](https://zenodo.org/badge/203115135.svg)](https://zenodo.org/badge/latestdoi/203115135)
+
+
 
 No idea what this framework does \...
 
