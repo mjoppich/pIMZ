@@ -5,7 +5,7 @@ python:
 script:
   - pip3 install ms_peak_picker wheezy.template
   - pip3 install Cython --upgrade
-  - pip3 install pandas numpy --upgrade
   - pip3 install llvmlite numba --upgrade
   - pip3 install dabest
+  - pip3 install pandas numpy --upgrade
   - python3 setup.py develop test
