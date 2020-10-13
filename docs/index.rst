@@ -6,10 +6,17 @@
 Welcome to pIMZ's documentation!
 ================================
 
+pIMZ is a framework for python-based Imaging Mass Spectrometry (IMS) data analysis.
+
+pIMZ focuses on a differential setting, where masses, specific to certain areas are obtained, which then serve as input for a cell-type detection framework and/or a differential expression setting.
+
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
 
+   ../README.rst
+   usage.rst
 
 
 Indices and tables

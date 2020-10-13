@@ -293,7 +293,7 @@ class SpectraRegion():
 
 
 
-    def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None):
+    def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None, kw2segment=None):
         """Extract eveilable data and prepares files for the 3D representation. 
         - .clustering.png: Picture of the segmented region.
         - .matrix.npy: Matrix of the segmented region.
@@ -308,6 +308,7 @@ class SpectraRegion():
             nodf (bool, optional): It set to True, do not perform differential analysis. Defaults to False.
             pathPrefix (str, optional): Desired path prefix for DE data files. Defaults to None.
             ctpred (str, optional): Path to tsv file with cluster-cell type mapping. Defaults to None.
+            kw2segment (dict, optional): Dictionary keyword => segment; assigns keyword to all listed segments.
         """
         cluster2celltype = None# { str(x): str(x) for x in np.unique(self.segmented)}
         if ctpred != None:
@@ -386,6 +387,11 @@ class SpectraRegion():
                     regionInfo["type_det"].append( cluster2celltype[str(cluster)] )
                 else:
                     self.logger.info("No cell type info for cluster: '{}'".format(cluster))
+
+            if kw2segment != None:
+                for kw in kw2segment:
+                    if cluster in kw2segment[kw] or str(cluster) in kw2segment[kw]:
+                        regionInfo["type_det"].append( kw )
 
             if cluster in cluster2deData:
                 regionInfo["de_data"] = cluster2deData[cluster]
