@@ -33,3 +33,9 @@ Only then we should install ``pIMZ`` ::
     sudo pip3 install pIMZ
 
 ``pIMZ`` is now ready to go!
+
+## Usage
+
+References to examples and example notebooks can be found in the ``examples`` folder, or in the [documentation](https://pimz.readthedocs.io/en/latest/usage.html).
+
+All available classes and their functions are explained in the [modules/API documentation](https://pimz.readthedocs.io/en/latest/modules.html).
