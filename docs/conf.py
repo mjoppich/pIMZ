@@ -37,7 +37,6 @@ extensions = [
 apidoc_module_dir = '../pIMZ'
 apidoc_output_dir = 'reference'
 apidoc_excluded_paths = ['../pIMZ/tablefilter', '../cIMZ', '../tests']
-autodoc_mock_imports = ["pIMZ"]
 apidoc_separate_modules = True
 
 # Add any paths that contain templates here, relative to this directory.
