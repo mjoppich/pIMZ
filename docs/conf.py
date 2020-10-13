@@ -21,6 +21,7 @@ project = 'pIMZ'
 copyright = '2020, Markus Joppich, Margaryta Olenchuk, Ralf Zimmer'
 author = 'Markus Joppich, Margaryta Olenchuk, Ralf Zimmer'
 
+master_doc = 'index'
 
 # -- General configuration ---------------------------------------------------
 
