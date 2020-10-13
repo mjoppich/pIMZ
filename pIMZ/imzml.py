@@ -42,9 +42,12 @@ import umap
 import hdbscan
 
 class IMZMLExtract:
+    """IMZMLExtract class is required to access and retrieve data from an imzML file.
+    """
 
     def __init__(self, fname):
-        """Constructs an IMZMLExtract object with the following attributes:
+        """
+        Constructs an IMZMLExtract object with the following attributes:
         -logger (logging.Logger): Reference to the Logger object.
         -fname (str): Absolute path to the .imzML file.
         -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object, which opens the two files corresponding to the file name, reads the entire .imzML file and extracts required attributes.
@@ -55,7 +58,6 @@ class IMZMLExtract:
         Args:
             fname (str): Absolute path to the .imzML file. Must end with .imzML.
         """
-        #fname = "/mnt/d/dev/data/190724_AR_ZT1_Proteins/190724_AR_ZT1_Proteins_spectra.imzML"
 
         self.logger = logging.getLogger('IMZMLExtract')
         self.logger.setLevel(logging.INFO)

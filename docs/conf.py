@@ -10,10 +10,10 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
+import os
+import sys
 # sys.path.insert(0, os.path.abspath('.'))
-
+sys.path.insert(0, os.path.abspath('../'))
 
 # -- Project information -----------------------------------------------------
 
@@ -29,15 +29,37 @@ master_doc = 'index'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.napoleon",
-    'sphinxcontrib.apidoc'
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.mathjax',
 ]
 
+napoleon_google_docstring = True
+napoleon_numpy_docstring = False
 
-apidoc_module_dir = '../pIMZ'
-apidoc_output_dir = 'reference'
-apidoc_excluded_paths = ['../pIMZ/tablefilter', '../cIMZ', '../tests']
-apidoc_separate_modules = True
+
+autodoc_mock_imports = [
+        'numpy', 'dabest',
+        'h5py',
+        'matplotlib',
+        'pandas',
+        'scipy', 
+        'scikit-image',
+        'scikit-learn', 
+        'sklearn', 'skimage',
+        'dill', 
+        'pathos',
+        'ms_peak_picker', 
+        'globus_sdk', 
+        'progressbar', 
+        'anndata', 
+        'diffxpy', 
+        'pyimzml',
+        'natsort',
+        'seaborn',
+        'llvmlite',
+        'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
+        'Pillow', 'mpl_toolkits']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
