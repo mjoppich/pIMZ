@@ -26,9 +26,15 @@ class PyTest(TestCommand):
 ext_lib_path = 'rectangle'
 include_dir = os.path.join(ext_lib_path, 'include')
 
-segment_sources = ['pIMZ/cimz/segment.cpp']
-imageregion_sources = ['pIMZ/cimz/src/imageregion.cpp']
-srm_sources = ['pIMZ/cimz/src/srm.cpp']
+curBaseFolder = os.path.relpath(os.path.abspath(os.path.dirname(__file__)), os.getcwd())
+
+print(curBaseFolder, file=sys.stderr)
+
+segment_sources = [os.path.join(curBaseFolder, 'cIMZ/segment.cpp')]
+imageregion_sources = [os.path.join(curBaseFolder, 'cIMZ/src/imageregion.cpp')]
+srm_sources = [os.path.join(curBaseFolder, 'cIMZ/src/srm.cpp')]
+
+print(segment_sources, file=sys.stderr)
 
 compileArgs = ["-std=c++1z", "-Wall", "-fopenmp", "-fPIC", "-std=gnu++17",'-O3']
 
