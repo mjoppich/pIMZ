@@ -585,7 +585,7 @@ class IMZMLExtract:
 
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
-            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.\n
+            normalize (str, optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.\n
                 - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.\n
                 - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.\n
                 - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.\n
