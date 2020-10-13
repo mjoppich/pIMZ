@@ -9,31 +9,27 @@
 [![DOI](https://zenodo.org/badge/203115135.svg)](https://zenodo.org/badge/latestdoi/203115135)
 
 
+## Description
 
-No idea what this framework does \...
+pIMZ is a framework for Imaging Mass Spectrometry (IMS) data analysis.
+The python implementation is available from  [github.com/mjoppich/pIMZ](http://github.com/mjoppich/pIMZ).
+For installation follow the instructions given here.
 
-\... it\'s not yet ready. But once it is, you will get to know a lot
-more here!
+pIMZ focuses on a differential setting, where masses, specific to certain areas are first determined, and then serve as input for a cell-type detection framework and/or a differential expression setting.
 
-This is a \"long description\" file for the package that you are
-creating. If you submit your package to PyPi, this text will be
-presented on the [public
-page](http://pypi.python.org/pypi/python_package_boilerplate) of your
-package.
+pIMZ's documentation is available here: [![Documentation Status](https://readthedocs.org/projects/pimz/badge/?version=latest)](https://pimz.readthedocs.io/en/latest/?badge=latest) .
 
-Note: This README has to be written using [reStructured
-Text](http://docutils.sourceforge.net/rst.html), otherwise PyPi won\'t
-format it properly.
 
-Installation
-============
+## Installation
 
-The easiest way to install is via `pip`:
+The easiest way to install most Python packages is via ``pip``.
 
-    $ sudo pip install pIMZ
-    $ sudo pip3 install pIMZ
-    
-or on a user-level:
+If not already done, you must first install the following dependencies manually. This is because at the time of writing this document, dabest requires ``pandas~=0.25``, which is incompatible with probably the rest of the world nowadays. So first dabest is installed, then numpy and pandas are upgraded again ::
 
-    $ pip install pIMZ --user
-    $ pip3 install pIMZ --user
+    sudo pip3 install dabest
+    sudo pip3 install numpy pandas --upgrade
+
+Only then we should install ``pIMZ`` ::
+    sudo pip3 install pIMZ
+
+``pIMZ`` is now ready to go!

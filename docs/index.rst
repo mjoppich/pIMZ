@@ -3,12 +3,14 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to pIMZ's documentation!
-================================
+pIMZ: python-based Imaging Mass Spectrometry (IMS) data analysis
+================================================================
 
-pIMZ is a framework for python-based Imaging Mass Spectrometry (IMS) data analysis.
+pIMZ is a framework for Imaging Mass Spectrometry (IMS) data analysis.
+The python implementation is available from  `github.com/mjoppich/pIMZ  <http://github.com/mjoppich/pIMZ>`_.
+For installation follow the instructions given in the GitHub repository.
 
-pIMZ focuses on a differential setting, where masses, specific to certain areas are obtained, which then serve as input for a cell-type detection framework and/or a differential expression setting.
+pIMZ focuses on a differential setting, where masses, specific to certain areas are first determined, and then serve as input for a cell-type detection framework and/or a differential expression setting.
 
 
 .. toctree::
@@ -19,10 +21,3 @@ pIMZ focuses on a differential setting, where masses, specific to certain areas 
    modules.rst
    
 
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
