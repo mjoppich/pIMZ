@@ -1,18 +1,11 @@
----
-title: 'pIMZ: an integrative framework for imaging mass spectrometry analysis'
----
+# pIMZ: an integrative framework for imaging mass spectrometry analysis
 
-![image](https://readthedocs.org/projects/pimz/badge/?version=latest)
-
-target
-
-:   <https://pimz.readthedocs.io/en/latest/?badge=latest>
-
-alt
-
-:   Documentation Status
-
-[![image](https://travis-ci.org/mjoppich/pIMZ.svg?branch=master)](https://travis-ci.org/mjoppich/pIMZ)
+[![Documentation Status](https://readthedocs.org/projects/pimz/badge/?version=latest)](https://pimz.readthedocs.io/en/latest/?badge=latest)
+[![Build Status](https://travis-ci.org/mjoppich/pIMZ.svg?branch=master)](https://travis-ci.org/mjoppich/pIMZ)
+![PyPI](https://img.shields.io/pypi/v/pIMZ)
+![GitHub All Releases](https://img.shields.io/github/downloads/mjoppich/pIMZ/total)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pIMZ)
+![PyPI - License](https://img.shields.io/pypi/l/pIMZ)
 
 No idea what this framework does \...
 
@@ -32,11 +25,12 @@ format it properly.
 Installation
 ============
 
-The easiest way to install most Python packages is via `easy_install` or
-`pip`:
+The easiest way to install is via `pip`:
 
     $ sudo pip install pIMZ
     $ sudo pip3 install pIMZ
+    
+or on a user-level:
 
     $ pip install pIMZ --user
     $ pip3 install pIMZ --user

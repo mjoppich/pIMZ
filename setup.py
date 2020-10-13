@@ -41,19 +41,22 @@ libPIMZ=Extension('pIMZ.libPIMZ',
                       
                       )
 
-version = "1.0"
+version = "1.0a"
 import pathlib
 
 
 setup(name="pIMZ",
       version=version,
       description="pIMZ: an integrative framework for imaging mass spectrometry analysis",
-      long_description=open("README.rst").read(),
+      long_description=open("README.md").read(),
+      long_description_content_type='text/markdown',
       classifiers=[ # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
         'Programming Language :: Python',
-        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Topic :: Scientific/Engineering :: Bio-Informatics',
         'Topic :: Scientific/Engineering :: Medical Science Apps.'
       ],
