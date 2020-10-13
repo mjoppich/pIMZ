@@ -47,13 +47,9 @@ class IMZMLExtract:
         """Constructs an IMZMLExtract object with the following attributes:
         -logger (logging.Logger): Reference to the Logger object.
         -fname (str): Absolute path to the .imzML file.
-        -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object,
-            which opens the two files corresponding to the file name,
-            reads the entire .imzML file and extracts required attributes.
-        -dregions (collections.defaultdict): Enumerated regions mapped to the
-            corresponding list of pixel coordinates.
-        -mzValues (numpy.array): Sequence of m/z values representing the
-            horizontal axis of the desired mass spectrum.
+        -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object, which opens the two files corresponding to the file name, reads the entire .imzML file and extracts required attributes.
+        -dregions (collections.defaultdict): Enumerated regions mapped to the corresponding list of pixel coordinates.
+        -mzValues (numpy.array): Sequence of m/z values representing the horizontal axis of the desired mass spectrum.
         -specStart (int): Strating position of the spectra.
 
         Args:
@@ -98,16 +94,14 @@ class IMZMLExtract:
 
 
     def get_spectrum(self, specid, normalize=False):
-        """ Reads the spectrum at the specified index and can be normalized by
-        dividing each intensity value by the maximum value observed.
+        """ Reads the spectrum at the specified index and can be normalized by dividing each intensity value by the maximum value observed.
 
         Args:
             specid (int): Index of the desired spectrum in the .imzML file.
             normalize (bool, optional): [description]. Defaults to False.
 
         Returns:
-            numpy.array: Sequence of intensity values corresponding to
-            mz_array of the given specid.
+            numpy.array: Sequence of intensity values corresponding to mz_array of the given specid.
         """
 
         spectra1 = self.parser.getspectrum(specid)
@@ -154,8 +148,7 @@ class IMZMLExtract:
 
         Args:
             value (float): Value for which the m/z is needed.
-            threshold (float, optional): Allowed maximum distance of the discovered m/z index.
-            Defaults to None.
+            threshold (float, optional): Allowed maximum distance of the discovered m/z index. Defaults to None.
 
         Returns:
             int: m/z index of the given value.
@@ -173,16 +166,13 @@ class IMZMLExtract:
         return curIdx
 
     def get_region_indices(self, regionid):
-        """Returns a dictionary with the location of the region-specific pixels
-            mapped to their spectral id in the .imzML file.
+        """Returns a dictionary with the location of the region-specific pixels mapped to their spectral id in the .imzML file.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
-            dict: Dictionary of spatial (x, y, 1) coordinates to the index of the
-            corresponding spectrum in the .imzML file.
+            dict: Dictionary of spatial (x, y, 1) coordinates to the index of the corresponding spectrum in the .imzML file.
         """
         if not regionid in self.dregions:
             return None
@@ -202,16 +192,13 @@ class IMZMLExtract:
         return outindices
 
     def get_region_spectra(self, regionid):
-        """Returns a dictionary with the location of the region-specific pixels
-            mapped to their spectra in the .imzML file.
+        """Returns a dictionary with the location of the region-specific pixels mapped to their spectra in the .imzML file.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
-            dict: Dictionary of spatial (x, y, 1) coordinates to each
-            corresponding spectrum in the .imzML file.
+            dict: Dictionary of spatial (x, y, 1) coordinates to each corresponding spectrum in the .imzML file.
         """
         if not regionid in self.dregions:
             return None
@@ -240,8 +227,7 @@ class IMZMLExtract:
         """Returns an average spectrum for spectra that belong to a given region.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
             numpy.array: Sequence of intensity values of the average spectrum.
@@ -256,9 +242,7 @@ class IMZMLExtract:
         The average spectrum is the mean intensity value for all m/z values
 
         Args:
-            region_spects (numpy.array): Three-dimensional array (x, y, s),
-            where x and y are positional coordinates and s corresponds to the
-            spectrum.
+            region_spects (numpy.array): Three-dimensional array (x, y, s), where x and y are positional coordinates and s corresponds to the spectrum.
 
         Returns:
             numpy.array: Sequence of intensity values of the average spectrum.
@@ -281,8 +265,7 @@ class IMZMLExtract:
         """Returns the shape of the queried region id in all dimensions, x,y and spectra.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
             [3 tuples]: x-range, y-range, z-range, and spectra dimension.
@@ -318,8 +301,7 @@ class IMZMLExtract:
         """Returns the shape of the queried region. The shape is always rectangular.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
             [tuple]: (width, height, spectra length). Exclusive ends.
@@ -344,9 +326,7 @@ class IMZMLExtract:
 
 
     def __get_peaks(self, spectrum, window):
-        """Calculates m/z values that correspond to the peaks with at least
-        five times higher intensity as a median value within the sliding window
-        and extra test within an epsilon hull of the expectant.
+        """Calculates m/z values that correspond to the peaks with at least five times higher intensity as a median value within the sliding window and extra test within an epsilon hull of the expectant.
 
 
         Args:
@@ -400,8 +380,7 @@ class IMZMLExtract:
 
 
     def get_peaks_fast(self, spectrum, window):
-        """Calculates m/z values that correspond to the peaks with at least
-        twice as high intensity as the minimum value within the sliding window.
+        """Calculates m/z values that correspond to the peaks with at least twice as high intensity as the minimum value within the sliding window.
 
 
         Args:
@@ -433,13 +412,11 @@ class IMZMLExtract:
         return sorted(peaks)
 
     def to_peak_region(self, region_array, peak_window = 100):
-        """Returns the given spectra reduced to the detected peaks
-            and the list of peaks itself.
+        """Returns the given spectra reduced to the detected peaks and the list of peaks itself.
 
         Args:
             region_array (numpy.array): Array of spectra.
-            peak_window (int, optional): The size of the sliding windowing within the peaks should be compared.
-            Defaults to 100.
+            peak_window (int, optional): The size of the sliding windowing within the peaks should be compared. Defaults to 100.
 
         Returns:
             tuple: (Array of reduced spectra, peaks list)
@@ -464,8 +441,7 @@ class IMZMLExtract:
 
         Args:
             spectrum (numpy.array): Spectrum to normalize.
-            normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region",
-            "vector". Defaults to None.
+            normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.
                 - "max_intensity_spectrum": devides the spectrum by the maximum intensity value.
                 - "max_intensity_region"/"max_intensity_all_regions": devides the spectrum by custom max_region_value.
                 - "vector": devides the spectrum by its norm.
@@ -503,8 +479,7 @@ class IMZMLExtract:
 
 
     def baseline_als(self, y, lam, p, niter=10):
-        """Performs Baseline Correction with Asymmetric Least Squares Smoothing
-            by P. Eilers and H. Boelens.
+        """Performs Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens.
 
         Args:
             y (numpy.array): Spectrum to correct.
@@ -608,22 +583,14 @@ class IMZMLExtract:
 
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
-            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum",
-            "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median",
-            "baseline_cor". Defaults to None.
-                - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum"
-                method in normalize_spectrum function.
-                - "max_intensity_region": normalizes each spectrum with "max_intensity_region"
-                method using the maximum intensity value within the region.
-                - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions"
-                method using the maximum intensity value within all regions.
+            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.
+                - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.
+                - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.
+                - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.
                 - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function.
-                - "inter_median": devides each spectrum by its median to make intensities
-                consistent within each array.
-                - "intra_median": devides each spectrum by the global median to achieve consistency
-                between arrays.
-                - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing
-                by P. Eilers and H. Boelens. Requires lam, p and iters parameters.
+                - "inter_median": devides each spectrum by its median to make intensities consistent within each array.
+                - "intra_median": devides each spectrum by the global median to achieve consistency between arrays.
+                - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.
             lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
             p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
             iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
@@ -760,8 +727,7 @@ class IMZMLExtract:
         return outarray
 
     def plot_toc(self, region_array):
-        """Displays a matrix where each pixel is the sum of intensity values over
-        all m/z summed in the corresponding pixel in region_array.
+        """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
             region_array (numpy.array): Array of spectra.
@@ -780,8 +746,7 @@ class IMZMLExtract:
         plt.close()
 
     def plot_tnc(self, region_array):
-        """Displays a matrix where each pixel is the norm count of intensity values
-        over all m/z summed in the corresponding pixel in region_array.
+        """Displays a matrix where each pixel is the norm count of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
             region_array (numpy.array): Array of spectra.
@@ -801,13 +766,11 @@ class IMZMLExtract:
 
 
     def list_highest_peaks(self, region_array, counter=False):
-        """Plots the matrix where each pixel is m/z value that corresponds to
-        the maximum  intensity value in the corresponding pixel in region_array.
+        """Plots the matrix where each pixel is m/z value that corresponds to the maximum  intensity value in the corresponding pixel in region_array.
 
         Args:
             region_array (numpy.array): Array of spectra.
-            counter (bool, optional): Prints a frequency of each m/z peak.
-            Defaults to False.
+            counter (bool, optional): Prints a frequency of each m/z peak. Defaults to False.
         """
         region_dims = region_array.shape
 
@@ -846,15 +809,11 @@ class IMZMLExtract:
         plt.close()
 
     def get_pixel_spectrum(self, regionid, specCoords):
-        """Returns the spectrum, its id and true coordinates according
-        to the .imzML file that correspond to the given coordinates within
-        a specific region array.
+        """Returns the spectrum, its id and true coordinates according to the .imzML file that correspond to the given coordinates within a specific region array.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
-            specCoords (numpy.array): Region-specific coordinates of the
-            desired spectrum.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
+            specCoords (numpy.array): Region-specific coordinates of the desired spectrum.
 
         Returns:
             tuple: (spectum, spectrum id in .imzML file, global coordinates)
@@ -876,13 +835,10 @@ class IMZMLExtract:
         """Returns an array with spectra indexes.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
-            numpy.array: An array with the same dimensions as the specific
-            region array and each element is an index of the spectrum
-            that correspond to the specific coordinate.
+            numpy.array: An array with the same dimensions as the specific region array and each element is an index of the spectrum that correspond to the specific coordinate.
         """
         xr,yr,zr,sc = self.get_region_range(regionid)
         rs = self.get_region_shape(regionid)
@@ -905,18 +861,14 @@ class IMZMLExtract:
     
     
     def __findBestShift( self, refspectrum, allspectra, maxshift ):
-        """Returns the shift offers with the maximum similarity to the
-        reference spectrum withing [-maxshift, maxshift] interval.
+        """Returns the shift offers with the maximum similarity to the reference spectrum withing [-maxshift, maxshift] interval.
 
         Args:
-            refspectrum (vector): Sequence of intensities of the desired
-            reference spectrum.
-            allspectra (numpy.array): Array of spectra to be shifted.
-            maxshift (int): Maximum allowed shift.
+            refspectrum (vector): Sequence of intensities of the desired reference spectrum.
+            allspectra (numpy.array): Array of spectra to be shifted. maxshift (int): Maximum allowed shift.
 
         Returns:
-            tuple: (dictionary of the best shifts for each spectrum in allspectra,
-            dictionary of each shifted spectrum)
+            tuple: (dictionary of the best shifts for each spectrum in allspectra, dictionary of each shifted spectrum)
         """
         idx2shift = {}
         idx2shifted = {}
@@ -964,10 +916,7 @@ class IMZMLExtract:
 
 
     def to_called_peaks(self, region, masses, resolution):
-        """Transforms an array of spectra into an array of called peaks.
-        The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4).
-        Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value,
-        the highest one is chosen.
+        """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
         Args:
             region (numpy.array): region/array of spectra
@@ -1049,8 +998,7 @@ class IMZMLExtract:
             reg_array (numpy.array): array of spectra
             masses (numpy.array): m/z values for reg_array spectra
             maxshift (int): maximal shift in each direction. Defaults to 20.
-            ref_coord (tuple, optional): Coordinates of the reference spectrum within
-            reg_array. Defaults to (0,0).
+            ref_coord (tuple, optional): Coordinates of the reference spectrum within reg_array. Defaults to (0,0).
 
         Returns:
             (numpy.array, numpy.array): shifted reg_array, corresponding masses
@@ -1087,8 +1035,7 @@ class IMZMLExtract:
     
 
     def remove_background_spec_aligned(self, array, bgSpec, masses=None, maxshift=20):
-        """Subtracts bgSpec from all spectra in array region. For each pixel, the pixel spectrum
-        and bgSpec are aligned (maxshift).
+        """Subtracts bgSpec from all spectra in array region. For each pixel, the pixel spectrum and bgSpec are aligned (maxshift).
 
         Args:
             array (numpy.array): Array of spectra to subtract from.
@@ -1170,8 +1117,7 @@ class IMZMLExtract:
         return outarray
 
     def integrate_masses(self, array, masses=None, window=10):
-        """Returns an array of spectra with (2*window less values) where for postion p,
-        the intensity value is the sum from p-window to p+window.
+        """Returns an array of spectra with (2*window less values) where for postion p, the intensity value is the sum from p-window to p+window.
 
         Args:
             array (numpy.array): Input Array
@@ -1212,18 +1158,12 @@ class IMZMLExtract:
 
 
     def get_region_array(self, regionid, makeNullLine=True, bgspec=None):
-        """Returns a 2D array of spectra for the specified regionid.
-        Subtracts the minimal intensity to accommodate for intensity shifts
-        (due to different heights of the sample).
-        Can subtract a background spectrum for all loaded spectra.
+        """Returns a 2D array of spectra for the specified regionid. Subtracts the minimal intensity to accommodate for intensity shifts (due to different heights of the sample). Can subtract a background spectrum for all loaded spectra.
 
         Args:
-            regionid (int): Id of the desired region in the .imzML file,
-            as specified in dregions dictionary.
-            makeNullLine (bool, optional): Normalizes each spectum by subtracting
-            its minimal intensity. Defaults to True.
-            bgspec (list/numpy.array, optional): spectrum to subtract from all spectra.
-            Defaults to None.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
+            makeNullLine (bool, optional): Normalizes each spectum by subtracting its minimal intensity. Defaults to True.
+            bgspec (list/numpy.array, optional): spectrum to subtract from all spectra. Defaults to None.
 
         Returns:
             numpy.array: 2D-Array of spectra
@@ -1397,8 +1337,7 @@ class IMZMLExtract:
         return dist
 
     def _detectRegions(self, allpixels):
-        """Returns a dictionary of region coordinates and creates a visualization
-        of their location.
+        """Returns a dictionary of region coordinates and creates a visualization of their location.
 
         Args:
             allpixels (numpy.array): Array of allpixels.
@@ -1410,8 +1349,7 @@ class IMZMLExtract:
         return self.__detectRegions(allpixels)
 
     def __detectRegions(self, allpixels):
-        """Returns a dictionary of region coordinates and creates a visualization
-        of their location.
+        """Returns a dictionary of region coordinates and creates a visualization of their location.
 
         Returns:
             dict: region id to its coordinates
@@ -1452,8 +1390,7 @@ class IMZMLExtract:
 
 
     def __detectRegions__old(self, allpixels):
-        """Returns a dictionary of region coordinates and creates a visualization
-        of their location.
+        """Returns a dictionary of region coordinates and creates a visualization of their location.
 
         Args:
             allpixels (numpy.array): Array of allpixels.
