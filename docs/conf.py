@@ -29,7 +29,15 @@ master_doc = 'index'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
+    "sphinx.ext.napoleon",
+    'sphinxcontrib.apidoc'
 ]
+
+
+apidoc_module_dir = '../pIMZ'
+apidoc_output_dir = 'reference'
+apidoc_excluded_paths = ['../pIMZ/tablefilter', '../cIMZ', '../tests']
+apidoc_separate_modules = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
