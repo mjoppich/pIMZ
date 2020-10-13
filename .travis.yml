@@ -3,7 +3,7 @@ dist: bionic
 python:
   - "3.8"
 script:
-  - pip3 install ms_peak_picker
+  - pip3 install ms_peak_picker wheezy.template
   - pip3 install Cython --upgrade
   - pip3 install pandas numpy --upgrade
   - pip3 install llvmlite numba --upgrade
