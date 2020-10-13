@@ -605,7 +605,14 @@ class SpectraRegion():
 
 
     def __segment__upgma(self, number_of_regions):
+        """Forms flat clusters with UPGMA clustering method (see scipy.cluster.hierarchy.linkage method='average' for more information) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -615,7 +622,14 @@ class SpectraRegion():
         return c
 
     def __segment__centroid(self, number_of_regions):
+        """Forms flat clusters with centroid clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -626,7 +640,14 @@ class SpectraRegion():
 
 
     def __segment__median(self, number_of_regions):
+        """Forms flat clusters with median clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -636,7 +657,14 @@ class SpectraRegion():
         return c
 
     def __segment__wpgma(self, number_of_regions):
+        """Performs WPGMA linkage (see scipy.cluster.hierarchy.weighted for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -646,7 +674,14 @@ class SpectraRegion():
         return c
 
     def __segment__ward(self, number_of_regions):
+        """Performs Ward’s linkag (see scipy.cluster.hierarchy.ward for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
