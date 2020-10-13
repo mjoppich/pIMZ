@@ -76,8 +76,28 @@ setup(name="pIMZ",
       zip_safe=False,
       tests_require=['pytest'],
       cmdclass={'test': PyTest},
+      python_requires='>=3.8',
       # TODO: List of packages that this one depends upon:   
-      install_requires=['ms_peak_picker', 'numpy', 'pandas', 'globus_sdk', 'progressbar', 'anndata', 'diffxpy', 'scipy', 'scikit-image', 'scikit-learn', 'dill', 'pathos', 'pyimzml', 'natsort', 'seaborn', 'matplotlib', 'imageio', 'Pillow'], #dabest
+      install_requires=[
+        'numpy', 
+        'matplotlib',
+        'pandas',
+        'scipy', 
+        'scikit-image',
+        'scikit-learn', 
+        'dill', 
+        'pathos',
+        'ms_peak_picker', 
+        'globus_sdk', 
+        'progressbar', 
+        'anndata', 
+        'diffxpy', 
+        'pyimzml',
+        'natsort',
+        'seaborn',
+
+        'imageio',
+        'Pillow'], #dabest
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
         'console_scripts': 
