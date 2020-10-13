@@ -2,6 +2,7 @@ language: python
 python:
   - "3.8"
 script:
+  - apt-get install llvm-dev
   - pip3 install dabest
   - pip3 install pandas --upgrade
   - python3 setup.py develop test
