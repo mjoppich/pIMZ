@@ -39,7 +39,7 @@ napoleon_numpy_docstring = False
 
 
 autodoc_mock_imports = [
-        'numpy', 
+        'numpy', 'dabest',
         'h5py',
         'matplotlib',
         'pandas',
