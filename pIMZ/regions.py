@@ -460,6 +460,20 @@ class SpectraRegion():
 
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True):
+        """Filters the region_region to the given masses and returns the matrix with summed
+        representation of the gained spectra.
+
+        Args:
+            masses (array): List of masses.
+            log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
+            min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
+            max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
+            plot (bool, optional): Whether to plot the output matrix. Defaults to True.
+            verbose (bool, optional): Whether to correct each mass in masses. Defaults to True.
+
+        Returns:
+            numpy.array: Each element is a sum of inetsities at given masses.
+        """
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
@@ -498,6 +512,14 @@ class SpectraRegion():
 
 
     def calc_similarity(self, inputarray):
+        """Returns cosine similarity matrix which is claculated with help of C++ libarary.
+
+        Args:
+            inputarray (numpy.array): Array of spectra.
+
+        Returns:
+            numpy.array: Pairwise similarity matrix.
+        """
         # load image
         dims = 1
 
@@ -545,10 +567,8 @@ class SpectraRegion():
         Args:
             mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".
                 - "spectra": Raw similarity matrix.
-                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the
-                maximum values.
-                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the
-                maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.
+                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the maximum values.
+                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.
             features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
             neighbors (int, optional): Number of neighboring masses to each feature to be included. Defaults to 1.
 
