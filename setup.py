@@ -77,9 +77,11 @@ setup(name="pIMZ",
       tests_require=['pytest'],
       cmdclass={'test': PyTest},
       python_requires='>=3.8',
-      # TODO: List of packages that this one depends upon:   
+      # TODO: List of packages that this one depends upon:  
+      setup_requires=['numpy','pandas'], 
       install_requires=[
         'numpy', 
+        'h5py',
         'matplotlib',
         'pandas',
         'scipy', 
