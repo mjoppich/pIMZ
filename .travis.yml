@@ -2,4 +2,5 @@ language: python
 python:
   - "3.8"
 script:
+  - pip3 install dabest
   - python3 setup.py develop test
