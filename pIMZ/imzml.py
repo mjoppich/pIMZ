@@ -65,12 +65,12 @@ class IMZMLExtract:
 
     def __init__(self, fname):
         """
-        Constructs an IMZMLExtract object with the following attributes:
-        -logger (logging.Logger): Reference to the Logger object.
-        -fname (str): Absolute path to the .imzML file.
-        -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object, which opens the two files corresponding to the file name, reads the entire .imzML file and extracts required attributes.
-        -dregions (collections.defaultdict): Enumerated regions mapped to the corresponding list of pixel coordinates.
-        -mzValues (numpy.array): Sequence of m/z values representing the horizontal axis of the desired mass spectrum.
+        Constructs an IMZMLExtract object with the following attributes:\n
+        -logger (logging.Logger): Reference to the Logger object.\n
+        -fname (str): Absolute path to the .imzML file.\n
+        -parser (pyimzml.ImzMLParser): Reference to the ImzMLParser object, which opens the two files corresponding to the file name, reads the entire .imzML file and extracts required attributes.\n
+        -dregions (collections.defaultdict): Enumerated regions mapped to the corresponding list of pixel coordinates.\n
+        -mzValues (numpy.array): Sequence of m/z values representing the horizontal axis of the desired mass spectrum.\n
         -specStart (int): Strating position of the spectra.
 
         Args:
@@ -461,10 +461,10 @@ class IMZMLExtract:
 
         Args:
             spectrum (numpy.array): Spectrum to normalize.
-            normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.
-                - "max_intensity_spectrum": devides the spectrum by the maximum intensity value.
-                - "max_intensity_region"/"max_intensity_all_regions": devides the spectrum by custom max_region_value.
-                - "vector": devides the spectrum by its norm.
+            normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.\n
+                - "max_intensity_spectrum": devides the spectrum by the maximum intensity value.\n
+                - "max_intensity_region"/"max_intensity_all_regions": devides the spectrum by custom max_region_value.\n
+                - "vector": devides the spectrum by its norm.\n
             max_region_value (int/float, optional): Value to normalize to for max-region-intensity norm. Defaults to None.
 
         Returns:
@@ -603,7 +603,7 @@ class IMZMLExtract:
 
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
-            normalize ([type], optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.
+            normalize (str, optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.\n
                 - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.\n
                 - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.\n
                 - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.\n

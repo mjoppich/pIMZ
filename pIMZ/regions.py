@@ -473,6 +473,20 @@ class SpectraRegion():
 
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True):
+        """Filters the region_region to the given masses and returns the matrix with summed
+        representation of the gained spectra.
+
+        Args:
+            masses (array): List of masses.
+            log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
+            min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
+            max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
+            plot (bool, optional): Whether to plot the output matrix. Defaults to True.
+            verbose (bool, optional): Whether to correct each mass in masses. Defaults to True.
+
+        Returns:
+            numpy.array: Each element is a sum of inetsities at given masses.
+        """
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
@@ -511,6 +525,14 @@ class SpectraRegion():
 
 
     def calc_similarity(self, inputarray):
+        """Returns cosine similarity matrix which is claculated with help of C++ libarary.
+
+        Args:
+            inputarray (numpy.array): Array of spectra.
+
+        Returns:
+            numpy.array: Pairwise similarity matrix.
+        """
         # load image
         dims = 1
 
@@ -556,12 +578,10 @@ class SpectraRegion():
         """Returns similarity matrix.
 
         Args:
-            mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".
-                - "spectra": Raw similarity matrix.
-                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the
-                maximum values.
-                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the
-                maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.
+            mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".\n
+                - "spectra": Raw similarity matrix.\n
+                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the maximum values.\n
+                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
             features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
             neighbors (int, optional): Number of neighboring masses to each feature to be included. Defaults to 1.
 
@@ -618,7 +638,14 @@ class SpectraRegion():
 
 
     def __segment__upgma(self, number_of_regions):
+        """Forms flat clusters with UPGMA clustering method (see scipy.cluster.hierarchy.linkage method='average' for more information) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -628,7 +655,14 @@ class SpectraRegion():
         return c
 
     def __segment__centroid(self, number_of_regions):
+        """Forms flat clusters with centroid clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -639,7 +673,14 @@ class SpectraRegion():
 
 
     def __segment__median(self, number_of_regions):
+        """Forms flat clusters with median clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -649,7 +690,14 @@ class SpectraRegion():
         return c
 
     def __segment__wpgma(self, number_of_regions):
+        """Performs WPGMA linkage (see scipy.cluster.hierarchy.weighted for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
@@ -659,7 +707,14 @@ class SpectraRegion():
         return c
 
     def __segment__ward(self, number_of_regions):
+        """Performs Ward’s linkag (see scipy.cluster.hierarchy.ward for more information to the method) on the similarity matrix.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         ssim = 1-self.spectra_similarity
         ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
 
