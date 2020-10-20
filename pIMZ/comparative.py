@@ -1,45 +1,63 @@
-import numpy as np
-from scipy import misc
-import ctypes
-import dabest
+# general
+import math
+import logging
 import json
+import os,sys
+import random
+from collections import defaultdict, Counter
+import glob
+import shutil, io, base64
+
+# general package
+from natsort import natsorted
 import pandas as pd
+
+import numpy as np
+from numpy.ctypeslib import ndpointer
+
+from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
+import ms_peak_picker
+import regex as re
+
+
+# image
+import skimage
+from skimage import measure as sk_measure
+
+# processing
+import ctypes
+import subprocess
+import dill as pickle
+
+
+#vis
+import dabest
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os,sys
-import imageio
-from PIL import Image
-from natsort import natsorted
-import subprocess
-from collections import defaultdict, Counter
-from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
-import logging
-import dill as pickle
-import math
-import scipy.ndimage as ndimage
+
+#methods
+import umap
+import hdbscan
 import diffxpy.api as de
 import anndata
-import progressbar
-from mpl_toolkits.axes_grid1 import ImageGrid
-from scipy import sparse
+
+from scipy import ndimage, misc, sparse
 from scipy.sparse.linalg import spsolve
-import random
-import ms_peak_picker
-
-
-baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
-
-from sklearn.metrics.pairwise import cosine_similarity
 from scipy.spatial.distance import squareform, pdist
-
 import scipy.cluster as spc
-
 import scipy as sp
 import sklearn as sk
 
-import umap
-import hdbscan
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+#web/html
+import jinja2
+
+
+# applications
+import progressbar
 
 
 class CombinedSpectra():

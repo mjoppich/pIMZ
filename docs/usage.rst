@@ -30,13 +30,13 @@ Usage
 pIMZ can be used with several use-cases.
 Here two of these are highlighted.
 
-1. Using a custom/private imzML-file as source
+1. Using a local imzML-file as source
 2. Using public HuBMap-Data
 
-Private imzML-file
-``````````````````
+Local imzML-file
+````````````````
 
-The usage of pIMZ on a private or local imzML is shown in the examples.
+The usage of pIMZ on a local imzML is shown in the examples.
 The `IMZMLprocess notebook  <https://github.com/mjoppich/pIMZ/blob/master/examples/IMZMLprocess.ipynb>`_ showcases how to use pIMZ to retrieve the correct data, normalize intensities, cluster spectra, determine background, perform differential analysis and finally combine multiple region for further comparative analyses.
 
 

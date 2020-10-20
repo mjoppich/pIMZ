@@ -1,58 +1,71 @@
-import numpy as np
-from scipy import misc
-import ctypes
-import dabest
-import json
-import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os,sys
-import imageio
-from PIL import Image
-from natsort import natsorted
-import subprocess
-from collections import defaultdict, Counter
-from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
-import logging
-import dill as pickle
+# general
 import math
-import scipy.ndimage as ndimage
-import diffxpy.api as de
-import anndata
-import progressbar
-from mpl_toolkits.axes_grid1 import ImageGrid
-from scipy import sparse
-from scipy.sparse.linalg import spsolve
-
-import operator
-
-import jinja2
-
-import ms_peak_picker
-import regex as re
+import logging
+import json
+import os,sys
 import random
-
-from skimage import measure as sk_measure
-
+from collections import defaultdict, Counter
 import glob
 import shutil, io, base64
 
+# general package
+from natsort import natsorted
+import pandas as pd
 
-from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
+from numpy.ctypeslib import ndpointer
+
+from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
+import ms_peak_picker
+import regex as re
+
+
+# image
+import skimage
+from skimage import measure as sk_measure
+
+# processing
+import ctypes
+import subprocess
+import dill as pickle
+
+
+#vis
+import dabest
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#methods
+import umap
+import hdbscan
+import diffxpy.api as de
+import anndata
+
+from scipy import ndimage, misc, sparse
+from scipy.sparse.linalg import spsolve
 from scipy.spatial.distance import squareform, pdist
-
 import scipy.cluster as spc
-
 import scipy as sp
 import sklearn as sk
 
-import umap
-import hdbscan
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+#web/html
+import jinja2
+
+
+# applications
+import progressbar
 
 
 
-from numpy.ctypeslib import ndpointer
+
+
+
+
+
 
 class SpectraRegion():
     """
@@ -1023,6 +1036,24 @@ class SpectraRegion():
 
         return self.segmented
 
+    def manual_segmentation(self, image_path):
+
+        if type(image_path) in [np.array]:
+            self.logger.info("Received Image as Matrix")
+
+            img = image_path
+
+        else:
+
+            img = skimage.io.imread(image_path)
+
+
+        labeledArr, num_ids = ndimage.label(img, structure=np.ones((3,3)))
+
+        plt.matshow(labeledArr)
+        plt.show()
+
+
     def set_background(self, clusterIDs):
 
         if not type(clusterIDs) in [tuple, list, set]:
@@ -1835,6 +1866,22 @@ document.addEventListener('readystatechange', event => {
           value = massImgValues) 
 
         (headpart, bodypart) = self._makeHTMLStringFilterTable(expDF)
+
+
+        
+        heatmap = plt.matshow(self.segmented, fignum=100)
+        plt.colorbar(heatmap)
+
+
+        pic_IObytes = io.BytesIO()
+        plt.savefig(pic_IObytes,  format='png')
+        pic_IObytes.seek(0)
+        pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+        plt.close(100)
+
+        imgStr = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+        bodypart = "<p>{}<p>\n{}".format(imgStr, bodypart)
 
         if title != None:
             bodypart = "<h1>"+title+"</h1>" + bodypart
