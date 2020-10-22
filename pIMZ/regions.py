@@ -767,7 +767,16 @@ class SpectraRegion():
         return c
 
     def __segment__umap_ward(self, number_of_regions, dims=None, n_neighbors=10):
+        """[summary]
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+            dims (int/list, optional): [description]. Defaults to None.
+            n_neighbors (int, optional): [description]. Defaults to 10.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
         ndims = self.region_array.shape[2]
@@ -985,7 +994,19 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
-    def plot_tic(self, min_cut_off=None, max_cut_off=None, masses=None, hist=False):
+    def plot_tic(self, min_cut_off=None, max_cut_off=None, masses=None, hist=False, plot_log=False):
+        """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
+
+        Args:
+            min_cut_off (int/float, optional): Minimum allowed value. Defaults to None.
+            max_cut_off (int/float, optional): Maximum allowed value. Defaults to None.
+            masses (numpy.array/list, optional): A list of masses to which each spectrum will be reduced. Defaults to None.
+            hist (bool, optional): Whether to plot a cumularive histogram of values (sums) frequencies. Defaults to False.
+            plot_log (bool, optional): Whether to logarithm the resulting matrix. Defaults to False.
+
+        Returns:
+            numpy.array: A matrix with summed intensities of each spectrum.
+        """
         assert(not self.region_array is None)
 
         showcopy = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
@@ -1017,6 +1038,8 @@ class SpectraRegion():
         if max_cut_off != None:
             showcopy[showcopy >= max_cut_off] = max_cut_off
 
+        if plot_log:
+            showcopy = np.log(showcopy)
 
         fig = plt.figure()
         self.plot_array(fig, showcopy, discrete_legend=False)
