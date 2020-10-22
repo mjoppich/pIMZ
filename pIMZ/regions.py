@@ -282,16 +282,23 @@ class SpectraRegion():
         """
 
 
-        valid_vals = np.unique(arr)
-        heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
 
         if discrete_legend:
-            # calculate the POSITION of the tick labels
-            min_ = min(valid_vals)
-            max_ = max(valid_vals)
+            valid_vals = sorted(np.unique(arr))
 
-            positions = np.linspace(min_, max_, len(valid_vals))
-            val_lookup = dict(zip(positions, valid_vals))
+            normArray = np.zeros(arr.shape)
+            
+            val_lookup = {}
+            positions = []
+            for uIdx, uVal in enumerate(valid_vals):
+                normArray[arr == uVal] = uIdx
+                val_lookup[uIdx] = uVal
+                positions.append(uIdx)
+
+            heatmap = plt.matshow(normArray, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
+
+            # calculate the POSITION of the tick labels
+            #positions = np.linspace(0, len(valid_vals), len(valid_vals))
 
             def formatter_func(x, pos):
                 'The two args are the value and tick position'
@@ -303,6 +310,8 @@ class SpectraRegion():
             # We must be sure to specify the ticks matching our target names
             plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
         else:
+            
+            heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
             plt.colorbar(heatmap)
         
         return fig
@@ -433,6 +442,32 @@ class SpectraRegion():
             print(jsElems, file=fout)
         
 
+    def judge_de_masses(self, filter_func):
+
+        for test in self.df_results_all:
+
+            for comp in self.df_results_all[test]:
+
+                testDF = self.df_results_all[test][comp]
+
+                self.logger.info("Judging results from {} and comparison {}".format(test, comp))
+
+                dfRes = [False] * len(testDF)
+                for index, row in testDF.iterrows():
+
+                    res = filter_func(row)
+                    dfRes[index] = res
+
+                pos = testDF.columns.values.tolist().index("gene_mass")+1
+                testDF.insert(loc = pos, 
+                column = 'de_judge', 
+                value = dfRes) 
+                
+                self.logger.info("Storing results from {} and comparison {} (position {})".format(test, comp,pos))
+                self.df_results_all[test][comp] = testDF
+
+        
+
 
     def idx_for_mass(self, mass):
         """Returns the closest index for a specific mass.
@@ -472,17 +507,18 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None):
         """Filters the region_region to the given masses and returns the matrix with summed
         representation of the gained spectra.
 
         Args:
-            masses (array): List of masses.
+            masses (array): List of masses or protein names (requires pw set).
             log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
             min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
             max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
             plot (bool, optional): Whether to plot the output matrix. Defaults to True.
             verbose (bool, optional): Whether to correct each mass in masses. Defaults to True.
+            pw (ProteinWeights, optional): Allows to . Defaults to None.
 
         Returns:
             numpy.array: Each element is a sum of inetsities at given masses.
@@ -490,9 +526,17 @@ class SpectraRegion():
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
+        useMasses = []
+        for x in masses:
+            if type(x) == str:
+                massprots = pw.get_masses_for_protein(x)
+                useMasses += list(massprots)
+            else:
+                useMasses.append(x)
+
         image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
 
-        for mass in masses:
+        for mass in useMasses:
             
             bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
 
@@ -1018,10 +1062,9 @@ class SpectraRegion():
                             showcopy[i,j] = 2
                         elif showcopy[i,j] != 0:
                             showcopy[i,j] = 1
-
-
+                            
         fig = plt.figure()
-        self.plot_array(fig, showcopy)
+        self.plot_array(fig, showcopy, discrete_legend=True)
         plt.show()
         plt.close()
 
@@ -1869,13 +1912,6 @@ document.addEventListener('readystatechange', event => {
         fgMask = self.get_mask(regions=resKey[0])
         bgMask = self.get_mask(regions=resKey[1])
 
-        plt.imshow(fgMask)
-        plt.show()
-        plt.close()
-        plt.imshow(bgMask)
-        plt.show()
-        plt.close()
-
 
         for mass in set(requiredMasses):
             mass_data = self.mass_heatmap(mass, plot=False, verbose=False)
@@ -1922,11 +1958,27 @@ document.addEventListener('readystatechange', event => {
 
         (headpart, bodypart) = self._makeHTMLStringFilterTable(expDF)
 
+        #
+        # Plot segments
+        #
+        #
+        valid_vals = np.unique(self.segmented)
+        heatmap = plt.matshow(self.segmented, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=100)
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
 
-        
-        heatmap = plt.matshow(self.segmented, fignum=100)
-        plt.colorbar(heatmap)
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
 
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        formatter = plt.FuncFormatter(formatter_func)
+
+        # We must be sure to specify the ticks matching our target names
+        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
 
         pic_IObytes = io.BytesIO()
         plt.savefig(pic_IObytes,  format='png')
@@ -1934,9 +1986,49 @@ document.addEventListener('readystatechange', event => {
         pic_hash = base64.b64encode(pic_IObytes.read()).decode()
         plt.close(100)
 
-        imgStr = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+        imgStrSegments = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
 
-        bodypart = "<p>{}<p>\n{}".format(imgStr, bodypart)
+        #
+        # Plot segment highlights
+        #
+        #
+        showcopy = np.copy(self.segmented)
+
+        for i in range(0, showcopy.shape[0]):
+            for j in range(0, showcopy.shape[1]):
+                if showcopy[i,j] != 0:
+                    if showcopy[i,j] in resKey[0]:
+                        showcopy[i,j] = 2
+                    elif showcopy[i,j] != 0:
+                        showcopy[i,j] = 1
+
+        valid_vals = np.unique(showcopy)
+        heatmap = plt.matshow(showcopy, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=100)
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        formatter = plt.FuncFormatter(formatter_func)
+
+        # We must be sure to specify the ticks matching our target names
+        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+
+        pic_IObytes = io.BytesIO()
+        plt.savefig(pic_IObytes,  format='png')
+        pic_IObytes.seek(0)
+        pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+        plt.close(100)
+
+        imgStrSegmentHighlight = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+        bodypart = "<p>{}<p><p>{}<p>\n{}".format(imgStrSegments, imgStrSegmentHighlight, bodypart)
 
         if title != None:
             bodypart = "<h1>"+title+"</h1>" + bodypart
@@ -2122,7 +2214,7 @@ document.addEventListener('readystatechange', event => {
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True,out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, backgroundCluster=[0], out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
         """
         Finds all marker proteins for a specific clustering.
 
@@ -2131,6 +2223,7 @@ document.addEventListener('readystatechange', event => {
             keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
             replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
             includeBackground (bool, optional): If True, the cluster specific expression data are compared to all other clusters incl. background cluster. Defaults to True.
+            backgroundCluster ([int], optional): Clusters which are handled as background. Defaults to [0].
             out_prefix (str, optional): Prefix for results file. Defaults to "nldiffreg".
             outdirectory ([type], optional): Directory used for empire files. Defaults to None.
             use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].
@@ -2145,14 +2238,16 @@ document.addEventListener('readystatechange', event => {
 
         for segment in cluster2coords:
 
-            if not includeBackground and segment == 0:
+            if not includeBackground and segment in backgroundCluster:
                 continue
 
             clusters0 = [segment]
             clusters1 = [x for x in cluster2coords if not x in clusters0]
 
-            if not includeBackground and 0 in clusters1:
-                del clusters1[clusters1.index(0)]
+            if not includeBackground:
+                for bgCluster in backgroundCluster:
+                    if bgCluster in clusters1:
+                        del clusters1[clusters1.index(bgCluster)]
 
             self.find_markers(clusters0=clusters0, clusters1=clusters1, replaceExisting=replaceExisting, outdirectory=outdirectory, out_prefix=out_prefix, use_methods=use_methods, count_scale=count_scale)
 
@@ -2170,7 +2265,7 @@ document.addEventListener('readystatechange', event => {
 
                 resDF = self.deres_to_df(method, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
 
-                dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)           
+                dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)
 
         return dfbyMethod
 
