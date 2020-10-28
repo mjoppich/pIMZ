@@ -1710,7 +1710,18 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-        def __check_neighbour(self, mat, x, y, background):
+    def __check_neighbour(self, mat, x, y, background):
+        """Decides whether the given pixel suppose to be a part of background cluster parameter.
+
+        Args:
+            mat (numpy.array): CLustered image with cluster ids as elements.
+            x (int): x-Coordinate.
+            y (int): y-Corrdinate.
+            background (int): Cluster id of the cluster to be compared to.
+
+        Returns:
+            bool: Whether the pixel is neighbour of the cluster in background parameter.
+        """
         if x < mat.shape[0]-1 and mat[x+1][y] in background:
             return True
         elif x > 1 and mat[x-1][y] in background:
