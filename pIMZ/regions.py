@@ -1710,6 +1710,59 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
+        def __check_neighbour(self, mat, x, y, background):
+        if x < mat.shape[0]-1 and mat[x+1][y] in background:
+            return True
+        elif x > 1 and mat[x-1][y] in background:
+            return True
+        elif y < mat.shape[1]-1 and mat[x][y+1] in background:
+            return True
+        elif y > 1 and mat[x][y-1] in background:
+            return True
+        elif x < mat.shape[0]-1 and y < mat.shape[1]-1 and mat[x+1][y+1] in background:
+            return True
+        elif x > 1 and y > 1 and mat[x-1][y-1] in background:
+            return True
+        elif x < mat.shape[0]-1 and y > 1 and mat[x+1][y-1] in background:
+            return True
+        elif y < mat.shape[1]-1 and x > 1 and mat[x-1][y+1] in background:
+            return True
+        else:
+            return False
+
+
+    def cartoonize(self, background, aorta, plaque, blur=False):
+        """Simplifies the clustered image.
+
+        Args:
+            background (list/numpy.array): A list of clusters id that contain background clusters.
+            aorta (list/numpy.array): A list of clusters id that contain aorta clusters.
+            plaque (list/numpy.array): A list of clusters id that contain plaque clusters.
+            blur (bool, optional): Whether to apply multidimensional uniform filter to blur the image. Defaults to False.
+
+        Returns:
+            numpy.array: Simpified image with three clusters.
+        """
+        assert(not self.segmented is None)
+
+        img = np.copy(self.segmented)
+        cartoon_img = np.zeros((img.shape))
+
+        for i in range(img.shape[0]):
+            for j in range(img.shape[1]):
+                if img[i,j] in background:
+                    cartoon_img[i,j] = 0
+                elif img[i,j] in aorta or self.__check_neighbour(img, i, j, background):
+                    cartoon_img[i,j] = 1
+                else:
+                    if not self.__check_neighbour(img, i, j, background) and self.__check_neighbour(cartoon_img, i, j, aorta) or img[i][j] in plaque:
+                        cartoon_img[i,j] = 2
+                    else: 
+                        cartoon_img[i,j]  = 0
+        if blur:
+            cartoon_img = ndimage.uniform_filter(cartoon_img, size=4)
+        return cartoon_img
+
 
 
     def _makeHTMLStringFilterTable(self, expDF):
