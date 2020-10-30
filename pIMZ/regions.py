@@ -23,6 +23,7 @@ import regex as re
 # image
 import skimage
 from skimage import measure as sk_measure
+from mpl_toolkits.mplot3d import axes3d
 
 # processing
 import ctypes
@@ -1774,6 +1775,63 @@ class SpectraRegion():
             cartoon_img = ndimage.uniform_filter(cartoon_img, size=4)
         return cartoon_img
 
+    def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
+        """Plots the background, aorta and plaque pixelwise probabilities.
+
+        Args:
+            imze (IMZMLExtract): IMZMLExtract object.
+            background (list/numpy.array): A list of clusters id that contain background clusters.
+            aorta (list/numpy.array): A list of clusters id that contain aorta clusters.
+            plaque (list/numpy.array): A list of clusters id that contain plaque clusters.
+            norm (bool, optional): Whether to divide all probabilities by global maximum probability. Defaults to False.
+
+        Returns:
+            numpy.array, numpy.array, numpy.array: Three array of probabilities for background, aorta and plaque.
+        """
+        out = self.cartoonize(background, aorta, plaque, blur=False)
+        tmp = self.segmented
+        self.segmented = out
+        cons = self.consensus_spectra(method="median", set_consensus=False)
+        self.segmented = tmp
+        sim_background = np.zeros(out.shape)
+        sim_aorta = np.zeros(out.shape)
+        sim_plaque = np.zeros(out.shape)
+        max_v = 0
+        
+        for i in range(out.shape[0]):
+            for j in range(out.shape[1]):
+                spectra = imze.get_spectrum(self.pixel2idx[(i,j)], normalize=False)
+                sim_background[i][j] = imze.compare_sequence(spectra, cons[0])
+                sim_aorta[i][j] = imze.compare_sequence(spectra, cons[1])
+                sim_plaque[i][j] = imze.compare_sequence(spectra, cons[2])
+                if sim_background[i][j]>max_v:
+                    max_v = sim_background[i][j]
+                if sim_aorta[i][j]>max_v:
+                    max_v = sim_aorta[i][j]
+                if sim_plaque[i][j]>max_v:
+                    max_v = sim_plaque[i][j]
+        if norm:
+            sim_background = sim_background/max_v
+            sim_aorta = sim_aorta/max_v
+            sim_plaque = sim_plaque/max_v
+            
+        (X, Y) = np.meshgrid(np.arange(self.segmented.shape[1]), np.arange(self.segmented.shape[0]))
+
+        fig = plt.figure(figsize=(12,12))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plot a basic wireframe.
+        ax.plot_wireframe(X, Y, sim_background, color='green', label='Background')
+        ax.plot_wireframe(X, Y, sim_aorta, color='red', label='Aorta')
+        ax.plot_wireframe(X, Y, sim_plaque, label='Plaque')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('P')
+        ax.legend()
+
+        plt.show()
+
+        return sim_background, sim_aorta, sim_plaque
 
 
     def _makeHTMLStringFilterTable(self, expDF):
