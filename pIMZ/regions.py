@@ -1796,24 +1796,18 @@ class SpectraRegion():
         sim_background = np.zeros(out.shape)
         sim_aorta = np.zeros(out.shape)
         sim_plaque = np.zeros(out.shape)
-        max_v = 0
-        
+
         for i in range(out.shape[0]):
             for j in range(out.shape[1]):
-                spectra = imze.get_spectrum(self.pixel2idx[(i,j)], normalize=False)
+                spectra = self.region_array[i][j]
                 sim_background[i][j] = imze.compare_sequence(spectra, cons[0])
                 sim_aorta[i][j] = imze.compare_sequence(spectra, cons[1])
                 sim_plaque[i][j] = imze.compare_sequence(spectra, cons[2])
-                if sim_background[i][j]>max_v:
-                    max_v = sim_background[i][j]
-                if sim_aorta[i][j]>max_v:
-                    max_v = sim_aorta[i][j]
-                if sim_plaque[i][j]>max_v:
-                    max_v = sim_plaque[i][j]
+
         if norm:
-            sim_background = sim_background/max_v
-            sim_aorta = sim_aorta/max_v
-            sim_plaque = sim_plaque/max_v
+            sim_background = np.sqrt(sim_background)
+            sim_aorta = np.sqrt(sim_aorta)
+            sim_plaque = np.sqrt(sim_plaque)
             
         (X, Y) = np.meshgrid(np.arange(self.segmented.shape[1]), np.arange(self.segmented.shape[0]))
 
