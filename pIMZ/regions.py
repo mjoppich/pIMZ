@@ -752,7 +752,7 @@ class SpectraRegion():
         return c
 
     def __segment__ward(self, number_of_regions):
-        """Performs Ward’s linkag (see scipy.cluster.hierarchy.ward for more information to the method) on the similarity matrix.
+        """Performs Ward’s linkage (see scipy.cluster.hierarchy.ward for more information to the method) on the similarity matrix.
 
         Args:
             number_of_regions (int): Number of desired clusters.
@@ -768,12 +768,12 @@ class SpectraRegion():
         return c
 
     def __segment__umap_ward(self, number_of_regions, dims=None, n_neighbors=10):
-        """[summary]
+        """Performs UMAP dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
 
         Args:
             number_of_regions (int): Number of desired clusters.
-            dims (int/list, optional): [description]. Defaults to None.
-            n_neighbors (int, optional): [description]. Defaults to 10.
+            dims (int/list, optional): dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
 
         Returns:
             numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
@@ -839,6 +839,20 @@ class SpectraRegion():
 
 
     def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
+        """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
+
+        Args:
+            number_of_regions (int): Number of desired clusters.
+            dims (int/list, optional): he desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_samples (int, optional): Minimum number of samples. Defaults to 5.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+
+        Returns:
+            list: A list of HDBSCAN labels. 
+        """
+        #TODO decide whether the min_samples is needed (not used in this function)
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
@@ -888,7 +902,14 @@ class SpectraRegion():
         return self.dimred_labels
 
     def redo_hdbscan_on_dimred(self, number_of_regions, min_cluster_size=15, num_samples=10000, set_segmented=True):
+        """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) with the additional UMAP dimension reduction in order to achieve the desired number of clusters.
 
+        Args:
+            number_of_regions (int): Number of desired clusters.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 15.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+            set_segmented (bool, optional): Whether to update the segmented array of the current object. Defaults to True.
+        """
         if num_samples == -1 or self.dimred_elem_matrix.shape[0] < num_samples:
             selIndices = [x for x in range(0, self.dimred_elem_matrix.shape[0])]
         else:
@@ -938,7 +959,11 @@ class SpectraRegion():
 
 
     def reduce_clusters(self, number_of_clusters):
+        """Reducing the number of clusters in segmented array by "reclustering" after the Ward's clustering on pairwise similarity matrix between consensus spectra.
 
+        Args:
+            number_of_clusters (int): Number of desired clusters.
+        """
         self.logger.info("Cluster Reduction")
 
         _ = self.consensus_spectra()
@@ -961,7 +986,11 @@ class SpectraRegion():
 
 
     def vis_umap(self, legend=True):
+        """Visualises a scatterplot of the UMAP assigned pixels.
 
+        Args:
+            legend (bool, optional): Whether to include the legend to the plot. Defaults to True.
+        """
         assert(not self.dimred_elem_matrix is None)
         assert(not self.dimred_labels is None)
 
@@ -1058,10 +1087,14 @@ class SpectraRegion():
 
 
     def set_null_spectra(self, condition):
+        """Goes thought the region array and sets the intensity values to zero if the condition is met.
 
-        bar = progressbar.Bar()
+        Args:
+            condition (function): Condition of canceling out an intensity value.
+        """
+       #bar = progressbar.Bar()
 
-        for i in bar(range(0, self.region_array.shape[0])):
+        for i in range(0, self.region_array.shape[0]):#bar(range(0, self.region_array.shape[0])):
             for j in range(0, self.region_array.shape[1]):
                 if condition(self.region_array[i,j, :]):
 
@@ -1069,6 +1102,11 @@ class SpectraRegion():
 
 
     def plot_segments(self, highlight=None):
+        """Plots the segmented array of the current SpectraRegion object.
+
+        Args:
+            highlight (list/tuple/set/int, optional): If the highlight clusters are specified, those will be assigned a cluster id 2. Otherwise 1. Background stays 0. Defaults to None.
+        """
         assert(not self.segmented is None)
 
         showcopy = np.copy(self.segmented)
@@ -1093,7 +1131,8 @@ class SpectraRegion():
         plt.close()
 
     def list_segment_counts(self):
-
+        """Prints the size of each cluster in segmenetd array.
+        """
         regionCounts = Counter()
 
         for i in range(0, self.segmented.shape[0]):
@@ -1106,7 +1145,28 @@ class SpectraRegion():
 
 
     def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=1000):
+        """Performs clustering on similarity matrix.
 
+        Args:
+            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN" or "UMAP_WARD". Defaults to "UPGMA".\n
+                - "UPGMA": Unweighted pair group method with arithmetic mean.\n
+                - "WPGMA": Weighted pair group method with arithmetic mean.\n
+                - "KMEANS": k-means clustering.\n
+                - "UMAP_DBSCAN": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
+                - "CENTROID": Unweighted pair group method with centroids (UPGMC).\n
+                - "MEDIAN": Weighted pair group method with centroids (WPGMC).\n
+                - "UMAP_WARD": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Ward variance minimization algorithm (WARD).\n
+            dims ([type], optional): The desired amount of intesity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intesities are considered.
+            number_of_regions (int, optional): Number of desired clusters. Defaults to 10.
+            n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_samples (int, optional): Minimum number of samples. Defaults to 5.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 1000.
+
+        Returns:
+            numpy.array: An array with cluster ids as elements.
+        """
+        #TODO there is no kmeans implemented!
         assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD"])
         if method in ["UPGMA", "WPGMA", "WARD", "KMEANS","CENTROID", "MEDIAN"]:
             assert(not self.spectra_similarity is None)
@@ -1159,7 +1219,11 @@ class SpectraRegion():
         return self.segmented
 
     def manual_segmentation(self, image_path):
+        """Plots the labeled array according to the given segmentation image.
 
+        Args:
+            image_path (str/numpy.array): Either path to the image file or the numpy array of the image.
+        """
         if type(image_path) in [np.array]:
             self.logger.info("Received Image as Matrix")
 
@@ -1177,7 +1241,11 @@ class SpectraRegion():
 
 
     def set_background(self, clusterIDs):
+        """Sets all given cluster ids to 0, meaning the background.
 
+        Args:
+            clusterIDs (tuple/list/set/int): Cluster id(s) that form the background (cluster id 0).
+        """
         if not type(clusterIDs) in [tuple, list, set]:
             clusterIDs = [clusterIDs]
 
@@ -1186,7 +1254,22 @@ class SpectraRegion():
 
 
     def filter_clusters(self, method='remove_singleton', bg_x=4, bg_y=4, minIslandSize=10):
+        """Filters the segmented array. 
 
+        Args:
+            method (str, optional): Possible methods: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".. Defaults to 'remove_singleton'.\n
+                - "remove_singleton": If there are clusters that include only one pixel, they will be made a part of the background.\n
+                - "most_similar_singleton": If there are clusters that include only one pixel, they will be compared to consensus spectra of all cluster and then added to the cluster with the lowest distance.\n
+                - "merge_background": Collects cluster ids at the borders and assigns all findings with background id 0.\n
+                - "remove_islands": Removes all pixel groups that include less then minimum allowed elements.\n
+                - "gauss": In case there is only two distinguishable cluster id in 3x3 area around the cluster will be assigned the most frequent cluster id of those two.\n
+            bg_x (int, optional): The x border limits whithin the clusters whould be assigned to background. Defaults to 4.
+            bg_y (int, optional): The y border limits whithin the clusters whould be assigned to background. Defaults to 4.
+            minIslandSize (int, optional): How many pixels an island is allowed to have. Defaults to 10.
+
+        Returns:
+            numpy.array: Array with reduced number of cluster ids.
+        """
         assert(method in ["remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss"])
 
         cluster2coords = self.getCoordsForSegmented()
@@ -1712,16 +1795,16 @@ class SpectraRegion():
         return tuple(resElem), num, anum
 
     def __check_neighbour(self, mat, x, y, background):
-        """Decides whether the given pixel suppose to be a part of background cluster parameter.
+        """Decides whether the given pixel suppose to be a part of the background cluster parameter.
 
         Args:
             mat (numpy.array): CLustered image with cluster ids as elements.
             x (int): x-Coordinate.
-            y (int): y-Corrdinate.
+            y (int): y-Coordinate.
             background (int): Cluster id of the cluster to be compared to.
 
         Returns:
-            bool: Whether the pixel is neighbour of the cluster in background parameter.
+            bool: Whether the pixel is neighbor of the cluster in the background parameter.
         """
         if x < mat.shape[0]-1 and mat[x+1][y] in background:
             return True
@@ -1747,13 +1830,13 @@ class SpectraRegion():
         """Simplifies the clustered image.
 
         Args:
-            background (list/numpy.array): A list of clusters id that contain background clusters.
-            aorta (list/numpy.array): A list of clusters id that contain aorta clusters.
-            plaque (list/numpy.array): A list of clusters id that contain plaque clusters.
-            blur (bool, optional): Whether to apply multidimensional uniform filter to blur the image. Defaults to False.
+            background (list/numpy.array): A list of clusters id that contains background clusters.
+            aorta (list/numpy.array): A list of clusters id that contains aorta clusters.
+            plaque (list/numpy.array): A list of clusters id that contains plaque clusters.
+            blur (bool, optional): Whether to apply a multidimensional uniform filter to blur the image. Defaults to False.
 
         Returns:
-            numpy.array: Simpified image with three clusters.
+            numpy.array: Simplified image with three clusters.
         """
         assert(not self.segmented is None)
 
@@ -1776,16 +1859,21 @@ class SpectraRegion():
         return cartoon_img
 
     def __merge_clusters(self, matrix, clusters):
-        merged = np.zeros(matrix.shape)
-        for i in range(matrix.shape[0]):
-            for j in range(matrix.shape[1]):
-                if matrix[i][j] in clusters:
-                    merged[i][j] = clusters[0]
-                else:
-                    merged[i][j] = matrix[i][j]
+        """Combines the given clusters to one cluster with the id of the first element in the clusters list.
+
+        Args:
+            matrix (numpy.array): Segmented array with cluster ids as elements.
+            clusters (list/numpy.array): Cluster ids to merge.
+
+        Returns:
+            numpy.array: Updated segmeted array.
+        """
+        merged = np.copy(self.segmented)
+        for cluster in clusters:
+            merged[merged == cluster] = clusters[0]
         return merged
 
-    def cartoonize2(self, imze, background, aorta, plaque, ignore_background=True):
+    def cartoonize2(self, imze, background, aorta, plaque, ignore_background=True, blur=False):
         """Simplifies the segmented array by comparing median spectra of the given cluster groups to the spectra region.
 
         Args:
@@ -1794,6 +1882,7 @@ class SpectraRegion():
             aorta (list/numpy.array): A list of clusters id that contains aorta clusters.
             plaque (list/numpy.array): A list of clusters id that contains plaque clusters.
             ignore_background (bool, optional): Whether to consider only aorta and plaque median spectra by "reclustering". Defaults to True.
+            blur (bool, optional): Whether to apply a multidimensional uniform filter to blur the image. Defaults to False.
 
         Returns:
             numpy.array: Simplified segmented array with only three clusters.
@@ -1835,6 +1924,8 @@ class SpectraRegion():
                     sim_max[i,j] = self.segmented[i][j] 
                 else:
                     sim_max[i,j] = np.argmax([sim_background[i][j], sim_aorta[i][j], sim_plaque[i][j]])
+        if blur:
+            sim_max = ndimage.uniform_filter(sim_max, size=4)
         
         return sim_max
 
