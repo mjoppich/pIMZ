@@ -1775,18 +1775,81 @@ class SpectraRegion():
             cartoon_img = ndimage.uniform_filter(cartoon_img, size=4)
         return cartoon_img
 
-    def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
-        """Plots the background, aorta and plaque pixelwise probabilities.
+    def __merge_clusters(self, matrix, clusters):
+        merged = np.zeros(matrix.shape)
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                if matrix[i][j] in clusters:
+                    merged[i][j] = clusters[0]
+                else:
+                    merged[i][j] = matrix[i][j]
+        return merged
+
+    def cartoonize2(self, imze, background, aorta, plaque, ignore_background=True):
+        """Simplifies the segmented array by comparing median spectra of the given cluster groups to the spectra region.
 
         Args:
             imze (IMZMLExtract): IMZMLExtract object.
-            background (list/numpy.array): A list of clusters id that contain background clusters.
-            aorta (list/numpy.array): A list of clusters id that contain aorta clusters.
-            plaque (list/numpy.array): A list of clusters id that contain plaque clusters.
+            background (list/numpy.array): A list of clusters id that contains background clusters.
+            aorta (list/numpy.array): A list of clusters id that contains aorta clusters.
+            plaque (list/numpy.array): A list of clusters id that contains plaque clusters.
+            ignore_background (bool, optional): Whether to consider only aorta and plaque median spectra by "reclustering". Defaults to True.
+
+        Returns:
+            numpy.array: Simplified segmented array with only three clusters.
+        """
+        assert(not self.segmented is None)
+
+        merged = self.segmented
+        if len(background)>1:
+            merged = self.__merge_clusters(merged, background)
+        if len(aorta)>1:
+            merged = self.__merge_clusters(merged, aorta)
+        if len(plaque)>1:
+            merged = self.__merge_clusters(merged, plaque)
+            
+        background = background[0]
+        aorta = aorta[0]
+        plaque = plaque[0]
+        
+        tmp = self.segmented
+        self.segmented = merged
+        cons = self.consensus_spectra(method="median", set_consensus=False)
+        self.segmented = tmp
+        
+        sim_background = np.zeros(self.segmented.shape)
+        sim_aorta = np.zeros(self.segmented.shape)
+        sim_plaque = np.zeros(self.segmented.shape)
+        
+        for i in range(sim_background.shape[0]):
+            for j in range(sim_background.shape[1]):
+                spectra = self.region_array[i][j]
+                sim_background[i][j] = imze.compare_sequence(spectra, cons[background])
+                sim_aorta[i][j] = imze.compare_sequence(spectra, cons[aorta])
+                sim_plaque[i][j] = imze.compare_sequence(spectra, cons[plaque])
+        
+        sim_max = np.zeros((sim_background.shape[0], sim_background.shape[1]))
+        for i in range(sim_background.shape[0]):
+            for j in range(sim_background.shape[1]):
+                if ignore_background and self.segmented[i][j] == background:
+                    sim_max[i,j] = self.segmented[i][j] 
+                else:
+                    sim_max[i,j] = np.argmax([sim_background[i][j], sim_aorta[i][j], sim_plaque[i][j]])
+        
+        return sim_max
+
+    def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
+        """Plots the background, aorta, and plaque pixelwise probabilities.
+
+        Args:
+            imze (IMZMLExtract): IMZMLExtract object.
+            background (list/numpy.array): A list of clusters id that contains background clusters.
+            aorta (list/numpy.array): A list of clusters id that contains aorta clusters.
+            plaque (list/numpy.array): A list of clusters id that contains plaque clusters.
             norm (bool, optional): Whether to divide all probabilities by global maximum probability. Defaults to False.
 
         Returns:
-            numpy.array, numpy.array, numpy.array: Three array of probabilities for background, aorta and plaque.
+            numpy.array, numpy.array, numpy.array: Three arrays of probabilities for background, aorta, and plaque.
         """
         out = self.cartoonize(background, aorta, plaque, blur=False)
         tmp = self.segmented
