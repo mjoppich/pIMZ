@@ -455,8 +455,12 @@ class SpectraRegion():
                 dfRes = [False] * len(testDF)
                 for index, row in testDF.iterrows():
 
-                    res = filter_func(row)
+                    res = filter_func(self, row)
                     dfRes[index] = res
+
+                if "de_judge" in testDF.columns.values.tolist():
+                    self.logger.info("Removing existing judge in comp: {}".format(comp))
+                    del testDF["de_judge"]
 
                 pos = testDF.columns.values.tolist().index("gene_mass")+1
                 testDF.insert(loc = pos, 
@@ -1085,7 +1089,7 @@ class SpectraRegion():
                             showcopy[i,j] = 2
                         elif showcopy[i,j] != 0:
                             showcopy[i,j] = 1
-                            
+
         fig = plt.figure()
         self.plot_array(fig, showcopy, discrete_legend=True)
         plt.show()

@@ -315,6 +315,41 @@ class CombinedSpectra():
 
         return image
 
+    def plot_segments(self, highlight=None):
+
+        assert(not self.region_cluster2cluster is None)
+
+        allClusters = [self.region_cluster2cluster[x] for x in self.region_cluster2cluster]
+        valid_vals = sorted(set(allClusters))
+
+
+        region2segments = {}
+        for regionName in self.regions:
+            origSegments = np.array(self.regions[regionName].segmented, copy=True)           
+            region2segments[regionName] = origSegments
+
+
+        if highlight != None:
+            if not isinstance(highlight, (list, tuple, set)):
+                highlight = [highlight]
+
+            for regionName in region2segments:
+
+                showcopy = np.copy(region2segments[regionName])
+                
+                for i in range(0, showcopy.shape[0]):
+                    for j in range(0, showcopy.shape[1]):
+
+                        if showcopy[i,j] != 0:
+
+                            if showcopy[i,j] in highlight:
+                                showcopy[i,j] = 2
+                            elif showcopy[i,j] != 0:
+                                showcopy[i,j] = 1
+
+                region2segments[regionName] = showcopy
+
+        self._plot_arrays(region2segments)
 
 
     def plot_common_segments(self, highlight=None):
@@ -365,9 +400,12 @@ class CombinedSpectra():
 
                 region2segments[regionName] = showcopy
 
+        self._plot_arrays(region2segments)
 
-        rows = math.ceil(len(self.regions) / 2)
-        fig, axes = plt.subplots(rows, 2)
+    def _plot_arrays(self, region2segments):
+
+        rows = math.ceil(len(region2segments) / 2)
+        fig, axes = plt.subplots(rows, 2, sharex=True, sharey=True)
 
         valid_vals = set()
         for regionName in region2segments:
@@ -399,9 +437,9 @@ class CombinedSpectra():
             formatter = plt.FuncFormatter(formatter_func)
 
             # We must be sure to specify the ticks matching our target names
-            ax.set_title(regionName, color="w", y=0.1)
+            ax.set_title(regionName, color="w", y=0.9, x=0.1)
 
-        plt.colorbar(im, ax=axes[-1], ticks=positions, format=formatter, spacing='proportional')
+        plt.colorbar(im, ax=axes[:], ticks=positions, format=formatter, spacing='proportional')
 
         plt.show()
         plt.close()
@@ -802,9 +840,10 @@ class CombinedSpectra():
 
         self.region_array_scaled[allRegionNames[0]] = np.copy(self.regions[allRegionNames[0]].region_array)
 
+        print(allRegionNames)
 
         fcDict = {}
-        bar = progressbar.ProgressBar()
+        bar = progressbar.ProgressBar(maxval=len(allRegionNames))
         for rIdx, regionName in bar(enumerate(allRegionNames)):
 
             if rIdx == 0:
