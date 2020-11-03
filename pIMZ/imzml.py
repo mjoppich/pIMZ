@@ -162,6 +162,17 @@ class IMZMLExtract:
 
         return ssum/(len1*len2)
 
+    def compare_sequence(self, spectra1, spectra2):
+        """Calculates cosine similarity between two desired spectra.
+
+        Args:
+            specid1 (numpy.array/list): Intensity sequence of the first desired spectrum in the .imzML file.
+            specid2 (numpy.array/list): Intensity sequence of the second desired spectrum in the .imzML file.
+
+        Returns:
+            float: Cosine similarity between two desired spectra.
+        """
+        return self.__cos_similarity(spectra1, spectra2)
 
     def get_mz_index(self, value, threshold=None):
         """Returns the closest existing m/z to the given value.
