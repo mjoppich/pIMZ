@@ -282,8 +282,6 @@ class SpectraRegion():
             matplotlib.pyplot.figure: Figure with plotted figure
         """
 
-
-
         if discrete_legend:
             valid_vals = sorted(np.unique(arr))
 
@@ -1395,7 +1393,15 @@ class SpectraRegion():
         return self.segmented
 
     def __cons_spectra__avg(self, cluster2coords, array):
+        """Constructs an average spectrum for each cluster id.
 
+        Args:
+            cluster2coords (dict): A dictionary of cluster ids mapped to the corresponding coordinates.
+            array (numpy.array): Array of spectra.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective average spectrum.
+        """
         if array is None:
             array = self.region_array
 
@@ -1422,6 +1428,11 @@ class SpectraRegion():
         return cons_spectra
 
     def getCoordsForSegmented(self):
+        """Returns a dictionary of cluster ids mapped to the corresponding coordinates.
+
+        Returns:
+            dict: Each cluster ids mapped to the corresponding coordinates.
+        """
         cluster2coords = defaultdict(list)
 
         for i in range(0, self.segmented.shape[0]):
@@ -1438,11 +1449,10 @@ class SpectraRegion():
 
 
     def _get_median_spectrum(self, region_array):
-        """
-        Calculates the median spectrum from all spectra in region_array
+        """Calculates the median spectrum from all spectra in region_array.
 
         Args:
-            region_array (np.array): Array of spectra
+            region_array (numpy.array): Array of spectra.
         """
 
         median_profile = np.array([0.0] * region_array.shape[2])
@@ -1469,7 +1479,15 @@ class SpectraRegion():
         return median_profile
 
     def __cons_spectra__median(self, cluster2coords, array=None):
+        """Constructs an median spectrum for each cluster id.
 
+        Args:
+            cluster2coords (dict): A dictionary of cluster ids mapped to the corresponding coordinates.
+            array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective median spectrum.
+        """
         if array is None:
             array = self.region_array
 
@@ -1498,7 +1516,16 @@ class SpectraRegion():
 
 
     def consensus_spectra(self, method="avg", set_consensus=True, array=None):
+        """Constructs a consensus spectrum for each cluster id by using the specified method.
 
+        Args:
+            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" or "median". Defaults to "avg".
+            set_consensus (bool, optional): Whether to set the calculated consensus and the respective method as object attributes. Defaults to True.
+            array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective consensus spectrum.
+        """
         if array is None:
             array = self.region_array
         else:
