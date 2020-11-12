@@ -1929,6 +1929,56 @@ class SpectraRegion():
         
         return sim_max
 
+    def get_surroundings(self, mat, x, y):
+        """Determines the cluster ids and their frequencies of the 3x3 surroundings of the given pixel.
+
+        Args:
+            mat (numpy.array): The matrix where the surrounding pixels will be computed.
+            x (int): x-Coordinate of the desired pixel.
+            y (int): y-Coordinate of the desired pixel.
+
+        Returns:
+            collections.Counter: Cluster ids and the respective frequencies in 3x3 window from the given pixel coordinates.
+        """
+        res = list()
+        if x < mat.shape[0]-1:
+            res.append(mat[x+1][y])
+        if x > 1:
+            res.append(mat[x-1][y])
+        if y < mat.shape[1]-1:
+            res.append(mat[x][y+1])
+        if y > 1:
+            res.append(mat[x][y-1])
+        if x < mat.shape[0]-1 and y < mat.shape[1]-1:
+            res.append(mat[x+1][y+1])
+        if x > 1 and y > 1:
+            res.append(mat[x-1][y-1])
+        if x < mat.shape[0]-1 and y > 1:
+            res.append(mat[x+1][y-1])
+        if y < mat.shape[1]-1 and x > 1:
+            res.append(mat[x-1][y+1])
+        return Counter(res)
+
+    def add_cellwall(self, mat, threshold_aorta_plaque = 2):
+        """Adds the cluster id 3 for the cell wall at those pixels that have significant number of aorta and plaque assigned pixels. (Implemented in order to use after cartoonize where only cluster ids 0, 1 and 2 are present.)
+
+        Args:
+            mat (numpy.array): A segmented array with a clustered image where the cell wall cluster should be added.
+            threshold_aorta_plaque (int, optional): The minimal number of plaque and aorta neighboring clusters for each pixel to be considered as a cell wall component. Defaults to 2.
+
+        Returns:
+            numpy.array: Updated segmented array where the cell wall cluster has cluster id 3.
+        """
+        new_mat = np.copy(mat)
+        for i in range(new_mat.shape[0]):
+            for j in range(new_mat.shape[1]):
+                s = self.get_surroundings(mat, i, j)
+                if s[1] > threshold_aorta_plaque and s[2] > threshold_aorta_plaque:
+                    new_mat[i][j] = 3
+                else:
+                    new_mat[i][j] = mat[i][j]
+        return new_mat
+
     def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
         """Plots the background, aorta, and plaque pixelwise probabilities.
 
