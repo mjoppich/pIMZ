@@ -2994,8 +2994,8 @@ class ProteinWeights():
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
-            filename (str): File with at least the following columns: protein_id	gene_symbol	mol_weight_kd	mol_weight
-            max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1 .
+            filename (str): File with at least the following columns: protein_id, gene_symbol, mol_weight_kd, mol_weight.
+            max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1.
         """
 
         self.__set_logger()
@@ -3003,42 +3003,96 @@ class ProteinWeights():
         self.protein2mass = defaultdict(set)
         self.protein_name2id = {}
 
+        if filename.endswith(".sdf"):
+            self.from_sdf(filename)
+        else:
+            with open(filename) as fin:
+                col2idx = {}
+                for lidx, line in enumerate(fin):
 
-        with open(filename) as fin:
-            col2idx = {}
-            for lidx, line in enumerate(fin):
+                    line = line.strip().split("\t")
 
-                line = line.strip().split("\t")
+                    if lidx == 0:
+                        for eidx, elem in enumerate(line):
 
-                if lidx == 0:
-                    for eidx, elem in enumerate(line):
+                            col2idx[elem] = eidx
 
-                        col2idx[elem] = eidx
+                        continue
 
-                    continue
+                    #protein_id	gene_symbol	mol_weight_kd	mol_weight
 
-                #protein_id	gene_symbol	mol_weight_kd	mol_weight
+                    if len(line) < 4:
+                        continue
 
-                if len(line) < 4:
-                    continue
+                    proteinIDs = line[col2idx["protein_id"]].split(";")
+                    proteinNames = line[col2idx["gene_symbol"]].split(";")
+                    molWeight = float(line[col2idx["mol_weight"]])
 
-                proteinIDs = line[col2idx["protein_id"]].split(";")
-                proteinNames = line[col2idx["gene_symbol"]].split(";")
-                molWeight = float(line[col2idx["mol_weight"]])
+                    if max_mass >= 0 and molWeight > max_mass:
+                        continue    
 
-                if max_mass >= 0 and molWeight > max_mass:
-                    continue    
+                    if len(proteinNames) == 0:
+                        proteinNames = proteinIDs
 
-                if len(proteinNames) == 0:
-                    proteinNames = proteinIDs
+                    for proteinName in proteinNames:
+                        self.protein2mass[proteinName].add(molWeight)
+                        self.protein_name2id[proteinName] = proteinIDs
 
-                for proteinName in proteinNames:
-                    self.protein2mass[proteinName].add(molWeight)
-                    self.protein_name2id[proteinName] = proteinIDs
+        allMasses = self.get_all_masses()
 
-            allMasses = self.get_all_masses()
+        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+    
+    def from_sdf(self, filename):
+        """Creates a ProteinWeights class. Requires a .sdf file.
 
-            self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+        Args:
+            filename (str): .sdf file with a starting < LM_ID > line of each new entry.
+        """
+        assert(filename.endswith(".sdf"))
+
+        self.__set_logger()
+
+        self.protein2mass = defaultdict(set)
+        self.protein_name2id = {}
+
+        self.category2id = defaultdict(set)
+        sdf_dic = self.sdf_reader(filename)
+        for lm_id in sdf_dic:
+            self.protein2mass[lm_id].add(float(sdf_dic[lm_id]["EXACT_MASS"]))
+            if "NAME" in sdf_dic[lm_id]:
+                self.protein_name2id[sdf_dic[lm_id]["NAME"]] = lm_id
+            elif "SYSTEMATIC_NAME" in sdf_dic[lm_id]:
+                self.protein_name2id[sdf_dic[lm_id]["SYSTEMATIC_NAME"]] = lm_id
+            self.category2id[sdf_dic[lm_id]["CATEGORY"]].add(lm_id)
+
+    def sdf_reader(self, filename):
+        """Reads a .sdf file into a dictionary.
+
+        Args:
+            filename (str): Path to the .sdf file.
+
+        Returns:
+            dict: Ids mapped to the respective annotation. 
+        """
+        res_dict = {}
+        with open(filename) as fp:
+            line = fp.readline()
+            line_id = ""
+            line_dict = {}
+            while line:
+                if line.startswith(">"):
+                    if "LM_ID" in line:
+                        if line_id:
+                            res_dict[line_id] = line_dict
+                            line_dict = {}
+                            line_id = ""
+                        line_id = fp.readline().rstrip()
+                    else:
+                        key = line.split("<")[1].split(">")[0]
+                        line_dict[key] = fp.readline().rstrip()
+                line = fp.readline()
+        fp.close()
+        return res_dict
 
     def get_all_masses(self):
         """Returns all masses contained in the lookup-dict
