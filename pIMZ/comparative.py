@@ -730,7 +730,7 @@ class CombinedSpectra():
                     
                     prot,protMass = protMassTuple
             
-                    clusterVec.append("".join([str(x) for x in resKey[0]]))
+                    clusterVec.append("_".join([str(resKey[0])]+[str(x) for x in resKey[1]]))
                     geneIdentVec.append(geneIDent)
                     massVec.append(massValue)
                     foundProtVec.append(prot)
@@ -749,7 +749,7 @@ class CombinedSpectra():
                     measuredSpectraBGVec.append(measuredSpectaBG)
 
             else:
-                clusterVec.append("".join([str(x) for x in resKey[0]]))
+                clusterVec.append("_".join([str(resKey[0])]+[str(x) for x in resKey[1]]))
                 geneIdentVec.append(geneIDent)
                 massVec.append(massValue)
                 foundProtVec.append("")
