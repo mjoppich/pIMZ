@@ -282,8 +282,6 @@ class SpectraRegion():
             matplotlib.pyplot.figure: Figure with plotted figure
         """
 
-
-
         if discrete_legend:
             valid_vals = sorted(np.unique(arr))
 
@@ -1399,7 +1397,15 @@ class SpectraRegion():
         return self.segmented
 
     def __cons_spectra__avg(self, cluster2coords, array):
+        """Constructs an average spectrum for each cluster id.
 
+        Args:
+            cluster2coords (dict): A dictionary of cluster ids mapped to the corresponding coordinates.
+            array (numpy.array): Array of spectra.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective average spectrum.
+        """
         if array is None:
             array = self.region_array
 
@@ -1426,6 +1432,11 @@ class SpectraRegion():
         return cons_spectra
 
     def getCoordsForSegmented(self):
+        """Returns a dictionary of cluster ids mapped to the corresponding coordinates.
+
+        Returns:
+            dict: Each cluster ids mapped to the corresponding coordinates.
+        """
         cluster2coords = defaultdict(list)
 
         for i in range(0, self.segmented.shape[0]):
@@ -1442,11 +1453,10 @@ class SpectraRegion():
 
 
     def _get_median_spectrum(self, region_array):
-        """
-        Calculates the median spectrum from all spectra in region_array
+        """Calculates the median spectrum from all spectra in region_array.
 
         Args:
-            region_array (np.array): Array of spectra
+            region_array (numpy.array): Array of spectra.
         """
 
         median_profile = np.array([0.0] * region_array.shape[2])
@@ -1473,7 +1483,15 @@ class SpectraRegion():
         return median_profile
 
     def __cons_spectra__median(self, cluster2coords, array=None):
+        """Constructs an median spectrum for each cluster id.
 
+        Args:
+            cluster2coords (dict): A dictionary of cluster ids mapped to the corresponding coordinates.
+            array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective median spectrum.
+        """
         if array is None:
             array = self.region_array
 
@@ -1502,7 +1520,16 @@ class SpectraRegion():
 
 
     def consensus_spectra(self, method="avg", set_consensus=True, array=None):
+        """Constructs a consensus spectrum for each cluster id by using the specified method.
 
+        Args:
+            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" or "median". Defaults to "avg".
+            set_consensus (bool, optional): Whether to set the calculated consensus and the respective method as object attributes. Defaults to True.
+            array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
+
+        Returns:
+            dict: A dictionary with cluster ids mapped to the respective consensus spectrum.
+        """
         if array is None:
             array = self.region_array
         else:
@@ -1932,6 +1959,56 @@ class SpectraRegion():
             sim_max = ndimage.uniform_filter(sim_max, size=4)
         
         return sim_max
+
+    def get_surroundings(self, mat, x, y):
+        """Determines the cluster ids and their frequencies of the 3x3 surroundings of the given pixel.
+
+        Args:
+            mat (numpy.array): The matrix where the surrounding pixels will be computed.
+            x (int): x-Coordinate of the desired pixel.
+            y (int): y-Coordinate of the desired pixel.
+
+        Returns:
+            collections.Counter: Cluster ids and the respective frequencies in 3x3 window from the given pixel coordinates.
+        """
+        res = list()
+        if x < mat.shape[0]-1:
+            res.append(mat[x+1][y])
+        if x > 1:
+            res.append(mat[x-1][y])
+        if y < mat.shape[1]-1:
+            res.append(mat[x][y+1])
+        if y > 1:
+            res.append(mat[x][y-1])
+        if x < mat.shape[0]-1 and y < mat.shape[1]-1:
+            res.append(mat[x+1][y+1])
+        if x > 1 and y > 1:
+            res.append(mat[x-1][y-1])
+        if x < mat.shape[0]-1 and y > 1:
+            res.append(mat[x+1][y-1])
+        if y < mat.shape[1]-1 and x > 1:
+            res.append(mat[x-1][y+1])
+        return Counter(res)
+
+    def add_cellwall(self, mat, threshold_aorta_plaque = 2):
+        """Adds the cluster id 3 for the cell wall at those pixels that have significant number of aorta and plaque assigned pixels. (Implemented in order to use after cartoonize where only cluster ids 0, 1 and 2 are present.)
+
+        Args:
+            mat (numpy.array): A segmented array with a clustered image where the cell wall cluster should be added.
+            threshold_aorta_plaque (int, optional): The minimal number of plaque and aorta neighboring clusters for each pixel to be considered as a cell wall component. Defaults to 2.
+
+        Returns:
+            numpy.array: Updated segmented array where the cell wall cluster has cluster id 3.
+        """
+        new_mat = np.copy(mat)
+        for i in range(new_mat.shape[0]):
+            for j in range(new_mat.shape[1]):
+                s = self.get_surroundings(mat, i, j)
+                if s[1] > threshold_aorta_plaque and s[2] > threshold_aorta_plaque:
+                    new_mat[i][j] = 3
+                else:
+                    new_mat[i][j] = mat[i][j]
+        return new_mat
 
     def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
         """Plots the background, aorta, and plaque pixelwise probabilities.
@@ -2921,8 +2998,8 @@ class ProteinWeights():
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
-            filename (str): File with at least the following columns: protein_id	gene_symbol	mol_weight_kd	mol_weight
-            max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1 .
+            filename (str): File with at least the following columns: protein_id, gene_symbol, mol_weight_kd, mol_weight.
+            max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1.
         """
 
         self.__set_logger()
@@ -2930,42 +3007,96 @@ class ProteinWeights():
         self.protein2mass = defaultdict(set)
         self.protein_name2id = {}
 
+        if filename.endswith(".sdf"):
+            self.from_sdf(filename)
+        else:
+            with open(filename) as fin:
+                col2idx = {}
+                for lidx, line in enumerate(fin):
 
-        with open(filename) as fin:
-            col2idx = {}
-            for lidx, line in enumerate(fin):
+                    line = line.strip().split("\t")
 
-                line = line.strip().split("\t")
+                    if lidx == 0:
+                        for eidx, elem in enumerate(line):
 
-                if lidx == 0:
-                    for eidx, elem in enumerate(line):
+                            col2idx[elem] = eidx
 
-                        col2idx[elem] = eidx
+                        continue
 
-                    continue
+                    #protein_id	gene_symbol	mol_weight_kd	mol_weight
 
-                #protein_id	gene_symbol	mol_weight_kd	mol_weight
+                    if len(line) < 4:
+                        continue
 
-                if len(line) < 4:
-                    continue
+                    proteinIDs = line[col2idx["protein_id"]].split(";")
+                    proteinNames = line[col2idx["gene_symbol"]].split(";")
+                    molWeight = float(line[col2idx["mol_weight"]])
 
-                proteinIDs = line[col2idx["protein_id"]].split(";")
-                proteinNames = line[col2idx["gene_symbol"]].split(";")
-                molWeight = float(line[col2idx["mol_weight"]])
+                    if max_mass >= 0 and molWeight > max_mass:
+                        continue    
 
-                if max_mass >= 0 and molWeight > max_mass:
-                    continue    
+                    if len(proteinNames) == 0:
+                        proteinNames = proteinIDs
 
-                if len(proteinNames) == 0:
-                    proteinNames = proteinIDs
+                    for proteinName in proteinNames:
+                        self.protein2mass[proteinName].add(molWeight)
+                        self.protein_name2id[proteinName] = proteinIDs
 
-                for proteinName in proteinNames:
-                    self.protein2mass[proteinName].add(molWeight)
-                    self.protein_name2id[proteinName] = proteinIDs
+        allMasses = self.get_all_masses()
 
-            allMasses = self.get_all_masses()
+        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+    
+    def from_sdf(self, filename):
+        """Creates a ProteinWeights class. Requires a .sdf file.
 
-            self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+        Args:
+            filename (str): .sdf file with a starting < LM_ID > line of each new entry.
+        """
+        assert(filename.endswith(".sdf"))
+
+        self.__set_logger()
+
+        self.protein2mass = defaultdict(set)
+        self.protein_name2id = {}
+
+        self.category2id = defaultdict(set)
+        sdf_dic = self.sdf_reader(filename)
+        for lm_id in sdf_dic:
+            self.protein2mass[lm_id].add(float(sdf_dic[lm_id]["EXACT_MASS"]))
+            if "NAME" in sdf_dic[lm_id]:
+                self.protein_name2id[sdf_dic[lm_id]["NAME"]] = lm_id
+            elif "SYSTEMATIC_NAME" in sdf_dic[lm_id]:
+                self.protein_name2id[sdf_dic[lm_id]["SYSTEMATIC_NAME"]] = lm_id
+            self.category2id[sdf_dic[lm_id]["CATEGORY"]].add(lm_id)
+
+    def sdf_reader(self, filename):
+        """Reads a .sdf file into a dictionary.
+
+        Args:
+            filename (str): Path to the .sdf file.
+
+        Returns:
+            dict: Ids mapped to the respective annotation. 
+        """
+        res_dict = {}
+        with open(filename) as fp:
+            line = fp.readline()
+            line_id = ""
+            line_dict = {}
+            while line:
+                if line.startswith(">"):
+                    if "LM_ID" in line:
+                        if line_id:
+                            res_dict[line_id] = line_dict
+                            line_dict = {}
+                            line_id = ""
+                        line_id = fp.readline().rstrip()
+                    else:
+                        key = line.split("<")[1].split(">")[0]
+                        line_dict[key] = fp.readline().rstrip()
+                line = fp.readline()
+        fp.close()
+        return res_dict
 
     def get_all_masses(self):
         """Returns all masses contained in the lookup-dict
