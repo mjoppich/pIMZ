@@ -188,7 +188,7 @@ class CombinedSpectra():
             self.get_internormed_regions()
 
 
-    def mass_intensity(self, masses, regions=None, scaled=False):
+    def mass_intensity(self, masses, regions=None, scaled=False, verbose=True):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -213,7 +213,8 @@ class CombinedSpectra():
             for mass in masses:
                 
                 bestExMassForMass, bestExMassIdx = cregion._get_exmass_for_mass(mass)
-                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+                if verbose:
+                    self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
                 clusterIntensities = defaultdict(list)
 
@@ -245,7 +246,7 @@ class CombinedSpectra():
 
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False, verbose=True):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -268,7 +269,8 @@ class CombinedSpectra():
             for mass in masses:
                 
                 bestExMassForMass, bestExMassIdx = cregion._get_exmass_for_mass(mass)
-                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+                if verbose:
+                    self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
 
                 for i in range(dataArray.shape[0]):
                     for j in range(dataArray.shape[1]):
@@ -299,6 +301,7 @@ class CombinedSpectra():
                 allMin = min(allMin, np.min(region2segments[regionName]))
                 allMax = max(allMax, np.max(region2segments[regionName]))
 
+            didx = 0
             for didx, regionName in enumerate(region2segments):
                 ax = axes[didx]
 
@@ -306,6 +309,10 @@ class CombinedSpectra():
 
                 # We must be sure to specify the ticks matching our target names
                 ax.set_title(regionName, color="w", y=0.1)
+
+            for ddidx in range(didx+1, rows*2):
+                ax = axes[ddidx]
+                ax.axis('off')
 
             fig.colorbar(heatmap, ax=axes[-1])
 
@@ -405,7 +412,7 @@ class CombinedSpectra():
     def _plot_arrays(self, region2segments):
 
         rows = math.ceil(len(region2segments) / 2)
-        fig, axes = plt.subplots(rows, 2, sharex=True, sharey=True)
+        fig, axes = plt.subplots(rows, 2)
 
         valid_vals = set()
         for regionName in region2segments:
@@ -430,6 +437,7 @@ class CombinedSpectra():
         if len(axes.shape) > 1:
             axes = np.reshape(axes, (1, axes.shape[0] * axes.shape[1]))[0][:]
 
+        didx=0
         for didx, regionName in enumerate(region2segments):
             ax = axes[didx]
 
@@ -438,6 +446,10 @@ class CombinedSpectra():
 
             # We must be sure to specify the ticks matching our target names
             ax.set_title(regionName, color="w", y=0.9, x=0.1)
+
+        for ddidx in range(didx+1, rows*2):
+            ax = axes[ddidx]
+            ax.axis('off')
 
         plt.colorbar(im, ax=axes[:], ticks=positions, format=formatter, spacing='proportional')
 
@@ -448,7 +460,7 @@ class CombinedSpectra():
 
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
-    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
+    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, mz_dist=3, mz_best=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
 
         assert(region0 in self.regions)
         assert(region1 in self.regions)
@@ -595,7 +607,7 @@ class CombinedSpectra():
         for test in self.de_results_all:
             for rkey in self.de_results_all[test]:
 
-                deresDFs[test][rkey] = self.deres_to_df(self.de_results_all[test][rkey], rkey, protWeights, keepOnlyProteins=protWeights != None, scaled=scaled)
+                deresDFs[test][rkey] = self.deres_to_df(self.de_results_all[test][rkey], rkey, protWeights, mz_dist=mz_dist, mz_best=mz_best, keepOnlyProteins=protWeights != None, scaled=scaled)
 
 
         return deresDFs, exprData, pData
@@ -630,7 +642,7 @@ class CombinedSpectra():
         return spectraMatrix
 
 
-    def deres_to_df(self, deResDF, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5, scaled=True):
+    def deres_to_df(self, deResDF, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5, scaled=True):
 
 
         if scaled:
@@ -710,7 +722,11 @@ class CombinedSpectra():
 
             foundProt = []
             if protWeights != None:
-                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=mz_dist)
+
+                if mz_best and len(foundProt) > 0:
+                    foundProt = [foundProt[0]]
+                    
 
             if keepOnlyProteins and len(foundProt) == 0:
                 continue

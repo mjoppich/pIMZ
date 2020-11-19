@@ -2436,7 +2436,7 @@ document.addEventListener('readystatechange', event => {
 
 
 
-    def deres_to_df(self, method, resKey, protWeights, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+    def deres_to_df(self, method, resKey, protWeights, mz_dist=3, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
 
         clusterVec = []
         geneIdentVec = []
@@ -2505,7 +2505,7 @@ document.addEventListener('readystatechange', event => {
 
             foundProt = []
             if protWeights != None:
-                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=3)
+                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=mz_dist)
 
             if keepOnlyProteins and len(foundProt) == 0:
                 continue
@@ -3005,11 +3005,11 @@ class ProteinWeights():
         self.__set_logger()
 
         self.protein2mass = defaultdict(set)
+        self.category2id = defaultdict(set)
         self.protein_name2id = {}
 
-        if filename.endswith(".sdf"):
-            self.from_sdf(filename)
-        else:
+        if filename != None:
+
             with open(filename) as fin:
                 col2idx = {}
                 for lidx, line in enumerate(fin):
@@ -3042,11 +3042,12 @@ class ProteinWeights():
                         self.protein2mass[proteinName].add(molWeight)
                         self.protein_name2id[proteinName] = proteinIDs
 
-        allMasses = self.get_all_masses()
-
-        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
+            allMasses = self.get_all_masses()
+            self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.protein2mass), len(allMasses)))
     
-    def from_sdf(self, filename):
+
+    @classmethod
+    def from_sdf(cls, filename, max_mass=-1):
         """Creates a ProteinWeights class. Requires a .sdf file.
 
         Args:
@@ -3054,22 +3055,33 @@ class ProteinWeights():
         """
         assert(filename.endswith(".sdf"))
 
-        self.__set_logger()
+        pw = ProteinWeights(None)
 
-        self.protein2mass = defaultdict(set)
-        self.protein_name2id = {}
+        pw.protein2mass = defaultdict(set)
+        pw.protein_name2id = {}
+        pw.category2id = defaultdict(set)
 
-        self.category2id = defaultdict(set)
-        sdf_dic = self.sdf_reader(filename)
+        sdf_dic = cls.sdf_reader(filename)
+
         for lm_id in sdf_dic:
-            self.protein2mass[lm_id].add(float(sdf_dic[lm_id]["EXACT_MASS"]))
-            if "NAME" in sdf_dic[lm_id]:
-                self.protein_name2id[sdf_dic[lm_id]["NAME"]] = lm_id
-            elif "SYSTEMATIC_NAME" in sdf_dic[lm_id]:
-                self.protein_name2id[sdf_dic[lm_id]["SYSTEMATIC_NAME"]] = lm_id
-            self.category2id[sdf_dic[lm_id]["CATEGORY"]].add(lm_id)
 
-    def sdf_reader(self, filename):
+            molWeight = float(sdf_dic[lm_id]["EXACT_MASS"])
+            if max_mass >= 0 and molWeight > max_mass:
+                continue    
+
+            pw.protein2mass[lm_id].add(molWeight)
+
+            if "NAME" in sdf_dic[lm_id]:
+                pw.protein_name2id[sdf_dic[lm_id]["NAME"]] = lm_id
+            elif "SYSTEMATIC_NAME" in sdf_dic[lm_id]:
+                pw.protein_name2id[sdf_dic[lm_id]["SYSTEMATIC_NAME"]] = lm_id
+
+            pw.category2id[sdf_dic[lm_id]["CATEGORY"]].add(lm_id)
+
+        return pw, sdf_dic
+
+    @classmethod
+    def sdf_reader(cls, filename):
         """Reads a .sdf file into a dictionary.
 
         Args:
@@ -3095,6 +3107,7 @@ class ProteinWeights():
                         key = line.split("<")[1].split(">")[0]
                         line_dict[key] = fp.readline().rstrip()
                 line = fp.readline()
+
         fp.close()
         return res_dict
 
@@ -3184,7 +3197,7 @@ class ProteinWeights():
             maxdist (float, optional): allowed offset for lookup. Defaults to 2.
 
         Returns:
-            list: list of all (protein, weight) tuple which have a protein in the given mass range
+            list: sorted list (by abs mass difference) of all (protein, weight) tuple which have a protein in the given mass range
         """
 
         possibleMatches = []
@@ -3194,7 +3207,11 @@ class ProteinWeights():
 
             for protMass in protMasses:
                 if abs(mass-protMass) < maxdist:
-                    possibleMatches.append((protein, protMass))
+                    protDist = abs(mass-protMass)
+                    possibleMatches.append((protein, protMass, protDist))
+
+        possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
+        possibleMatches = [(x[0], x[1]) for x in possibleMatches]
 
         return possibleMatches
 
@@ -3202,14 +3219,21 @@ class ProteinWeights():
         """Returns all recorded masses for a given protein. Return None if protein not found
 
         Args:
-            protein (str): protein to search for in database (exact matching)
+            protein (str|iterable): protein to search for in database (exact matching)
 
         Returns:
             set: set of masses for protein
         """
 
-        return self.protein2mass.get(protein, None)
+        if type(protein) == str:
+            return self.protein2mass.get(protein, None)
 
+        allMasses = set()
+        for x in protein:
+            protMasses = self.get_masses_for_protein(x)
+            allMasses = allMasses.union(protMasses)
+
+        return allMasses
 
     def compare_masses(self, pw):
         """For each protein contained in both PW objects, and for each protein mass, the distance to the best match in the other PW object is calculated.
