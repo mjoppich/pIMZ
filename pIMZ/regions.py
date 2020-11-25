@@ -1990,24 +1990,26 @@ class SpectraRegion():
             res.append(mat[x-1][y+1])
         return Counter(res)
 
-    def add_cellwall(self, mat, threshold_aorta_plaque = 2):
-        """Adds the cluster id 3 for the cell wall at those pixels that have significant number of aorta and plaque assigned pixels. (Implemented in order to use after cartoonize where only cluster ids 0, 1 and 2 are present.)
+    def add_cellwall(self, mat, between1, between2, threshold = 2):
+        """Adds the cluster for the cell wall at those pixels that have significant number of between1 and between2 assigned pixels.
 
         Args:
             mat (numpy.array): A segmented array with a clustered image where the cell wall cluster should be added.
-            threshold_aorta_plaque (int, optional): The minimal number of plaque and aorta neighboring clusters for each pixel to be considered as a cell wall component. Defaults to 2.
+            between1 (int): First cluster id of the selected cluster pair. Between those the new cluster will be added.
+            between2 (int): Second cluster id of the selected cluster pair. Between those the new cluster will be added.
+            threshold (int, optional): The minimal number of between1 and between2 neighboring clusters for each pixel to be considered as a cell wall component. Defaults to 2.
 
         Returns:
             numpy.array: Updated segmented array where the cell wall cluster has cluster id 3.
         """
         new_mat = np.copy(mat)
+        new_mat = new_mat+1
+        new_mat[new_mat==1] = 0
         for i in range(new_mat.shape[0]):
             for j in range(new_mat.shape[1]):
                 s = self.get_surroundings(mat, i, j)
-                if s[1] > threshold_aorta_plaque and s[2] > threshold_aorta_plaque:
-                    new_mat[i][j] = 3
-                else:
-                    new_mat[i][j] = mat[i][j]
+                if s[between1] > threshold and s[between2] > threshold:
+                    new_mat[i][j] = 1
         return new_mat
 
     def plot_wireframe(self, imze, background, aorta, plaque, norm=False):
