@@ -2438,7 +2438,7 @@ document.addEventListener('readystatechange', event => {
 
 
 
-    def deres_to_df(self, method, resKey, protWeights, mz_dist=3, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+    def deres_to_df(self, method, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
 
         clusterVec = []
         geneIdentVec = []
@@ -2508,6 +2508,9 @@ document.addEventListener('readystatechange', event => {
             foundProt = []
             if protWeights != None:
                 foundProt = protWeights.get_protein_from_mass(massValue, maxdist=mz_dist)
+
+                if mz_best and len(foundProt) > 0:
+                    foundProt = [foundProt[0]]
 
             if keepOnlyProteins and len(foundProt) == 0:
                 continue
@@ -2590,7 +2593,7 @@ document.addEventListener('readystatechange', event => {
         return df
 
 
-    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, backgroundCluster=[0], out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
+    def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, mz_dist=3, mz_best=False, backgroundCluster=[0], out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
         """
         Finds all marker proteins for a specific clustering.
 
@@ -2639,7 +2642,7 @@ document.addEventListener('readystatechange', event => {
                 if method in ["ttest", "rank"]:
                     inverseFC = True
 
-                resDF = self.deres_to_df(method, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC)
+                resDF = self.deres_to_df(method, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC, mz_dist=mz_dist, mz_best=mz_best)
 
                 dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)
 
@@ -3078,7 +3081,7 @@ class ProteinWeights():
             elif "SYSTEMATIC_NAME" in sdf_dic[lm_id]:
                 pw.protein_name2id[sdf_dic[lm_id]["SYSTEMATIC_NAME"]] = lm_id
 
-            pw.category2id[sdf_dic[lm_id]["CATEGORY"]].add(lm_id)
+            pw.category2id[sdf_dic[lm_id]["MAIN_CLASS"]].add(lm_id)#"CATEGORY"
 
         return pw, sdf_dic
 
