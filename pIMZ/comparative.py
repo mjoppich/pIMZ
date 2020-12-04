@@ -460,91 +460,109 @@ class CombinedSpectra():
 
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
-    def find_markers(self, region0, clusters0, region1, clusters1, protWeights, mz_dist=3, mz_best=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
+    def find_markers(self, region_cluster_list0, region_cluster_list1, protWeights, mz_dist=3, mz_best=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
+        """Performs differential analysis to finds marker proteins for specific regions and clusters.
 
-        assert(region0 in self.regions)
-        assert(region1 in self.regions)
+        Args:
+            region_cluster_list0 (list/numpy.array): A list of tuples (region id, list of clusters) that will be used as the 0 conditional vector by differential analysis.
+            region_cluster_list1 (list/numpy.array): A list of tuples (region id, list of clusters) that will be used as the 1 conditional vector by differential analysis.
+            protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein names.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
+            use_methods (str/list, optional): Test method(s) for differential expression. Defaults to ["empire", "ttest", "rank"].
+            count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1}.
+            scaled (bool, optional): Weather each processed region is normalized. Those which are not will be scaled with the median method. Defaults to True.
+            sample_max (int, optional): Allowed number of samples (spectra of specified regions&clusters) will be used by differential analysis (will be randomly picked if there are more available than allowed). Defaults to -1 meaning all samples are used.
 
-        assert([x for x in self.regions[region0].idx2mass] == [x for x in self.regions[region1].idx2mass])
+        Returns:
+            tuple: Tuple (collections.defaultdict, pandas.core.frame.DataFrame, pandas.core.frame.DataFrame). Dictionary with test method mapped to each tuple (region, clusters) and respective results. Two further data frames with expression data and test design.
+        """
+        for pair in region_cluster_list0:
+            assert(int(pair[0]) in self.regions)
+            assert([x for x in self.regions[region_cluster_list0[0][0]].idx2mass] == [x for x in self.regions[pair[0]].idx2mass])
 
-        if not isinstance(clusters0, (list, tuple, set)):
-            clusters0 = [clusters0]
+        for pair in region_cluster_list1:
+            assert(int(pair[0]) in self.regions)
+            assert([x for x in self.regions[region_cluster_list1[0][0]].idx2mass] == [x for x in self.regions[pair[0]].idx2mass])
 
-        if not isinstance(clusters1, (list, tuple, set)):
-            clusters1 = [clusters1]
 
-        assert(len(clusters0) > 0)
-        assert(len(clusters1) > 0)
+        cluster2coords0 = {}
 
-        cluster2coords_0 = self.regions[region0].getCoordsForSegmented()
-        assert(all([x in cluster2coords_0 for x in clusters0]))
+        for pair in region_cluster_list0:
+            cluster2coords0[pair[0]] = self.regions[pair[0]].getCoordsForSegmented()
+            assert(all([x in cluster2coords0[pair[0]] for x in pair[1]]))
 
-        cluster2coords_1 = self.regions[region1].getCoordsForSegmented()
-        assert(all([x in cluster2coords_1 for x in clusters1]))
+        cluster2coords1 = {}
+
+        for pair in region_cluster_list1:
+            cluster2coords1[pair[0]] = self.regions[pair[0]].getCoordsForSegmented()
+            assert(all([x in cluster2coords1[pair[0]] for x in pair[1]]))
+
+        resKey = self.__make_de_res_key(region_cluster_list0[0][0], region_cluster_list0[0][1], region_cluster_list1[0][0], region_cluster_list1[0][1])
 
         if scaled:
             self.check_scaled()
 
-        self.logger.info("DE data for case: {} {}".format(region0, clusters0))
-        self.logger.info("DE data for control: {} {}".format(region1, clusters1))
-        print("Running {} {} against {} {}".format(region0, clusters0,region1, clusters1))
-
         if self.de_results_all is None:
             self.de_results_all = defaultdict(lambda: dict())
-
-        resKey = self.__make_de_res_key(region0, clusters0, region1, clusters1)
         
         sampleVec = []
         conditionVec = []
 
         exprData = pd.DataFrame()
-        masses = [("mass_" + str(x)).replace(".", "_") for x in self.regions[region0].idx2mass]
 
-        for clus in clusters0:
-
-            allPixels = cluster2coords_0[clus]
-
-            self.logger.info("Processing region {} cluster: {}".format(region0, clus))
-            bar = progressbar.ProgressBar()
-
-            if scaled:
-                dataArray = self.region_array_scaled[region0]
-            else:
-                dataArray = self.regions[region0].region_array
-
-
-            if sample_max > 0 and len(allPixels) > sample_max:
-                allPixels = random.sample(allPixels, sample_max)
-
-            for pxl in bar(allPixels):
-                pxl_name = "{}__{}__{}".format(region0, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
-                sampleVec.append(pxl_name)
-                conditionVec.append(0)
-
-                exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
-
-
-        for clus in clusters1:
-            self.logger.info("Processing region {} cluster: {}".format(region1, clus))
-
-            allPixels = cluster2coords_1[clus]
+        for pair in region_cluster_list0:
+            region0 = pair[0]
+            clusters0 = pair[1]
             
-            bar = progressbar.ProgressBar()
+            masses = [("mass_" + str(x)).replace(".", "_") for x in self.regions[region0].idx2mass]
+            for clus in clusters0:
 
-            if scaled:
-                dataArray = self.region_array_scaled[region1]
-            else:
-                dataArray = self.regions[region1].region_array
+                allPixels = cluster2coords0[region0][clus]
 
-            if sample_max > 0 and len(allPixels) > sample_max:
-                allPixels = random.sample(allPixels, sample_max)
+                self.logger.info("Processing region {} cluster: {}".format(region0, clus))
+                bar = progressbar.ProgressBar()
 
-            for pxl in bar(allPixels):
-                pxl_name = "{}__{}__{}".format(region1, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
-                sampleVec.append(pxl_name)
-                conditionVec.append(1)
+                if scaled:
+                    dataArray = self.region_array_scaled[region0]
+                else:
+                    dataArray = self.regions[region0].region_array
 
-                exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
+
+                if sample_max > 0 and len(allPixels) > sample_max:
+                    allPixels = random.sample(allPixels, sample_max)
+
+                for pxl in bar(allPixels):
+                    pxl_name = "{}__{}__{}".format(region0, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+                    sampleVec.append(pxl_name)
+                    conditionVec.append(0)
+
+                    exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
+
+        for pair in region_cluster_list1:
+            region1 = pair[0]
+            clusters1 = pair[1]
+            for clus in clusters1:
+                self.logger.info("Processing region {} cluster: {}".format(region1, clus))
+
+                allPixels = cluster2coords1[region1][clus]
+                
+                bar = progressbar.ProgressBar()
+
+                if scaled:
+                    dataArray = self.region_array_scaled[region1]
+                else:
+                    dataArray = self.regions[region1].region_array
+
+                if sample_max > 0 and len(allPixels) > sample_max:
+                    allPixels = random.sample(allPixels, sample_max)
+
+                for pxl in bar(allPixels):
+                    pxl_name = "{}__{}__{}".format(region1, str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+                    sampleVec.append(pxl_name)
+                    conditionVec.append(1)
+
+                    exprData[pxl_name] = dataArray[pxl[0], pxl[1], :]#.astype('int')
 
 
         self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
@@ -598,7 +616,6 @@ class CombinedSpectra():
                         grouping="condition"
                     )
 
-                
                 self.de_results_all[testMethod][resKey] = test.summary()
                 self.logger.info("DE-test ({}) finished. Results available: {}".format(testMethod, resKey))
 
