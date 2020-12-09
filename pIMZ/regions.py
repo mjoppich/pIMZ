@@ -769,7 +769,7 @@ class SpectraRegion():
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
-    def __segment__umap_ward(self, number_of_regions, dims=None, n_neighbors=10):
+    def __segment__umap_ward(self, number_of_regions, densmap=False, dims=None, n_neighbors=10):
         """Performs UMAP dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
 
         Args:
@@ -821,6 +821,7 @@ class SpectraRegion():
 
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
+            densmap=densmap,
             n_neighbors=n_neighbors,
             min_dist=0.0,
             n_components=2,
@@ -840,7 +841,7 @@ class SpectraRegion():
         return c
 
 
-    def __segment__umap_hdbscan(self, number_of_regions, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
+    def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
         """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
 
         Args:
@@ -893,6 +894,7 @@ class SpectraRegion():
 
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(
+            densmap=densmap,
             n_neighbors=n_neighbors,
             min_dist=0.0,
             n_components=2,
@@ -1150,14 +1152,16 @@ class SpectraRegion():
         """Performs clustering on similarity matrix.
 
         Args:
-            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN" or "UMAP_WARD". Defaults to "UPGMA".\n
+            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD" and "DENSMAP". Defaults to "UPGMA".\n
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
                 - "KMEANS": k-means clustering.\n
                 - "UMAP_DBSCAN": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
+                - "DENSMAP_DBSCAN": densMAP performs an optimization of the low dimensional representation followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "CENTROID": Unweighted pair group method with centroids (UPGMC).\n
                 - "MEDIAN": Weighted pair group method with centroids (WPGMC).\n
                 - "UMAP_WARD": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Ward variance minimization algorithm (WARD).\n
+                - "DENSMAP_WARD": densMAP performs an optimization of the low dimensional representation followed by Ward variance minimization algorithm (WARD).\n
             dims ([type], optional): The desired amount of intesity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intesities are considered.
             number_of_regions (int, optional): Number of desired clusters. Defaults to 10.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
@@ -1169,7 +1173,7 @@ class SpectraRegion():
             numpy.array: An array with cluster ids as elements.
         """
         #TODO there is no kmeans implemented!
-        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD"])
+        assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_DBSCAN", "DENSMAP_WARD"])
         if method in ["UPGMA", "WPGMA", "WARD", "KMEANS","CENTROID", "MEDIAN"]:
             assert(not self.spectra_similarity is None)
 
@@ -1197,6 +1201,12 @@ class SpectraRegion():
 
         elif method == "UMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, dims=dims, n_neighbors=n_neighbors)
+
+        elif method == "DENSMAP_DBSCAN":
+            c = self.__segment__umap_hdbscan(number_of_regions, densmap=True, dims=dims, n_neighbors=n_neighbors)
+
+        elif method == "DENSMAP_WARD":
+            c = self.__segment__umap_ward(number_of_regions, densmap=True, dims=dims, n_neighbors=n_neighbors)
 
         self.logger.info("Calculating clusters done")
 
