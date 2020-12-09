@@ -597,6 +597,8 @@ class IMZMLExtract:
             allData.append(res)
             allLabels.append("{}".format(position))
 
+            self.logger.info("Pixel {}: {}".format(position, self._fivenumber(res)))
+
 
         bplot2 = plt.boxplot(allData,
                     notch=True,  # notch shape
@@ -670,7 +672,7 @@ class IMZMLExtract:
 
                 return intra_norm
 
-            if normalize == "inter_median":
+            elif normalize == "inter_median":
                 global_fcs = Counter()
                 scalingFactor = 100000
 

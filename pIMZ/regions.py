@@ -1,8 +1,7 @@
 # general
-import math
 import logging
 import json
-import os,sys
+import os
 import random
 from collections import defaultdict, Counter
 import glob
@@ -11,19 +10,14 @@ import shutil, io, base64
 # general package
 from natsort import natsorted
 import pandas as pd
-
 import numpy as np
-from numpy.ctypeslib import ndpointer
-
-from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
-import ms_peak_picker
 import regex as re
+import h5py
 
 
 # image
 import skimage
 from skimage import measure as sk_measure
-from mpl_toolkits.mplot3d import axes3d
 
 # processing
 import ctypes
@@ -43,19 +37,13 @@ import hdbscan
 import diffxpy.api as de
 import anndata
 
-from scipy import ndimage, misc, sparse
-from scipy.sparse.linalg import spsolve
+from scipy import ndimage
 from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
-import scipy as sp
-import sklearn as sk
-
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 #web/html
 import jinja2
-
 
 # applications
 import progressbar
@@ -367,7 +355,18 @@ class SpectraRegion():
         with open(matrixPath, "wb") as fout:
             np.save(fout, self.segmented)
 
+        # hdf5 file with intensities
 
+        hdf5Path = os.path.abspath(os.path.join(folder, prefix + "." + str(regionID) + ".hdf5"))
+
+        with h5py.File(hdf5Path, "w") as data_file:
+            grp = data_file.create_group("intensities")
+
+            for mzIdx in range(0, self.region_array.shape[2]):
+                mzValue = self.idx2mass[mzIdx]
+                dset = grp.create_dataset( str(mzIdx) , data=self.region_array[:,:, mzIdx])
+                dset.attrs["mz"] = mzValue
+            data_file.close()
 
         cluster2deData = {}
         # write DE data
@@ -429,7 +428,8 @@ class SpectraRegion():
             "region": regionID,
             "path_upgma": segmentsPath,
             "info": regionInfos,
-            "segment_file": matrixPath
+            "segment_file": matrixPath,
+            "hdf5_file": hdf5Path
         }
 
 
@@ -1678,17 +1678,27 @@ class SpectraRegion():
             clusterSimilarities = {}
 
             for clusterLabel in clusterLabels:
-
-                allSpectra = [ self.region_array[xy[0], xy[1], :] for xy in cluster2coords[clusterLabel] ]
-
                 self.logger.info("Processing clusterLabel {}".format(clusterLabel))
 
                 clusterSims = []
-                for i in range(0, len(allSpectra)):
-                    for j in range(i+1, len(allSpectra)):
-                        clusterSims.append( self.__get_spectra_similarity(allSpectra[i], allSpectra[j]) )
+                useCoords = cluster2coords[clusterLabel]
+                for i in range(0, len(useCoords)):
+                    for j in range(i+1, len(useCoords)):
+                        iIdx = self.pixel2idx[useCoords[i]]
+                        jIdx = self.pixel2idx[useCoords[j]]
+                        
+                        sim = self.spectra_similarity[iIdx, jIdx]
+                        clusterSims.append(sim)
 
                 clusterSimilarities[clusterLabel] = clusterSims
+
+                #allSpectra = [ self.region_array[xy[0], xy[1], :] for xy in  cluster2coords[clusterLabel]]             
+                #bar = progressbar.ProgressBar()
+                #clusterSims = []
+                #for i in bar(range(0, len(allSpectra))):
+                #    for j in range(i+1, len(allSpectra)):
+                #        clusterSims.append( self.__get_spectra_similarity(allSpectra[i], allSpectra[j]) )
+                #clusterSimilarities[clusterLabel] = clusterSims
 
             clusterVec = []
             similarityVec = []
