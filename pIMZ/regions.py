@@ -837,8 +837,8 @@ class SpectraRegion():
         print(pwdist.shape)
 
         Z = spc.hierarchy.ward(pwdist)
-        c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
-        return c
+        self.dimred_labels = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
+        return self.dimred_labels
 
 
     def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
@@ -989,11 +989,12 @@ class SpectraRegion():
 
 
 
-    def vis_umap(self, legend=True):
-        """Visualises a scatterplot of the UMAP assigned pixels.
+    def vis_umap(self, legend=True, marker_size=(2.0, 10.0)):
+        """Visualises a scatterplot of the UMAP/densMAP assigned pixels.
 
         Args:
             legend (bool, optional): Whether to include the legend to the plot. Defaults to True.
+            marker_size (tuple, optional): Tuple of preferred marker sizes for unassigned marker_size[0] and lable specific points marker_size[1]. Defaults to (2.0, 10.0).
         """
         assert(not self.dimred_elem_matrix is None)
         assert(not self.dimred_labels is None)
@@ -1008,12 +1009,12 @@ class SpectraRegion():
                     self.dimred_elem_matrix[~clustered, 1],
                     color=(1, 0,0),
                     label="Unassigned",
-                    s=2.0)
+                    s=marker_size[0])
 
         uniqueClusters = sorted(set([x for x in nplabels if x >= 0]))
 
         for cidx, clusterID in enumerate(uniqueClusters):
-            cmap = matplotlib.cm.get_cmap('Spectral')
+            cmap=plt.cm.get_cmap('viridis', len(uniqueClusters))
 
             clusterColor = cmap(cidx / len(uniqueClusters))
 
@@ -1021,10 +1022,10 @@ class SpectraRegion():
                         self.dimred_elem_matrix[nplabels == clusterID, 1],
                         color=clusterColor,
                         label=str(clusterID),
-                        s=10.0)
+                        s=marker_size[1])
 
         if legend:
-            plt.legend()
+            plt.legend(loc="upper left",  bbox_to_anchor=(1.05, 1))
         plt.show()
         plt.close()
 
@@ -1404,7 +1405,8 @@ class SpectraRegion():
                 self.segmented[self.segmented == x] = 0
                     
         self.cluster_filters.append(method)
-
+        if self.segmented_method in ["UPGMA", "UMAP_DBSCAN", "UMAP_WARD", "DENSMAP_WARD", "DENSMAP_DBSCAN"]:
+            self.dimred_labels = self.segmented.flatten()
         return self.segmented
 
     def __cons_spectra__avg(self, cluster2coords, array):
