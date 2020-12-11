@@ -1155,6 +1155,7 @@ class SpectraRegion():
             method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD" and "DENSMAP". Defaults to "UPGMA".\n
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
+                - "WARD": Ward variance minimization algorithm.\n
                 - "KMEANS": k-means clustering.\n
                 - "UMAP_DBSCAN": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "DENSMAP_DBSCAN": densMAP performs an optimization of the low dimensional representation followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
