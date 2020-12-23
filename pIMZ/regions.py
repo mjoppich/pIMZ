@@ -306,7 +306,7 @@ class SpectraRegion():
 
 
     def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None, kw2segment=None):
-        """Extract eveilable data and prepares files for the 3D representation. 
+        """Extracts available data and prepares files for the 3D representation:
         - .clustering.png: Picture of the segmented region.
         - .matrix.npy: Matrix of the segmented region.
         - .tsv: Marker Proteins Analysis findings. (Optional)
@@ -317,9 +317,9 @@ class SpectraRegion():
             prefix (str): Desired name of the output files.
             regionID (int): Id of the desired region in the .imzML file.
             protWeights (ProteinWeights, optional): ProteinWeights object for translation of masses to protein name. Defaults to None.
-            nodf (bool, optional): It set to True, do not perform differential analysis. Defaults to False.
+            nodf (bool, optional): If set to True, do not perform differential analysis. Defaults to False.
             pathPrefix (str, optional): Desired path prefix for DE data files. Defaults to None.
-            ctpred (str, optional): Path to tsv file with cluster-cell type mapping. Defaults to None.
+            ctpred (str, optional): Path to .tsv file with cluster-cell type mapping. Defaults to None.
             kw2segment (dict, optional): Dictionary keyword => segment; assigns keyword to all listed segments.
         """
         cluster2celltype = None# { str(x): str(x) for x in np.unique(self.segmented)}
@@ -476,7 +476,7 @@ class SpectraRegion():
         """Returns the closest index for a specific mass.
 
         Args:
-            mass (float): mass to look up index for
+            mass (float): mass to look up index for.
 
         Returns:
             int: index in m/z array for mass (or closest mass if not exactly found).
@@ -484,16 +484,16 @@ class SpectraRegion():
         emass, eidx = self._get_exmass_for_mass(mass)
 
         return eidx
-
+ 
     def _get_exmass_for_mass(self, mass, threshold=None):
-        """Returns the closest mass and index for a specific mass.
+        """Returns the closest mass and index in .imzML file for a specific mass.
 
         Args:
-            mass (float): mass to look up index for
+            mass (float): mass to look up index for.
             threshold (float, optional): Maximal distance from mass to contained m/z. Defaults to None.
 
         Returns:
-            float, int: mass and index of closest contained m/z for mass
+            float, int: mass and index of closest contained m/z for mass.
         """
         
         dist2mass = float('inf')
@@ -511,8 +511,7 @@ class SpectraRegion():
 
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None):
-        """Filters the region_region to the given masses and returns the matrix with summed
-        representation of the gained spectra.
+        """Filters the region_array to the given masses and returns the matrix with summed representation of the gained spectra.
 
         Args:
             masses (array): List of masses or protein names (requires pw set).
@@ -520,11 +519,11 @@ class SpectraRegion():
             min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
             max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
             plot (bool, optional): Whether to plot the output matrix. Defaults to True.
-            verbose (bool, optional): Whether to correct each mass in masses. Defaults to True.
-            pw (ProteinWeights, optional): Allows to . Defaults to None.
+            verbose (bool, optional): Whether to correct each mass in masses using _get_exmass_for_mass. Defaults to True.
+            pw (ProteinWeights, optional): Allows to translate masses names to actual masses in a given ProteinWeights object. Defaults assuming the elements in masses are numeric, hence None.
 
         Returns:
-            numpy.array: Each element is a sum of inetsities at given masses.
+            numpy.array: Each element is a sum of intensities at given masses.
         """
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -568,7 +567,6 @@ class SpectraRegion():
             plt.close()
 
         return image
-        #return image
 
 
     def calc_similarity(self, inputarray):
@@ -627,8 +625,8 @@ class SpectraRegion():
         Args:
             mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".\n
                 - "spectra": Raw similarity matrix.\n
-                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the maximum values.\n
-                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
+                - "spectra_log": Takes a logarithm and normalizes the similarity matrix by dividing by the maximum values.\n
+                - "spectra_log_dist": Takes a logarithm, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
             features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
             neighbors (int, optional): Number of neighboring masses to each feature to be included. Defaults to 1.
 
@@ -774,7 +772,8 @@ class SpectraRegion():
 
         Args:
             number_of_regions (int): Number of desired clusters.
-            dims (int/list, optional): dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
 
         Returns:
@@ -846,7 +845,8 @@ class SpectraRegion():
 
         Args:
             number_of_regions (int): Number of desired clusters.
-            dims (int/list, optional): he desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
             min_samples (int, optional): Minimum number of samples. Defaults to 5.
             min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
@@ -1033,9 +1033,9 @@ class SpectraRegion():
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
-            min_cut_off (int/float, optional): Minimum allowed value. Defaults to None.
-            max_cut_off (int/float, optional): Maximum allowed value. Defaults to None.
-            masses (numpy.array/list, optional): A list of masses to which each spectrum will be reduced. Defaults to None.
+            min_cut_off (int/float, optional): Minimum allowed value. Smaller values will be replaced with min_cut_off value. Defaults to None.
+            max_cut_off (int/float, optional): Maximum allowed value. Greater values will be replaced with max_cut_off value. Defaults to None.
+            masses (numpy.array/list, optional): A list of masses to which each spectrum will be reduced. Defaults to None, meaning all masses are considered.
             hist (bool, optional): Whether to plot a cumularive histogram of values (sums) frequencies. Defaults to False.
             plot_log (bool, optional): Whether to logarithm the resulting matrix. Defaults to False.
 
@@ -1271,7 +1271,7 @@ class SpectraRegion():
         """Filters the segmented array. 
 
         Args:
-            method (str, optional): Possible methods: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".. Defaults to 'remove_singleton'.\n
+            method (str, optional): Possible methods: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss". Defaults to 'remove_singleton'.\n
                 - "remove_singleton": If there are clusters that include only one pixel, they will be made a part of the background.\n
                 - "most_similar_singleton": If there are clusters that include only one pixel, they will be compared to consensus spectra of all cluster and then added to the cluster with the lowest distance.\n
                 - "merge_background": Collects cluster ids at the borders and assigns all findings with background id 0.\n
@@ -1470,6 +1470,9 @@ class SpectraRegion():
 
         Args:
             region_array (numpy.array): Array of spectra.
+
+        Returns:
+            numpy.array: An array where each element is a median value of all spectra at each specific m/z index.
         """
 
         median_profile = np.array([0.0] * region_array.shape[2])
@@ -1536,7 +1539,7 @@ class SpectraRegion():
         """Constructs a consensus spectrum for each cluster id by using the specified method.
 
         Args:
-            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" or "median". Defaults to "avg".
+            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" (average) or "median". Defaults to "avg".
             set_consensus (bool, optional): Whether to set the calculated consensus and the respective method as object attributes. Defaults to True.
             array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
 
@@ -1627,8 +1630,6 @@ class SpectraRegion():
             multi_groups.mean_diff.plot()
 
     def plot_inter_consensus_similarity(self, clusters=None):
-
-
         cluster2coords = self.getCoordsForSegmented()
         clusterLabels = sorted([x for x in cluster2coords])
         self.logger.info("Found clusterLabels {}".format(clusterLabels))
@@ -1670,7 +1671,11 @@ class SpectraRegion():
 
 
     def plot_consensus_similarity(self, mode="heatmap"):
+        """Plots the similarity matrix either represented as a heatmap of similarity matrix or as seaborn.boxplot depicting similarity distributions of similarity values within the clusters.
 
+        Args:
+            mode (str, optional): Either "heatmap" or "spectra". Defaults to "heatmap".
+        """
         assert(not self.consensus_similarity_matrix is None)
 
         assert(mode in ["heatmap", "spectra"])
@@ -1727,11 +1732,21 @@ class SpectraRegion():
             plt.close()                                
 
     def __get_spectra_similarity(self, vA, vB):
+        """Calculates cosine similarity between two vectors of the same length.
+
+        Args:
+            vA (numpy.array/list): First vector.
+            vB (numpy.array/list): Second vector.
+
+        Returns:
+            float: cosine similarity.
+        """
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
     def consensus_similarity(self ):
-
+        """Updates consensus_similarity_matrix attribute of SpectraRegion object. The matrix then consists of similarity values between the spectra in the consensus dictionary.
+        """
         assert(not self.consensus is None)
 
         allLabels = sorted([x for x in self.consensus])
@@ -1760,7 +1775,16 @@ class SpectraRegion():
 
 
     def __get_expression(self, massValue, segments, mode="avg"):
+        """Gives an overview of the expression (intensity values) of the given mass in the region.
 
+        Args:
+            massValue (float): A desired mass.
+            segments (numpy.array/list/tuple/set/int): Desired cluster id(s).
+            mode (numpy.array/list/tuple/set/str, optional): Whether to calculate the average and/or median value of the found expression values. Defaults to "avg".
+
+        Returns:
+            tuple: the first element consists of value(s) calculated with specified mode(s), number of found expression values, number of found expression values that differ from 0.
+        """
         assert(massValue != None)
         assert(segments != None)
 
@@ -1801,8 +1825,15 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-    def get_spectra_matrix(self,segments):
+    def get_spectra_matrix(self, segments):
+        """Returns a matrix with all spectra in .imzML file that correspond to the given segments.
 
+        Args:
+            segments (numpy.array/list): A list of desired cluster ids.
+
+        Returns:
+            numpy.array: An array where each element is spectrum that was previously found to be part of one of the given clusters given in segments parameter.
+        """
         cluster2coords = self.getCoordsForSegmented()
 
         relPixels = []
@@ -1928,7 +1959,7 @@ class SpectraRegion():
         return merged
 
     def cartoonize2(self, imze, background, aorta, plaque, ignore_background=True, blur=False):
-        """Simplifies the segmented array by comparing median spectra of the given cluster groups to the spectra region.
+        """Simplifies the segmented array by comparing median spectra of the given cluster groups to the whole spectra region.
 
         Args:
             imze (IMZMLExtract): IMZMLExtract object.
@@ -2089,13 +2120,13 @@ class SpectraRegion():
 
 
     def _makeHTMLStringFilterTable(self, expDF):
-        """Transform given pandas dataframe into HTML output
+        """Transform given pandas dataframe into HTML output.
 
         Args:
-            expDF (pd.DataFrame): Values for output
+            expDF (pd.DataFrame): Values for output.
 
         Returns:
-            htmlHead, htmlBody (str): HTML code for head and body
+            htmlHead, htmlBody (str): HTML code for head and body.
         """
 
         headpart = """
