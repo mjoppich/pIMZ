@@ -69,7 +69,7 @@ class SpectraRegion():
             path (str): Path to pickle file to load spectra region from.
 
         Returns:
-            SpectraRegion: SpectraRegion from pickle
+            SpectraRegion: SpectraRegion object from pickle.
         """
 
         obj = None
@@ -138,7 +138,6 @@ class SpectraRegion():
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
-        - de_results_all (dict): Methods mapped to their differential analysis results. Initialized with None.
         - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with None.
 
         Args:
@@ -442,7 +441,11 @@ class SpectraRegion():
         
 
     def judge_de_masses(self, filter_func):
+        """Adds or edits the de_judge element of a differential analysis result dictionary of the given SpectraRegion object by applying the desired function.
 
+        Args:
+            filter_func (function): A function that is applied to every entry of a differential analysis result of every available method.
+        """
         for test in self.df_results_all:
 
             for comp in self.df_results_all[test]:
@@ -1576,7 +1579,12 @@ class SpectraRegion():
         return cons_spectra
 
     def mass_dabest(self, masses, background=0):
+        """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster. Additionally, plots mean difference effect sizes with help of the DABEST package. The given cluster id is considered a control group.
 
+        Args:
+            masses (float/list/tuple/set): A desired mass or collection of masses.
+            background (int, optional): Cluster id of the background. Defaults to 0.
+        """
         assert(not self.segmented is None)
 
         if not isinstance(masses, (list, tuple, set)):
@@ -1630,6 +1638,11 @@ class SpectraRegion():
             multi_groups.mean_diff.plot()
 
     def plot_inter_consensus_similarity(self, clusters=None):
+        """Plots seaborn.boxplot depicting the cosine similarity distributions by comparison of spectra belonging to specified cluster ids to all available clusters.
+
+        Args:
+            clusters (numpy.array/list, optional): A list of desired cluster ids. Defaults to None, meaning to include all available clusters.
+        """
         cluster2coords = self.getCoordsForSegmented()
         clusterLabels = sorted([x for x in cluster2coords])
         self.logger.info("Found clusterLabels {}".format(clusterLabels))
@@ -1745,7 +1758,7 @@ class SpectraRegion():
 
 
     def consensus_similarity(self ):
-        """Updates consensus_similarity_matrix attribute of SpectraRegion object. The matrix then consists of similarity values between the spectra in the consensus dictionary.
+        """Updates consensus_similarity_matrix attribute of SpectraRegion object. The updated matrix consists of similarity values between the spectra in the consensus dictionary.
         """
         assert(not self.consensus is None)
 
@@ -1775,7 +1788,7 @@ class SpectraRegion():
 
 
     def __get_expression(self, massValue, segments, mode="avg"):
-        """Gives an overview of the expression (intensity values) of the given mass in the region.
+        """Gives an expression (intensity values) overview of the given mass in the region.
 
         Args:
             massValue (float): A desired mass.
@@ -1849,7 +1862,18 @@ class SpectraRegion():
 
 
     def get_expression_from_matrix(self, matrix, massValue, segments, mode="avg"):
+        """Gives an expression (intensity values) overview of the given matrix.
 
+        Args:
+            matrix (numpy.array): A matrix from which the intensity values will be extracted.
+            massValue (float): A desired mass.
+            segments (numpy.array/list/tuple/set/int): Desired cluster id(s).
+            mode (numpy.array/list/tuple/set/str, optional): Whether to calculate the average and/or median value of the found expression values. "arg" (average) and/or "median". Defaults to "avg".
+
+        Returns:
+            tuple: the first element consists of value(s) calculated with specified mode(s), number of found expression values, number of found expression values that differ from 0.
+        """
+        #TODO not used parameter segments. Delete?
         assert(massValue != None)
         assert(segments != None)
 
@@ -2310,6 +2334,14 @@ document.addEventListener('readystatechange', event => {
 
 
     def get_mask(self, regions):
+        """Returns updated segmented shaped matrix with the desired region coordinates replaced with ones.
+
+        Args:
+            regions (list/tuple/set/int): A desired region or collection of cluster ids.
+
+        Returns:
+            numpy.array: An updated matrix with all specified cluster ids replaced with cluster id equals 1.
+        """
         if not isinstance(regions, (list, tuple, set)):
             regions = [regions]
 
@@ -2493,7 +2525,22 @@ document.addEventListener('readystatechange', event => {
 
 
     def deres_to_df(self, method, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+        """Transforms differetial expression (de) result in de_results_all dictionary of the SpectraRegion object into a DataFrame.
 
+        Args:
+            method (str): Test method for differential expression. "empire", "ttest" or "rank".
+            resKey (tuple): List of regions where to look for the result.
+            protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
+            keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
+            inverse_fc (bool, optional): If True, the de result logFC will be inversed (negated). Defaults to False.
+            max_adj_pval (float, optional): Threshold for maximum adjusted p-value that will be used for filtering of the de results. Defaults to 0.05.
+            min_log2fc (float, optional): Threshold for minimum log2fc that will be used for filtering of the de results. Defaults to 0.5.
+
+        Returns:
+            pandas.DataFrame: DataFrame of differetial expression (de) result.
+        """
         clusterVec = []
         geneIdentVec = []
         massVec = []
@@ -2648,18 +2695,22 @@ document.addEventListener('readystatechange', event => {
 
 
     def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, mz_dist=3, mz_best=False, backgroundCluster=[0], out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
-        """
-        Finds all marker proteins for a specific clustering.
+        """Finds all marker proteins for a specific clustering.
 
         Args:
             protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
             keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
             replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
             includeBackground (bool, optional): If True, the cluster specific expression data are compared to all other clusters incl. background cluster. Defaults to True.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
             backgroundCluster ([int], optional): Clusters which are handled as background. Defaults to [0].
             out_prefix (str, optional): Prefix for results file. Defaults to "nldiffreg".
             outdirectory ([type], optional): Directory used for empire files. Defaults to None.
-            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].
+            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].\n
+                - "empire": Empirical and Replicate based statistics (EmpiRe).\n
+                - "ttest": Welch’s t-test for differential expression using diffxpy.api.\n
+                - "rank": Mann-Whitney rank test (Wilcoxon rank-sum test) for differential expression using diffxpy.api.\n
             count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1, "empire": 10000}.
 
         Returns:
@@ -2705,14 +2756,14 @@ document.addEventListener('readystatechange', event => {
                     
 
     def __make_de_res_key(self, clusters0, clusters1):
-        """Generates the storage key for two sets of clusters
+        """Generates the storage key for two sets of clusters.
 
         Args:
-            clusters0 (list): list of cluster ids 1
-            clusters1 (list): list of cluster ids 2
+            clusters0 (list): list of cluster ids 1.
+            clusters1 (list): list of cluster ids 2.
 
         Returns:
-            tuple: tuple of both sorted cluster ids, as tuple
+            tuple: tuple of both sorted cluster ids, as tuple.
         """
 
         return (tuple(sorted(clusters0)), tuple(sorted(clusters1)))
@@ -2725,7 +2776,14 @@ document.addEventListener('readystatechange', event => {
         self.df_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
-        
+        """Performs Empirical and Replicate based statistics (EmpiRe).
+
+        Args:
+            nlDir (str): The path to the desired output directory.
+            pdata (DataFrame): Phenotype data.
+            pdataPath (str): The path to the saved .tsv file with phenotype data.
+            diffOutput (str): The path where to save the .tsv output file.
+        """
         def run(cmd):
             print(" ".join(cmd))
             proc = subprocess.Popen(cmd,
@@ -2808,7 +2866,24 @@ document.addEventListener('readystatechange', event => {
 
 
     def find_markers(self, clusters0, clusters1=None, out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}, sample_max=-1):
+        """Finds marker proteins for a specific clustering.
 
+        Args:
+            clusters0 (int/list/tuple/set): Cluster id(s) that will be labeled as condition 0.
+            clusters1 (list/tuple/set, optional): Cluster id(s) that will be labeled as condition 1. Defaults to None, meaning all clusters that are not in clusters0, belong to clusters1.
+            out_prefix (str, optional): If using "empire" method, the desired prefix of the newly generated files can be specified. Defaults to "nldiffreg".
+            outdirectory (str, optional): If using "empire" method, the path to the desired output directory must be specified. Defaults to None.
+            replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
+            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].\n
+                - "empire": Empirical and Replicate based statistics (EmpiRe).\n
+                - "ttest": Welch’s t-test for differential expression using diffxpy.api.\n
+                - "rank": Mann-Whitney rank test (Wilcoxon rank-sum test) for differential expression using diffxpy.api.\n
+            count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1, "empire": 10000}.
+            sample_max (int, optional): The size of the sampled list of spectra. Defaults to -1, meaning all are considered.
+
+        Returns:
+            tuple: DataFrame object containing expression data, DataFrame object containing phenotype data (condition 0/1), DataFrame object containing feature data (masses)
+        """
         cluster2coords = self.getCoordsForSegmented()
 
         if not isinstance(clusters0, (list, tuple, set)):
@@ -2995,7 +3070,11 @@ document.addEventListener('readystatechange', event => {
 
 
     def list_de_results(self):
-        
+        """Transforms a dictionary of the differential expression results into a list.
+
+        Returns:
+            list: A list of tuples where the first element is the name of the used method and the second - all compared sets of clusters.
+        """
         allDERes = []
         for x in self.de_results_all:
             for y in self.de_results_all[x]:
@@ -3004,7 +3083,14 @@ document.addEventListener('readystatechange', event => {
         return allDERes
 
     def find_de_results(self, keypart):
+        """Finds all occurrences of the desired set of clusters.
 
+        Args:
+            keypart (tuple): Desired set of clusters to find.
+
+        Returns:
+            list: A list of tuples where the first element is the name of the used method followed by all occurrences that include the specified set of clusters.
+        """
         results = []
         for method in self.de_results_all:
             for key in self.de_results_all[method]:
@@ -3017,7 +3103,14 @@ document.addEventListener('readystatechange', event => {
 
 
     def get_de_results(self, key):
+        """Finds exactly those differential expression results that correspond to the given cluster sets pair.
 
+        Args:
+            key (tuple): A tuple of two tuples each consisting of cluster ids compared.
+
+        Returns:
+            dict: name of the used methods as keys mapped to the respective results.
+        """
         results = {}
         for method in self.de_results_all:
             if key in self.de_results_all[method]:
@@ -3026,7 +3119,15 @@ document.addEventListener('readystatechange', event => {
         return results
 
     def get_de_result(self, method, key):
+        """Finds differential expression result of exact given cluster sets pair using the specified method.
 
+        Args:
+            method (str): Either "empire", "ttest" or "rank".
+            key (tuple): A tuple of two tuples each consisting of cluster ids compared.
+
+        Returns:
+            pandas.DataFrame: differential expression data of the given case.
+        """
         rets = []
         for x in self.de_results_all:
             if x == method:
