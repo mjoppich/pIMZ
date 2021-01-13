@@ -61,10 +61,12 @@ import progressbar
 
 
 class CombinedSpectra():
-    """CombinedSpectra class for a combined analysis
+    """CombinedSpectra class for a combined analysis of several spectra regions.
     """
 
     def __setlogger(self):
+        """Sets up logging facilities for CombinedSpectra.
+        """
         self.logger = logging.getLogger('CombinedSpectra')
 
         if len(self.logger.handlers) == 0:
@@ -79,6 +81,17 @@ class CombinedSpectra():
             consoleHandler.setFormatter(formatter)
 
     def __init__(self, regions):
+        """Initializes a CombinedSpectra object with the following attributes:
+        - logger (logging.Logger): Reference to the Logger object.
+        - regions (dict): A dictionary that has SpectraRegion objects names as keys and respective SpectraRegion objects as values. If a SpectraRegion object does not have a name attribute it will be named according to the region id.
+        - consensus_similarity_matrix (pandas.DataFrame): Pairwise similarity matrix between consensus spectra of all combinations of regions. Initialized with None.
+        - region_cluster2cluster (dict): A dictionary where every tuple (region name, region id) is mapped to its cluster id where it belongs. Initialized with None.
+        - region_array_scaled (dict): A dictionary where each SpectraRegion name is mapped to the respective scaled region array either using "avg" (average) or "median" method. Initialized with an empty dict.
+        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with an empty defaultdict.
+
+        Args:
+            regions (dict): A dictionary that maps region ids to respective SpectraRegion objects.
+        """
 
         self.regions = {}
         self.consensus_similarity_matrix = None
@@ -100,11 +113,21 @@ class CombinedSpectra():
 
 
     def __get_spectra_similarity(self, vA, vB):
+        """Calculates cosine similarity between two vectors of the same length.
+
+        Args:
+            vA (numpy.array/list): First vector.
+            vB (numpy.array/list): Second vector.
+
+        Returns:
+            float: cosine similarity.
+        """
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
     def consensus_similarity(self):
-        
+        """Calculates consensus_similarity_matrix of CombinedSpectra object. The resulting pandas.DataFrame is a pairwise similarity matrix between consensus spectra of all combinations of regions.
+        """
         allConsSpectra = {}
 
         for regionName in self.regions:
@@ -133,12 +156,19 @@ class CombinedSpectra():
         self.consensus_similarity_matrix = distDF
 
     def plot_consensus_similarity(self):
-            sns.heatmap(self.consensus_similarity_matrix)
-            plt.show()
-            plt.close()
+        """Plots the similarity matrix represented as seaborn.heatmap.
+        """
+        sns.heatmap(self.consensus_similarity_matrix)
+        plt.show()
+        plt.close()
 
 
     def cluster_concensus_spectra(self, number_of_clusters=5):
+        """Performs clustering using Ward variance minimization algorithm on similarity matrix of consensus spectra and updates region_cluster2cluster with the results. region_cluster2cluster dictionary maps every tuple (region name, region id) to its cluster id where it belongs. Additionally plots the resulting dendrogram depicting relationships of regions to each other.
+
+        Args:
+            number_of_clusters (int, optional): Number of desired clusters. Defaults to 5.
+        """
         df = self.consensus_similarity_matrix.copy()
         # Calculate the distance between each sample
         Z = spc.hierarchy.linkage(df.values, 'ward')
@@ -177,6 +207,8 @@ class CombinedSpectra():
         self.region_cluster2cluster = region2cluster
 
     def check_scaled(self):
+        """Detects not scaled region arrays and norms them using "median" method.
+        """
         hasToReprocess = False
         for regionName in self.regions:
             if not regionName in self.region_array_scaled:
@@ -189,7 +221,14 @@ class CombinedSpectra():
 
 
     def mass_intensity(self, masses, regions=None, scaled=False, verbose=True):
+        """Plots seaborn.boxplot for every selected region depicting the range of intensity values in each cluster.
 
+        Args:
+            masses (float/list/tuple/set): Desired mass(es).
+            regions (list/numpy.array, optional): Desired regions where to look for mass intensities. Defaults to None meaning to consider all available regions.
+            scaled (bool, optional): Whether to use intensity values of scaled region arrays. Defaults to False.
+            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
+        """
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
@@ -247,7 +286,20 @@ class CombinedSpectra():
 
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False, verbose=True):
+        """Plots heatmap for every selected region depicting region_array spectra reduced to the sum of the specified masses.
 
+        Args:
+            masses (float/list/tuple/set): Desired mass(es).
+            log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
+            min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
+            plot (bool, optional):  Whether to plot the output matrix. Defaults to True.
+            scaled (bool, optional): Whether to use intensity values of scaled region arrays. Defaults to False.
+            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
+
+        Returns:
+            numpy.array: A matrix of the last region where each element is a sum of intensities at given masses. 
+        """
+        #TODO deside whether it makes sence to return this matrix
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 
@@ -323,7 +375,11 @@ class CombinedSpectra():
         return image
 
     def plot_segments(self, highlight=None):
+        """Plots segmented arrays of all regions as heatmaps.
 
+        Args:
+            highlight (list/tuple/set/int, optional): If cluster ids are specified here, the resulting clustering will have cluster id 2 for highlight clusters, cluster id 0 for background, and cluster id 1 for the rest. Defaults to None.
+        """
         assert(not self.region_cluster2cluster is None)
 
         allClusters = [self.region_cluster2cluster[x] for x in self.region_cluster2cluster]
@@ -360,7 +416,11 @@ class CombinedSpectra():
 
 
     def plot_common_segments(self, highlight=None):
+        """Plots segmented arrays of every region annotating the clusters with respect to new clustering done with CombinedSpectra (saved in region_cluster2cluster).
 
+        Args:
+            highlight (list/tuple/set/int, optional):  If cluster ids are specified here, the resulting clustering will have cluster id 2 for highlight clusters, cluster id 0 for background, and cluster id 1 for the rest. Defaults to None.
+        """
         assert(not self.region_cluster2cluster is None)
 
         allClusters = [self.region_cluster2cluster[x] for x in self.region_cluster2cluster]
@@ -410,7 +470,11 @@ class CombinedSpectra():
         self._plot_arrays(region2segments)
 
     def _plot_arrays(self, region2segments):
+        """Plots heatmaps for every region given in region2segments.
 
+        Args:
+            region2segments (dict): A dictionary with region names as keys and respective segmented arrays as values.
+        """
         rows = math.ceil(len(region2segments) / 2)
         fig, axes = plt.subplots(rows, 2)
 
@@ -457,7 +521,17 @@ class CombinedSpectra():
         plt.close()
 
     def __make_de_res_key(self, region0, clusters0, region1, clusters1):
+        """Generates the storage key for two sets of clusters.
 
+        Args:
+            region0 (int): first region id.
+            clusters0 (list): list of cluster ids 1.
+            region1 (int): second region id.
+            clusters1 (list): list of cluster ids 2.
+
+        Returns:
+            tuple: tuple (region0, sorted clusters0, region1, sorted clusters1)
+        """
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
     def find_markers(self, region_cluster_list0, region_cluster_list1, protWeights, mz_dist=3, mz_best=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
@@ -469,9 +543,12 @@ class CombinedSpectra():
             protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein names.
             mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
             mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
-            use_methods (str/list, optional): Test method(s) for differential expression. Defaults to ["empire", "ttest", "rank"].
+            use_methods (str/list, optional): Test method(s) for differential expression. Defaults to ["empire", "ttest", "rank"].\n
+                - "empire": Empirical and Replicate based statistics (EmpiRe).\n
+                - "ttest": Welch’s t-test for differential expression using diffxpy.api.\n
+                - "rank": Mann-Whitney rank test (Wilcoxon rank-sum test) for differential expression using diffxpy.api.\n
             count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1}.
-            scaled (bool, optional): Weather each processed region is normalized. Those which are not will be scaled with the median method. Defaults to True.
+            scaled (bool, optional): Wether each processed region is normalized. Those which are not will be scaled with the median method. Defaults to True.
             sample_max (int, optional): Allowed number of samples (spectra of specified regions&clusters) will be used by differential analysis (will be randomly picked if there are more available than allowed). Defaults to -1 meaning all samples are used.
 
         Returns:
@@ -631,7 +708,11 @@ class CombinedSpectra():
 
 
     def list_de_results(self):
-        
+        """Transforms a dictionary of the differential expression results into a list.
+
+        Returns:
+            list: A list of tuples where the first element is the name of the used method and the second - all compared sets of clusters.
+        """
         allDERes = []
         for x in self.de_results_all:
             for y in self.de_results_all[x]:
@@ -640,7 +721,16 @@ class CombinedSpectra():
         return allDERes
 
     def get_spectra_matrix(self, region_array, segments, cluster2coords):
+        """Returns a matrix with all spectra that correspond to the given segments.
 
+        Args:
+            region_array (numpy.array): Array of spectra.
+            segments (numpy.array/list): A list of desired cluster ids.
+            cluster2coords (dict): Each cluster ids mapped to the corresponding coordinates in region_array.
+
+        Returns:
+            numpy.array: An array where each element is spectrum that is part of one of the given clusters from segments.
+        """
         relPixels = []
         for x in segments:
             relPixels += cluster2coords.get(x, [])
@@ -660,7 +750,23 @@ class CombinedSpectra():
 
 
     def deres_to_df(self, deResDF, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5, scaled=True):
+        """Transforms differetial expression (de) result into a DataFrame form.
 
+        Args:
+            deResDF (pandas.DataFrame): A DataFrame that summarizes de result. 
+            resKey (tuple): List of regions where to look for the result.
+            protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
+            keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
+            inverse_fc (bool, optional): If True, the de result logFC will be inversed (negated). Defaults to False.
+            max_adj_pval (float, optional): Threshold for maximum adjusted p-value that will be used for filtering of the de results. Defaults to 0.05.
+            min_log2fc (float, optional): Threshold for minimum log2fc that will be used for filtering of the de results. Defaults to 0.5.
+            scaled (bool, optional):Whether to use intensity values of scaled region arrays. Defaults to True.
+
+        Returns:
+            pandas.DataFrame: DataFrame of differetial expression (de) result.
+        """
 
         if scaled:
             self.check_scaled()
@@ -848,7 +954,7 @@ class CombinedSpectra():
         """Creates five number statistics for values in valuelist
 
         Args:
-            valuelist (list/tuple/np.array (1D)): list of values to use for statistics
+            valuelist (list/tuple/nupmy.array (1D)): list of values to use for statistics
 
         Returns:
             tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
@@ -863,7 +969,11 @@ class CombinedSpectra():
 
 
     def get_internormed_regions(self, method="median"):
+        """Scales region arrays with either average or median of the fold changes. Updates region_array_scaled. Additionally plots the range of scaled fold changes with a boxplot.
 
+        Args:
+            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" (average) or "median". Defaults to "median".
+        """
         assert (method in ["avg", "median"])
 
         allRegionNames = [x for x in self.regions]

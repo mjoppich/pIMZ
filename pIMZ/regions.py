@@ -138,7 +138,7 @@ class SpectraRegion():
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
-        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with None.
+        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with an empty defaultdict.
 
         Args:
             region_array (numpy.array): Array of spectra defining one region.
@@ -522,7 +522,7 @@ class SpectraRegion():
             min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
             max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
             plot (bool, optional): Whether to plot the output matrix. Defaults to True.
-            verbose (bool, optional): Whether to correct each mass in masses using _get_exmass_for_mass. Defaults to True.
+            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
             pw (ProteinWeights, optional): Allows to translate masses names to actual masses in a given ProteinWeights object. Defaults assuming the elements in masses are numeric, hence None.
 
         Returns:
@@ -1757,7 +1757,7 @@ class SpectraRegion():
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
-    def consensus_similarity(self ):
+    def consensus_similarity(self):
         """Updates consensus_similarity_matrix attribute of SpectraRegion object. The updated matrix consists of similarity values between the spectra in the consensus dictionary.
         """
         assert(not self.consensus is None)
