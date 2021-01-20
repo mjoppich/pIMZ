@@ -299,7 +299,7 @@ class CombinedSpectra():
         Returns:
             numpy.array: A matrix of the last region where each element is a sum of intensities at given masses. 
         """
-        #TODO deside whether it makes sence to return this matrix
+
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
 

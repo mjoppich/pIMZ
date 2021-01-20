@@ -40,6 +40,7 @@ import anndata
 from scipy import ndimage
 from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
+from scipy.cluster.vq import kmeans2
 
 
 #web/html
@@ -843,7 +844,7 @@ class SpectraRegion():
         return self.dimred_labels
 
 
-    def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
+    def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_cluster_size=20, num_samples=10000):
         """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
 
         Args:
@@ -851,14 +852,12 @@ class SpectraRegion():
             densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
             dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
-            min_samples (int, optional): Minimum number of samples. Defaults to 5.
             min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
             num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
 
         Returns:
             list: A list of HDBSCAN labels. 
         """
-        #TODO decide whether the min_samples is needed (not used in this function)
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
@@ -907,6 +906,22 @@ class SpectraRegion():
         self.redo_hdbscan_on_dimred(number_of_regions, min_cluster_size, num_samples)
 
         return self.dimred_labels
+
+    def __segment__kmeans(self, number_of_regions):
+        """Forms flat clusters with k-means++ clustering method (see scipy.cluster.vq.kmeans2 for more information) on the spectra array.
+
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
+
+        all_spectra = self.region_array.reshape(-1, self.region_array.shape[2])
+        centroid, label = kmeans2(all_spectra, k=number_of_regions, iter=10, minit='++')
+        if 0 in label:
+            label += 1
+        return label
 
     def redo_hdbscan_on_dimred(self, number_of_regions, min_cluster_size=15, num_samples=10000, set_segmented=True):
         """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) with the additional UMAP dimension reduction in order to achieve the desired number of clusters.
@@ -1152,7 +1167,7 @@ class SpectraRegion():
             print(region, ": ", regionCounts[region])
 
 
-    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=1000):
+    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_cluster_size=20, num_samples=1000):
         """Performs clustering on similarity matrix.
 
         Args:
@@ -1160,7 +1175,7 @@ class SpectraRegion():
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
                 - "WARD": Ward variance minimization algorithm.\n
-                - "KMEANS": k-means clustering.\n
+                - "KMEANS": k-means++ clustering.\n
                 - "UMAP_DBSCAN": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "DENSMAP_DBSCAN": densMAP performs an optimization of the low dimensional representation followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "CENTROID": Unweighted pair group method with centroids (UPGMC).\n
@@ -1170,16 +1185,14 @@ class SpectraRegion():
             dims ([type], optional): The desired amount of intesity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intesities are considered.
             number_of_regions (int, optional): Number of desired clusters. Defaults to 10.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
-            min_samples (int, optional): Minimum number of samples. Defaults to 5.
             min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
             num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 1000.
 
         Returns:
             numpy.array: An array with cluster ids as elements.
         """
-        #TODO there is no kmeans implemented!
         assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_DBSCAN", "DENSMAP_WARD"])
-        if method in ["UPGMA", "WPGMA", "WARD", "KMEANS","CENTROID", "MEDIAN"]:
+        if method in ["UPGMA", "WPGMA", "WARD", "CENTROID", "MEDIAN"]:
             assert(not self.spectra_similarity is None)
 
         self.logger.info("Calculating clusters")
@@ -1202,7 +1215,7 @@ class SpectraRegion():
             c = self.__segment__ward(number_of_regions)
 
         elif method == "UMAP_DBSCAN":
-            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size, num_samples=num_samples)
+            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_cluster_size=min_cluster_size, num_samples=num_samples)
 
         elif method == "UMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, dims=dims, n_neighbors=n_neighbors)
@@ -1213,12 +1226,15 @@ class SpectraRegion():
         elif method == "DENSMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, densmap=True, dims=dims, n_neighbors=n_neighbors)
 
+        elif method == "KMEANS":
+            c = self.__segment__kmeans(number_of_regions)
+
         self.logger.info("Calculating clusters done")
 
         image_UPGMA = np.zeros(self.region_array.shape, dtype=np.int16)
         image_UPGMA = image_UPGMA[:,:,0]
 
-
+        
         # cluster 0 has special meaning: not assigned !
         assert(not 0 in [c[x] for x in c])
 
@@ -1873,7 +1889,6 @@ class SpectraRegion():
         Returns:
             tuple: the first element consists of value(s) calculated with specified mode(s), number of found expression values, number of found expression values that differ from 0.
         """
-        #TODO not used parameter segments. Delete?
         assert(massValue != None)
         assert(segments != None)
 
