@@ -40,6 +40,7 @@ import anndata
 from scipy import ndimage
 from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
+from scipy.cluster.vq import kmeans2
 
 
 #web/html
@@ -69,7 +70,7 @@ class SpectraRegion():
             path (str): Path to pickle file to load spectra region from.
 
         Returns:
-            SpectraRegion: SpectraRegion from pickle
+            SpectraRegion: SpectraRegion object from pickle.
         """
 
         obj = None
@@ -138,8 +139,7 @@ class SpectraRegion():
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
-        - de_results_all (dict): Methods mapped to their differential analysis results. Initialized with None.
-        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with None.
+        - de_results_all (dict): Methods mapped to their differential analysis results (as pd.DataFrame). Initialized with an empty defaultdict.
 
         Args:
             region_array (numpy.array): Array of spectra defining one region.
@@ -306,7 +306,7 @@ class SpectraRegion():
 
 
     def to_aorta3d(self, folder, prefix, regionID, protWeights = None, nodf=False, pathPrefix = None, ctpred=None, kw2segment=None):
-        """Extract eveilable data and prepares files for the 3D representation. 
+        """Extracts available data and prepares files for the 3D representation:
         - .clustering.png: Picture of the segmented region.
         - .matrix.npy: Matrix of the segmented region.
         - .tsv: Marker Proteins Analysis findings. (Optional)
@@ -317,9 +317,9 @@ class SpectraRegion():
             prefix (str): Desired name of the output files.
             regionID (int): Id of the desired region in the .imzML file.
             protWeights (ProteinWeights, optional): ProteinWeights object for translation of masses to protein name. Defaults to None.
-            nodf (bool, optional): It set to True, do not perform differential analysis. Defaults to False.
+            nodf (bool, optional): If set to True, do not perform differential analysis. Defaults to False.
             pathPrefix (str, optional): Desired path prefix for DE data files. Defaults to None.
-            ctpred (str, optional): Path to tsv file with cluster-cell type mapping. Defaults to None.
+            ctpred (str, optional): Path to .tsv file with cluster-cell type mapping. Defaults to None.
             kw2segment (dict, optional): Dictionary keyword => segment; assigns keyword to all listed segments.
         """
         cluster2celltype = None# { str(x): str(x) for x in np.unique(self.segmented)}
@@ -442,7 +442,11 @@ class SpectraRegion():
         
 
     def judge_de_masses(self, filter_func):
+        """Adds or edits the de_judge element of a differential analysis result dictionary of the given SpectraRegion object by applying the desired function.
 
+        Args:
+            filter_func (function): A function that is applied to every entry of a differential analysis result of every available method.
+        """
         for test in self.df_results_all:
 
             for comp in self.df_results_all[test]:
@@ -476,7 +480,7 @@ class SpectraRegion():
         """Returns the closest index for a specific mass.
 
         Args:
-            mass (float): mass to look up index for
+            mass (float): mass to look up index for.
 
         Returns:
             int: index in m/z array for mass (or closest mass if not exactly found).
@@ -484,16 +488,16 @@ class SpectraRegion():
         emass, eidx = self._get_exmass_for_mass(mass)
 
         return eidx
-
+ 
     def _get_exmass_for_mass(self, mass, threshold=None):
-        """Returns the closest mass and index for a specific mass.
+        """Returns the closest mass and index in .imzML file for a specific mass.
 
         Args:
-            mass (float): mass to look up index for
+            mass (float): mass to look up index for.
             threshold (float, optional): Maximal distance from mass to contained m/z. Defaults to None.
 
         Returns:
-            float, int: mass and index of closest contained m/z for mass
+            float, int: mass and index of closest contained m/z for mass.
         """
         
         dist2mass = float('inf')
@@ -520,11 +524,11 @@ class SpectraRegion():
             min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
             max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
             plot (bool, optional): Whether to plot the output matrix. Defaults to True.
-            verbose (bool, optional): Whether to correct each mass in masses. Defaults to True.
-            pw (ProteinWeights, optional): Allows to . Defaults to None.
+            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
+            pw (ProteinWeights, optional): Allows to translate masses names to actual masses in a given ProteinWeights object. Defaults assuming the elements in masses are numeric, hence None.
 
         Returns:
-            numpy.array: Each element is a sum of inetsities at given masses.
+            numpy.array: Each element is a sum of intensities at given masses.
         """
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -570,7 +574,6 @@ class SpectraRegion():
             plt.close()
 
         return image
-        #return image
 
 
     def calc_similarity(self, inputarray):
@@ -629,8 +632,8 @@ class SpectraRegion():
         Args:
             mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".\n
                 - "spectra": Raw similarity matrix.\n
-                - "spectra_log": Takes a logarithms and normalizes the similarity matrix by dividing by the maximum values.\n
-                - "spectra_log_dist": Takes a logarithms, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
+                - "spectra_log": Takes a logarithm and normalizes the similarity matrix by dividing by the maximum values.\n
+                - "spectra_log_dist": Takes a logarithm, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
             features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
             neighbors (int, optional): Number of neighboring masses to each feature to be included. Defaults to 1.
 
@@ -776,7 +779,8 @@ class SpectraRegion():
 
         Args:
             number_of_regions (int): Number of desired clusters.
-            dims (int/list, optional): dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
 
         Returns:
@@ -843,21 +847,20 @@ class SpectraRegion():
         return self.dimred_labels
 
 
-    def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=10000):
+    def __segment__umap_hdbscan(self, number_of_regions, densmap=False, dims=None, n_neighbors=10, min_cluster_size=20, num_samples=10000):
         """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
 
         Args:
             number_of_regions (int): Number of desired clusters.
-            dims (int/list, optional): he desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
-            min_samples (int, optional): Minimum number of samples. Defaults to 5.
             min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
             num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
 
         Returns:
             list: A list of HDBSCAN labels. 
         """
-        #TODO decide whether the min_samples is needed (not used in this function)
 
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
@@ -906,6 +909,22 @@ class SpectraRegion():
         self.redo_hdbscan_on_dimred(number_of_regions, min_cluster_size, num_samples)
 
         return self.dimred_labels
+
+    def __segment__kmeans(self, number_of_regions):
+        """Forms flat clusters with k-means++ clustering method (see scipy.cluster.vq.kmeans2 for more information) on the spectra array.
+
+        Args:
+            number_of_regions (int): Number of desired clusters.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
+
+        all_spectra = self.region_array.reshape(-1, self.region_array.shape[2])
+        centroid, label = kmeans2(all_spectra, k=number_of_regions, iter=10, minit='++')
+        if 0 in label:
+            label += 1
+        return label
 
     def redo_hdbscan_on_dimred(self, number_of_regions, min_cluster_size=15, num_samples=10000, set_segmented=True):
         """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) with the additional UMAP dimension reduction in order to achieve the desired number of clusters.
@@ -1040,9 +1059,9 @@ class SpectraRegion():
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
-            min_cut_off (int/float, optional): Minimum allowed value. Defaults to None.
-            max_cut_off (int/float, optional): Maximum allowed value. Defaults to None.
-            masses (numpy.array/list, optional): A list of masses to which each spectrum will be reduced. Defaults to None.
+            min_cut_off (int/float, optional): Minimum allowed value. Smaller values will be replaced with min_cut_off value. Defaults to None.
+            max_cut_off (int/float, optional): Maximum allowed value. Greater values will be replaced with max_cut_off value. Defaults to None.
+            masses (numpy.array/list, optional): A list of masses to which each spectrum will be reduced. Defaults to None, meaning all masses are considered.
             hist (bool, optional): Whether to plot a cumularive histogram of values (sums) frequencies. Defaults to False.
             plot_log (bool, optional): Whether to logarithm the resulting matrix. Defaults to False.
 
@@ -1156,7 +1175,7 @@ class SpectraRegion():
             print(region, ": ", regionCounts[region])
 
 
-    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_samples=5, min_cluster_size=20, num_samples=1000):
+    def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_cluster_size=20, num_samples=1000):
         """Performs clustering on similarity matrix.
 
         Args:
@@ -1164,7 +1183,7 @@ class SpectraRegion():
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
                 - "WARD": Ward variance minimization algorithm.\n
-                - "KMEANS": k-means clustering.\n
+                - "KMEANS": k-means++ clustering.\n
                 - "UMAP_DBSCAN": Uniform Manifold Approximation and Projection for Dimension Reduction (UMAP) followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "DENSMAP_DBSCAN": densMAP performs an optimization of the low dimensional representation followed by Density-Based Spatial Clustering of Applications with Noise (DBSCAN).\n
                 - "CENTROID": Unweighted pair group method with centroids (UPGMC).\n
@@ -1174,16 +1193,14 @@ class SpectraRegion():
             dims ([type], optional): The desired amount of intesity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intesities are considered.
             number_of_regions (int, optional): Number of desired clusters. Defaults to 10.
             n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
-            min_samples (int, optional): Minimum number of samples. Defaults to 5.
             min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 20.
             num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 1000.
 
         Returns:
             numpy.array: An array with cluster ids as elements.
         """
-        #TODO there is no kmeans implemented!
         assert(method in ["UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_DBSCAN", "DENSMAP_WARD"])
-        if method in ["UPGMA", "WPGMA", "WARD", "KMEANS","CENTROID", "MEDIAN"]:
+        if method in ["UPGMA", "WPGMA", "WARD", "CENTROID", "MEDIAN"]:
             assert(not self.spectra_similarity is None)
 
         self.logger.info("Calculating clusters")
@@ -1206,7 +1223,7 @@ class SpectraRegion():
             c = self.__segment__ward(number_of_regions)
 
         elif method == "UMAP_DBSCAN":
-            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_samples=min_samples, min_cluster_size=min_cluster_size, num_samples=num_samples)
+            c = self.__segment__umap_hdbscan(number_of_regions, dims=dims, n_neighbors=n_neighbors, min_cluster_size=min_cluster_size, num_samples=num_samples)
 
         elif method == "UMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, dims=dims, n_neighbors=n_neighbors)
@@ -1217,12 +1234,15 @@ class SpectraRegion():
         elif method == "DENSMAP_WARD":
             c = self.__segment__umap_ward(number_of_regions, densmap=True, dims=dims, n_neighbors=n_neighbors)
 
+        elif method == "KMEANS":
+            c = self.__segment__kmeans(number_of_regions)
+
         self.logger.info("Calculating clusters done")
 
         image_UPGMA = np.zeros(self.region_array.shape, dtype=np.int16)
         image_UPGMA = image_UPGMA[:,:,0]
 
-
+        
         # cluster 0 has special meaning: not assigned !
         assert(not 0 in [c[x] for x in c])
 
@@ -1278,7 +1298,7 @@ class SpectraRegion():
         """Filters the segmented array. 
 
         Args:
-            method (str, optional): Possible methods: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".. Defaults to 'remove_singleton'.\n
+            method (str, optional): Possible methods: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss". Defaults to 'remove_singleton'.\n
                 - "remove_singleton": If there are clusters that include only one pixel, they will be made a part of the background.\n
                 - "most_similar_singleton": If there are clusters that include only one pixel, they will be compared to consensus spectra of all cluster and then added to the cluster with the lowest distance.\n
                 - "merge_background": Collects cluster ids at the borders and assigns all findings with background id 0.\n
@@ -1477,6 +1497,9 @@ class SpectraRegion():
 
         Args:
             region_array (numpy.array): Array of spectra.
+
+        Returns:
+            numpy.array: An array where each element is a median value of all spectra at each specific m/z index.
         """
 
         median_profile = np.array([0.0] * region_array.shape[2])
@@ -1543,7 +1566,7 @@ class SpectraRegion():
         """Constructs a consensus spectrum for each cluster id by using the specified method.
 
         Args:
-            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" or "median". Defaults to "avg".
+            method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" (average) or "median". Defaults to "avg".
             set_consensus (bool, optional): Whether to set the calculated consensus and the respective method as object attributes. Defaults to True.
             array (numpy.array, optional): Array of spectra. Defaults to None, that means using the region_array of the object.
 
@@ -1580,7 +1603,12 @@ class SpectraRegion():
         return cons_spectra
 
     def mass_dabest(self, masses, background=0):
+        """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster. Additionally, plots mean difference effect sizes with help of the DABEST package. The given cluster id is considered a control group.
 
+        Args:
+            masses (float/list/tuple/set): A desired mass or collection of masses.
+            background (int, optional): Cluster id of the background. Defaults to 0.
+        """
         assert(not self.segmented is None)
 
         if not isinstance(masses, (list, tuple, set)):
@@ -1634,8 +1662,11 @@ class SpectraRegion():
             multi_groups.mean_diff.plot()
 
     def plot_inter_consensus_similarity(self, clusters=None):
+        """Plots seaborn.boxplot depicting the cosine similarity distributions by comparison of spectra belonging to specified cluster ids to all available clusters.
 
-
+        Args:
+            clusters (numpy.array/list, optional): A list of desired cluster ids. Defaults to None, meaning to include all available clusters.
+        """
         cluster2coords = self.getCoordsForSegmented()
         clusterLabels = sorted([x for x in cluster2coords])
         self.logger.info("Found clusterLabels {}".format(clusterLabels))
@@ -1677,7 +1708,11 @@ class SpectraRegion():
 
 
     def plot_consensus_similarity(self, mode="heatmap"):
+        """Plots the similarity matrix either represented as a heatmap of similarity matrix or as seaborn.boxplot depicting similarity distributions of similarity values within the clusters.
 
+        Args:
+            mode (str, optional): Either "heatmap" or "spectra". Defaults to "heatmap".
+        """
         assert(not self.consensus_similarity_matrix is None)
 
         assert(mode in ["heatmap", "spectra"])
@@ -1739,11 +1774,21 @@ class SpectraRegion():
             plt.close()                                
 
     def __get_spectra_similarity(self, vA, vB):
+        """Calculates cosine similarity between two vectors of the same length.
+
+        Args:
+            vA (numpy.array/list): First vector.
+            vB (numpy.array/list): Second vector.
+
+        Returns:
+            float: cosine similarity.
+        """
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
-
     def consensus_similarity( self ):
-
+        """
+        Updates consensus_similarity_matrix attribute of SpectraRegion object. The updated matrix consists of similarity values between the spectra in the consensus dictionary.
+        """
         assert(not self.consensus is None)
 
         allLabels = sorted([x for x in self.consensus])
@@ -1772,7 +1817,16 @@ class SpectraRegion():
 
 
     def __get_expression(self, massValue, segments, mode="avg"):
+        """Gives an expression (intensity values) overview of the given mass in the region.
 
+        Args:
+            massValue (float): A desired mass.
+            segments (numpy.array/list/tuple/set/int): Desired cluster id(s).
+            mode (numpy.array/list/tuple/set/str, optional): Whether to calculate the average and/or median value of the found expression values. Defaults to "avg".
+
+        Returns:
+            tuple: the first element consists of value(s) calculated with specified mode(s), number of found expression values, number of found expression values that differ from 0.
+        """
         assert(massValue != None)
         assert(segments != None)
 
@@ -1813,8 +1867,15 @@ class SpectraRegion():
 
         return tuple(resElem), num, anum
 
-    def get_spectra_matrix(self,segments):
+    def get_spectra_matrix(self, segments):
+        """Returns a matrix with all spectra in .imzML file that correspond to the given segments.
 
+        Args:
+            segments (numpy.array/list): A list of desired cluster ids.
+
+        Returns:
+            numpy.array: An array where each element is spectrum that was previously found to be part of one of the given clusters given in segments parameter.
+        """
         cluster2coords = self.getCoordsForSegmented()
 
         relPixels = []
@@ -1830,7 +1891,17 @@ class SpectraRegion():
 
 
     def get_expression_from_matrix(self, matrix, massValue, segments, mode="avg"):
+        """Gives an expression (intensity values) overview of the given matrix.
 
+        Args:
+            matrix (numpy.array): A matrix from which the intensity values will be extracted.
+            massValue (float): A desired mass.
+            segments (numpy.array/list/tuple/set/int): Desired cluster id(s).
+            mode (numpy.array/list/tuple/set/str, optional): Whether to calculate the average and/or median value of the found expression values. "arg" (average) and/or "median". Defaults to "avg".
+
+        Returns:
+            tuple: the first element consists of value(s) calculated with specified mode(s), number of found expression values, number of found expression values that differ from 0.
+        """
         assert(massValue != None)
         assert(segments != None)
 
@@ -1940,7 +2011,7 @@ class SpectraRegion():
         return merged
 
     def cartoonize2(self, imze, background, aorta, plaque, ignore_background=True, blur=False):
-        """Simplifies the segmented array by comparing median spectra of the given cluster groups to the spectra region.
+        """Simplifies the segmented array by comparing median spectra of the given cluster groups to the whole spectra region.
 
         Args:
             imze (IMZMLExtract): IMZMLExtract object.
@@ -2101,13 +2172,13 @@ class SpectraRegion():
 
 
     def _makeHTMLStringFilterTable(self, expDF):
-        """Transform given pandas dataframe into HTML output
+        """Transform given pandas dataframe into HTML output.
 
         Args:
-            expDF (pd.DataFrame): Values for output
+            expDF (pd.DataFrame): Values for output.
 
         Returns:
-            htmlHead, htmlBody (str): HTML code for head and body
+            htmlHead, htmlBody (str): HTML code for head and body.
         """
 
         headpart = """
@@ -2291,6 +2362,14 @@ document.addEventListener('readystatechange', event => {
 
 
     def get_mask(self, regions):
+        """Returns updated segmented shaped matrix with the desired region coordinates replaced with ones.
+
+        Args:
+            regions (list/tuple/set/int): A desired region or collection of cluster ids.
+
+        Returns:
+            numpy.array: An updated matrix with all specified cluster ids replaced with cluster id equals 1.
+        """
         if not isinstance(regions, (list, tuple, set)):
             regions = [regions]
 
@@ -2474,7 +2553,22 @@ document.addEventListener('readystatechange', event => {
 
 
     def deres_to_df(self, method, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5):
+        """Transforms differetial expression (de) result in de_results_all dictionary of the SpectraRegion object into a DataFrame.
 
+        Args:
+            method (str): Test method for differential expression. "empire", "ttest" or "rank".
+            resKey (tuple): List of regions where to look for the result.
+            protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
+            keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
+            inverse_fc (bool, optional): If True, the de result logFC will be inversed (negated). Defaults to False.
+            max_adj_pval (float, optional): Threshold for maximum adjusted p-value that will be used for filtering of the de results. Defaults to 0.05.
+            min_log2fc (float, optional): Threshold for minimum log2fc that will be used for filtering of the de results. Defaults to 0.5.
+
+        Returns:
+            pandas.DataFrame: DataFrame of differetial expression (de) result.
+        """
         clusterVec = []
         geneIdentVec = []
         massVec = []
@@ -2629,18 +2723,22 @@ document.addEventListener('readystatechange', event => {
 
 
     def find_all_markers(self, protWeights, keepOnlyProteins=True, replaceExisting=False, includeBackground=True, mz_dist=3, mz_best=False, backgroundCluster=[0], out_prefix="nldiffreg", outdirectory=None, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}):
-        """
-        Finds all marker proteins for a specific clustering.
+        """Finds all marker proteins for a specific clustering.
 
         Args:
             protWeights (ProteinWeights): ProteinWeights object for translation of masses to protein name.
             keepOnlyProteins (bool, optional): If True, differential masses without protein name will be removed. Defaults to True.
             replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
             includeBackground (bool, optional): If True, the cluster specific expression data are compared to all other clusters incl. background cluster. Defaults to True.
+            mz_dist (float/int, optional): Allowed offset for protein lookup of needed masses. Defaults to 3.
+            mz_best (bool, optional): Wether to consider only the closest found protein within mz_dist (with the least absolute mass difference). Defaults to False.
             backgroundCluster ([int], optional): Clusters which are handled as background. Defaults to [0].
             out_prefix (str, optional): Prefix for results file. Defaults to "nldiffreg".
             outdirectory ([type], optional): Directory used for empire files. Defaults to None.
-            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].
+            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].\n
+                - "empire": Empirical and Replicate based statistics (EmpiRe).\n
+                - "ttest": Welch’s t-test for differential expression using diffxpy.api.\n
+                - "rank": Mann-Whitney rank test (Wilcoxon rank-sum test) for differential expression using diffxpy.api.\n
             count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1, "empire": 10000}.
 
         Returns:
@@ -2686,14 +2784,14 @@ document.addEventListener('readystatechange', event => {
                     
 
     def __make_de_res_key(self, clusters0, clusters1):
-        """Generates the storage key for two sets of clusters
+        """Generates the storage key for two sets of clusters.
 
         Args:
-            clusters0 (list): list of cluster ids 1
-            clusters1 (list): list of cluster ids 2
+            clusters0 (list): list of cluster ids 1.
+            clusters1 (list): list of cluster ids 2.
 
         Returns:
-            tuple: tuple of both sorted cluster ids, as tuple
+            tuple: tuple of both sorted cluster ids, as tuple.
         """
 
         return (tuple(sorted(clusters0)), tuple(sorted(clusters1)))
@@ -2706,7 +2804,14 @@ document.addEventListener('readystatechange', event => {
         self.df_results_all = defaultdict(lambda: dict())
 
     def run_nlempire(self, nlDir, pdata, pdataPath, diffOutput):
-        
+        """Performs Empirical and Replicate based statistics (EmpiRe).
+
+        Args:
+            nlDir (str): The path to the desired output directory.
+            pdata (DataFrame): Phenotype data.
+            pdataPath (str): The path to the saved .tsv file with phenotype data.
+            diffOutput (str): The path where to save the .tsv output file.
+        """
         def run(cmd):
             print(" ".join(cmd))
             proc = subprocess.Popen(cmd,
@@ -2789,7 +2894,24 @@ document.addEventListener('readystatechange', event => {
 
 
     def find_markers(self, clusters0, clusters1=None, out_prefix="nldiffreg", outdirectory=None, replaceExisting=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1, "empire": 10000}, sample_max=-1):
+        """Finds marker proteins for a specific clustering.
 
+        Args:
+            clusters0 (int/list/tuple/set): Cluster id(s) that will be labeled as condition 0.
+            clusters1 (list/tuple/set, optional): Cluster id(s) that will be labeled as condition 1. Defaults to None, meaning all clusters that are not in clusters0, belong to clusters1.
+            out_prefix (str, optional): If using "empire" method, the desired prefix of the newly generated files can be specified. Defaults to "nldiffreg".
+            outdirectory (str, optional): If using "empire" method, the path to the desired output directory must be specified. Defaults to None.
+            replaceExisting (bool, optional): If True, previously created marker-gene results will be overwritten. Defaults to False.
+            use_methods (list, optional): Test methods for differential expression. Defaults to ["empire", "ttest", "rank"].\n
+                - "empire": Empirical and Replicate based statistics (EmpiRe).\n
+                - "ttest": Welch’s t-test for differential expression using diffxpy.api.\n
+                - "rank": Mann-Whitney rank test (Wilcoxon rank-sum test) for differential expression using diffxpy.api.\n
+            count_scale (dict, optional): Count scales for different methods (relevant for empire, which can only use integer counts). Defaults to {"ttest": 1, "rank": 1, "empire": 10000}.
+            sample_max (int, optional): The size of the sampled list of spectra. Defaults to -1, meaning all are considered.
+
+        Returns:
+            tuple: DataFrame object containing expression data, DataFrame object containing phenotype data (condition 0/1), DataFrame object containing feature data (masses)
+        """
         cluster2coords = self.getCoordsForSegmented()
 
         if not isinstance(clusters0, (list, tuple, set)):
@@ -2976,7 +3098,11 @@ document.addEventListener('readystatechange', event => {
 
 
     def list_de_results(self):
-        
+        """Transforms a dictionary of the differential expression results into a list.
+
+        Returns:
+            list: A list of tuples where the first element is the name of the used method and the second - all compared sets of clusters.
+        """
         allDERes = []
         for x in self.de_results_all:
             for y in self.de_results_all[x]:
@@ -2985,7 +3111,14 @@ document.addEventListener('readystatechange', event => {
         return allDERes
 
     def find_de_results(self, keypart):
+        """Finds all occurrences of the desired set of clusters.
 
+        Args:
+            keypart (tuple): Desired set of clusters to find.
+
+        Returns:
+            list: A list of tuples where the first element is the name of the used method followed by all occurrences that include the specified set of clusters.
+        """
         results = []
         for method in self.de_results_all:
             for key in self.de_results_all[method]:
@@ -2998,7 +3131,14 @@ document.addEventListener('readystatechange', event => {
 
 
     def get_de_results(self, key):
+        """Finds exactly those differential expression results that correspond to the given cluster sets pair.
 
+        Args:
+            key (tuple): A tuple of two tuples each consisting of cluster ids compared.
+
+        Returns:
+            dict: name of the used methods as keys mapped to the respective results.
+        """
         results = {}
         for method in self.de_results_all:
             if key in self.de_results_all[method]:
@@ -3007,7 +3147,15 @@ document.addEventListener('readystatechange', event => {
         return results
 
     def get_de_result(self, method, key):
+        """Finds differential expression result of exact given cluster sets pair using the specified method.
 
+        Args:
+            method (str): Either "empire", "ttest" or "rank".
+            key (tuple): A tuple of two tuples each consisting of cluster ids compared.
+
+        Returns:
+            pandas.DataFrame: differential expression data of the given case.
+        """
         rets = []
         for x in self.de_results_all:
             if x == method:
