@@ -104,16 +104,19 @@ class CombinedSpectra():
 
 
     def consensus_similarity(self):
+
+        self.check_scaled()
         
         allConsSpectra = {}
 
-        for regionName in self.regions:
+        for regionName in self.region_array_scaled:
+            scaled_region = self.region_array_scaled[regionName]
             region = self.regions[regionName]
 
-            regionCS = region.consensus_spectra()
+            regionCS = region.consensus_spectra(array=scaled_region, set_consensus=False)
 
             for clusterid in regionCS:
-                allConsSpectra[(region.name, clusterid)] = regionCS[clusterid]
+                allConsSpectra[(regionName, clusterid)] = regionCS[clusterid]
 
         allRegionClusters = sorted([x for x in allConsSpectra])
 
@@ -133,7 +136,9 @@ class CombinedSpectra():
         self.consensus_similarity_matrix = distDF
 
     def plot_consensus_similarity(self):
-            sns.heatmap(self.consensus_similarity_matrix)
+
+            sns.heatmap(self.consensus_similarity_matrix, xticklabels=1, yticklabels=1)
+
             plt.show()
             plt.close()
 
@@ -156,20 +161,16 @@ class CombinedSpectra():
             region2cluster[lbl] = clus
 
         # Create a color palette with 3 color for the 3 cyl possibilities
-        my_palette = plt.cm.get_cmap("Accent", 5)
-        
-        # transforme the 'cyl' column in a categorical variable. It will allow to put one color on each level.
-        df['cat']=pd.Categorical(c)
-        my_color=df['cat'].cat.codes
-        
+        my_palette = plt.cm.get_cmap("viridis", number_of_clusters)
+                
         # Apply the right color to each label
         ax = plt.gca()
         xlbls = ax.get_ymajorticklabels()
-        num=-1
         for lbl in xlbls:
-            num+=1
             val=lbl2cluster[lbl.get_text()]
-            lbl.set_color(my_palette(val))
+            #print(lbl.get_text() + " " + str(val))
+
+            lbl.set_color(my_palette(val-1))
 
         plt.show()
         plt.close()
@@ -246,7 +247,7 @@ class CombinedSpectra():
 
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False, verbose=True):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, plot=True, scaled=False, verbose=True, title="{mz}"):
 
         if not isinstance(masses, (list, tuple, set)):
             masses = [masses]
@@ -315,6 +316,7 @@ class CombinedSpectra():
                 ax.axis('off')
 
             fig.colorbar(heatmap, ax=axes[-1])
+            plt.suptitle(title.format(mz=";".join([str(x) for x in masses])))
 
             plt.show()
             plt.close()
@@ -460,6 +462,16 @@ class CombinedSpectra():
 
         return (region0, tuple(sorted(clusters0)), region1, tuple(sorted(clusters1)))
 
+    def to_region_cluster_input(self, region_cluster_list):
+
+        rcl0 = defaultdict(list)
+
+        for x in region_cluster_list:
+            rcl0[x[0]].append(x[1])
+
+        rcl0 = [(x, tuple(sorted(rcl0[x]))) for x in rcl0]
+        return rcl0
+
     def find_markers(self, region_cluster_list0, region_cluster_list1, protWeights, mz_dist=3, mz_best=False, use_methods = ["empire", "ttest", "rank"], count_scale={"ttest": 1, "rank": 1}, scaled=True, sample_max=-1):
         """Performs differential analysis to finds marker proteins for specific regions and clusters.
 
@@ -477,12 +489,20 @@ class CombinedSpectra():
         Returns:
             tuple: Tuple (collections.defaultdict, pandas.core.frame.DataFrame, pandas.core.frame.DataFrame). Dictionary with test method mapped to each tuple (region, clusters) and respective results. Two further data frames with expression data and test design.
         """
+
+        if type(region_cluster_list0) in (list, tuple):
+            region_cluster_list0 = self.to_region_cluster_input(region_cluster_list0)
+
+        if type(region_cluster_list1) in (list, tuple):
+            region_cluster_list1 = self.to_region_cluster_input(region_cluster_list1)
+
+
         for pair in region_cluster_list0:
-            assert(int(pair[0]) in self.regions)
+            assert(pair[0] in self.regions)
             assert([x for x in self.regions[region_cluster_list0[0][0]].idx2mass] == [x for x in self.regions[pair[0]].idx2mass])
 
         for pair in region_cluster_list1:
-            assert(int(pair[0]) in self.regions)
+            assert(pair[0] in self.regions)
             assert([x for x in self.regions[region_cluster_list1[0][0]].idx2mass] == [x for x in self.regions[pair[0]].idx2mass])
 
 
@@ -863,6 +883,7 @@ class CombinedSpectra():
 
 
     def get_internormed_regions(self, method="median"):
+        # TODO: specify which clusters are used for normalization! (dict: region => clusterids)
 
         assert (method in ["avg", "median"])
 
@@ -894,7 +915,7 @@ class CombinedSpectra():
 
             if method == "avg":
                 scaleFactor = np.mean(bgFoldChanges)
-            if method == "median":
+            elif method == "median":
                 scaleFactor = np.median(bgFoldChanges)
 
             self.logger.info("FiveNumber Stats for bgFoldChanges before: {}".format(self._fivenumber(bgFoldChanges)))

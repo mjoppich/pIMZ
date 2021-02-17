@@ -375,7 +375,7 @@ class SpectraRegion():
             self.logger.info("Starting Marker Proteins Analysis")
 
             if not nodf:
-                markerGenes = self.find_all_markers(protWeights, use_methods=["ttest"], includeBackground=True)
+                markerGenes = self.find_all_markers(protWeights, use_methods=["ttest"], replaceExisting=False, includeBackground=True)
             
             for cluster in cluster2coords:
 
@@ -510,7 +510,7 @@ class SpectraRegion():
         return curMass, curIdx
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
         """Filters the region_region to the given masses and returns the matrix with summed
         representation of the gained spectra.
 
@@ -564,6 +564,8 @@ class SpectraRegion():
         if plot:
             heatmap = plt.matshow(image)
             plt.colorbar(heatmap)
+            plt.gca().xaxis.set_ticks_position('bottom')
+            plt.title(title.format(mz=";".join([str(x) for x in masses])))
             plt.show()
             plt.close()
 
@@ -914,6 +916,11 @@ class SpectraRegion():
             num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
             set_segmented (bool, optional): Whether to update the segmented array of the current object. Defaults to True.
         """
+        self.logger.info("HDBSCAN reduction")
+        if num_samples > self.dimred_elem_matrix.shape[0]:
+            num_samples = self.dimred_elem_matrix.shape[0]
+            self.logger.info("HDBSCAN reduction num_samples reset: {}".format(num_samples))
+
         if num_samples == -1 or self.dimred_elem_matrix.shape[0] < num_samples:
             selIndices = [x for x in range(0, self.dimred_elem_matrix.shape[0])]
         else:
@@ -921,7 +928,7 @@ class SpectraRegion():
 
         dr_matrix = self.dimred_elem_matrix[selIndices, :]
 
-        self.logger.info("HDBSCAN reduction")
+        
         self.logger.info("HDBSCAN Clusterer with matrix {}".format(dr_matrix.shape))
         clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, prediction_data=True).fit(dr_matrix)
         clusterer.generate_prediction_data()
@@ -1676,7 +1683,12 @@ class SpectraRegion():
         assert(mode in ["heatmap", "spectra"])
 
         if mode == "heatmap":
+            allLabels = [''] + sorted([x for x in self.consensus])
+            
             heatmap = plt.matshow(self.consensus_similarity_matrix)
+            plt.gca().set_xticklabels( allLabels )
+            plt.gca().set_yticklabels( allLabels )
+
             plt.colorbar(heatmap)
             plt.show()
             plt.close()
@@ -1730,7 +1742,7 @@ class SpectraRegion():
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
-    def consensus_similarity(self ):
+    def consensus_similarity( self ):
 
         assert(not self.consensus is None)
 
@@ -3208,8 +3220,8 @@ class ProteinWeights():
         self.logger.info("         Number of total proteins: {}".format(len(self.protein2mass)))
         self.logger.info("           Number of total masses: {}".format(len(mass2prot)))
         self.logger.info("Number of proteins with collision: {}".format(len(protsWithCollision)))
-        self.logger.info("        Mean Number of Collidings: {}".format(np.mean([protsWithCollision[x] for x in protsWithCollision])))
-        self.logger.info("      Median Number of Collidings: {}".format(np.median([protsWithCollision[x] for x in protsWithCollision])))
+        self.logger.info("        Mean Number of collisions: {}".format(np.mean([protsWithCollision[x] for x in protsWithCollision])))
+        self.logger.info("      Median Number of collisions: {}".format(np.median([protsWithCollision[x] for x in protsWithCollision])))
 
         if print_proteins:
             self.logger.info("Proteins with collision: {}".format([x for x in protsWithCollision]))

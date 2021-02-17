@@ -25,8 +25,6 @@ import skimage
 from skimage import measure as sk_measure
 
 # processing
-import ctypes
-import subprocess
 import dill as pickle
 
 
@@ -34,22 +32,10 @@ import dill as pickle
 import dabest
 import matplotlib
 import matplotlib.pyplot as plt
-import seaborn as sns
-
-#methods
-import umap
-import hdbscan
-import diffxpy.api as de
-import anndata
 
 from scipy import ndimage, misc, sparse
 from scipy.sparse.linalg import spsolve
-from scipy.spatial.distance import squareform, pdist
-import scipy.cluster as spc
-import scipy as sp
-import sklearn as sk
 
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 #web/html
@@ -759,7 +745,7 @@ class IMZMLExtract:
 
         return outarray
 
-    def plot_toc(self, region_array):
+    def plot_tic(self, region_array):
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
