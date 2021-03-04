@@ -569,7 +569,7 @@ class SpectraRegion():
             heatmap = plt.matshow(image)
             plt.colorbar(heatmap)
             plt.gca().xaxis.set_ticks_position('bottom')
-            plt.title(title.format(mz=";".join([str(x) for x in masses])))
+            plt.title(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
             plt.show()
             plt.close()
 
@@ -1158,6 +1158,8 @@ class SpectraRegion():
 
         fig = plt.figure()
         self.plot_array(fig, showcopy, discrete_legend=True)
+        if not highlight is None and len(highlight) > 0:
+            plt.title("Highlighted (yellow) clusters: {}".format(", ".join([str(x) for x in highlight])), y=1.08)
         plt.show()
         plt.close()
 
@@ -1650,6 +1652,8 @@ class SpectraRegion():
                     
             dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
             sns.boxplot(data=dfObj, x="cluster", y="intensity")
+            plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
+
             plt.xticks(rotation=90)
             plt.show()
             plt.close()
@@ -1659,7 +1663,8 @@ class SpectraRegion():
             allClusterIDs = natsorted([x for x in set(clusterVec) if not " {}".format(background) in x])
             
             multi_groups = dabest.load(dfobj_db, idx=tuple(["Cluster {}".format(background)]+allClusterIDs))
-            multi_groups.mean_diff.plot()
+            dabestFig = multi_groups.mean_diff.plot()
+            dabestFig.suptitle("DABEST intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
 
     def plot_inter_consensus_similarity(self, clusters=None):
         """Plots seaborn.boxplot depicting the cosine similarity distributions by comparison of spectra belonging to specified cluster ids to all available clusters.

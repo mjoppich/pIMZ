@@ -283,7 +283,7 @@ class CombinedSpectra():
                 dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
                 sns.boxplot(data=dfObj, x="cluster", y="intensity")
                 plt.xticks(rotation=90)
-                plt.title("Intensities for Region {}".format(regionName))
+                plt.title("Intensities for Region {} ({}m/z)".format(regionName, mass))
                 plt.show()
                 plt.close()
 
@@ -372,7 +372,7 @@ class CombinedSpectra():
                 ax.axis('off')
 
             fig.colorbar(heatmap, ax=axes[-1])
-            plt.suptitle(title.format(mz=";".join([str(x) for x in masses])))
+            plt.suptitle(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
 
             plt.show()
             plt.close()

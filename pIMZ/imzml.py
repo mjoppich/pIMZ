@@ -592,6 +592,9 @@ class IMZMLExtract:
                     patch_artist=True,  # fill with color
                     labels=allLabels)  # will be used to label x-ticks
 
+        plt.xlabel("Fold Changes against median spectrum")
+        plt.ylabel("Pixel Location")
+
         plt.show()
         plt.close()
 
@@ -760,6 +763,7 @@ class IMZMLExtract:
                 peakplot[i,j] = sum(spectrum)
 
         heatmap = plt.matshow(peakplot)
+        plt.title("TIC (total summed intensity per pixel)", y=1.08)
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
@@ -779,6 +783,7 @@ class IMZMLExtract:
                 peakplot[i,j] = np.linalg.norm(spectrum)
 
         heatmap = plt.matshow(peakplot)
+        plt.title("TNC (total normed intensity per pixel)", y=1.08)
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
@@ -817,6 +822,7 @@ class IMZMLExtract:
                 print(x, maxPeakCounter[x])
 
         heatmap = plt.matshow(peakplot)
+        plt.xlabel("m/z value of maximum intensity")
         plt.colorbar(heatmap)
         plt.show()
         plt.close()
@@ -824,6 +830,7 @@ class IMZMLExtract:
         print(len(allPeakIntensities), min(allPeakIntensities), max(allPeakIntensities), sum(allPeakIntensities)/len(allPeakIntensities))
 
         plt.hist(allPeakIntensities, bins=len(allPeakIntensities), cumulative=True, histtype="step")
+        plt.title("Cumulative Histogram of maximum peak intensities")
         plt.show()
         plt.close()
 
@@ -1280,7 +1287,7 @@ class IMZMLExtract:
                 miny = min([x[1] for x in allpixels])
                 maxy = max([x[1] for x in allpixels])
 
-                middlex = minx + (maxx-minx)/ 2.0
+                middlex = minx + (maxx-minx)/ 3.0
                 middley = miny + (maxy-miny)/ 2.0
 
                 plt.text(middlex, middley, str(regionid))
