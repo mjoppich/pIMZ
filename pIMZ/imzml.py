@@ -33,7 +33,7 @@ import dabest
 import matplotlib
 import matplotlib.pyplot as plt
 
-from scipy import ndimage, misc, sparse
+from scipy import ndimage, misc, sparse, signal, stats
 from scipy.sparse.linalg import spsolve
 
 
@@ -44,6 +44,11 @@ import jinja2
 
 # applications
 import progressbar
+
+def makeProgressBar():
+    return progressbar.ProgressBar(widgets=[
+        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
+        ])
 
 class IMZMLExtract:
     """IMZMLExtract class is required to access and retrieve data from an imzML file.
@@ -85,6 +90,28 @@ class IMZMLExtract:
             print("WARNING: SPECTRA STARTING AT POSITION", self.specStart)
 
         self.find_regions()
+
+    def check_binned_mz(self):
+        """
+        Checks whether all spectra have same m/z values
+
+        Returns:
+            bool: True if all spectra have same m/z values
+
+        """
+
+        bar = makeProgressBar()
+
+
+        for coord in bar(self.coord2index):
+            idx = self.coord2index[coord]
+
+            if not np.array_equal(self.mzValues,self.parser.getspectrum(idx)[0]):
+                print("Unequal mzValues", idx, coord)
+                return False
+
+        return True
+
 
 
     def _coord2index(self):
@@ -222,7 +249,7 @@ class IMZMLExtract:
         
         outspectra = {}
 
-        bar = progressbar.ProgressBar()
+        bar = makeProgressBar()
 
         for coord in bar(self.dregions[regionid]):
 
@@ -459,16 +486,17 @@ class IMZMLExtract:
         Args:
             spectrum (numpy.array): Spectrum to normalize.
             normalize (str, optional): Normalization method. Must be "max_intensity_spectrum", "max_intensity_region", "vector". Defaults to None.\n
-                - "max_intensity_spectrum": devides the spectrum by the maximum intensity value.\n
-                - "max_intensity_region"/"max_intensity_all_regions": devides the spectrum by custom max_region_value.\n
-                - "vector": devides the spectrum by its norm.\n
+                - "max_intensity_spectrum": divides the spectrum by the maximum intensity value.\n
+                - "max_intensity_region"/"max_intensity_all_regions": divides the spectrum by custom max_region_value.\n
+                - "vector": divides the spectrum by its norm.\n
+                - "tic": divides the spectrum by its TIC (sum).\n
             max_region_value (int/float, optional): Value to normalize to for max-region-intensity norm. Defaults to None.
 
         Returns:
             numpy.array: Normalized spectrum.
         """
 
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
+        assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
         retSpectrum = np.array(spectrum, copy=True)
 
@@ -483,6 +511,22 @@ class IMZMLExtract:
             retSpectrum = retSpectrum / max_region_value
             return retSpectrum
 
+        elif normalize in ["tic"]:
+            specSum = sum(retSpectrum)
+            if specSum > 0:
+                retSpectrum = retSpectrum / specSum
+            return retSpectrum
+
+        elif normalize in ["zscore"]:
+
+            lspec = list(retSpectrum)
+            nlspec = list(-retSpectrum)
+            retSpectrum = np.array(stats.zscore( lspec + nlspec , nan_policy="omit")[:len(lspec)])
+            retSpectrum = np.nan_to_num(retSpectrum)
+            assert(len(retSpectrum) == len(lspec))
+
+            return retSpectrum
+
         elif normalize == "vector":
 
             slen = np.linalg.norm(retSpectrum)
@@ -491,6 +535,14 @@ class IMZMLExtract:
                 retSpectrum = retSpectrum * 0
             else:
                 retSpectrum = retSpectrum / slen
+
+            #with very small spectra it can happen that due to norm the baseline is shifted up!
+            retSpectrum[retSpectrum < 0.0] = 0.0
+            retSpectrum = retSpectrum - np.min(retSpectrum)
+
+            if not np.linalg.norm(retSpectrum) <= 1.01:
+                print(slen, np.linalg.norm(retSpectrum))
+
 
             return retSpectrum
 
@@ -600,6 +652,34 @@ class IMZMLExtract:
 
 
 
+    def smooth_spectrum(self, spectrum, method="savgol", window_length=5, polyorder=2):
+        assert (method in ["savgol", "gaussian"])
+
+        
+        if method=="savgol":
+            outspectrum = signal.savgol_filter(spectrum, window_length=window_length, polyorder=polyorder, mode='nearest')
+        elif method=="gaussian":
+            outspectrum = ndimage.gaussian_filter1d(spectrum, sigma=window_length, mode='nearest')
+
+        outspectrum[outspectrum < 0] = 0
+
+        return outspectrum
+
+
+    def smooth_region_array(self, region_array, method="savgol", window_length=5, polyorder=2):
+        
+        assert (method in ["savgol", "gaussian"])
+        bar = makeProgressBar()
+
+        outarray = np.zeros(region_array.shape)
+        for i in bar(range(region_array.shape[0])):
+            for j in range(region_array.shape[1]):
+                outarray[i,j,:] = self.smooth_spectrum(region_array[i,j,:], method=method, window_length=window_length, polyorder=polyorder)
+
+        return outarray
+
+
+
     def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
         """Returns a normalized array of spectra.
 
@@ -610,9 +690,10 @@ class IMZMLExtract:
                 - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.\n
                 - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.\n
                 - "vector": normalizes each spectrum with "vector" method in normalize_spectrum function.\n
-                - "inter_median": devides each spectrum by its median to make intensities consistent within each array.\n
-                - "intra_median": devides each spectrum by the global median to achieve consistency between arrays.\n
+                - "inter_median": divides each spectrum by its median to make intensities consistent within each array.\n
+                - "intra_median": divides each spectrum by the global median to achieve consistency between arrays.\n
                 - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.\n
+                - "tic": normalizes each spectrum by its TIC (total ion current)
             lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
             p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
             iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
@@ -621,7 +702,7 @@ class IMZMLExtract:
             numpy.array: Normalized region_array.
         """
         
-        assert (normalize in [None, "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
+        assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
 
         if normalize in ["vector"]:
             outarray = np.zeros(region_array.shape)
@@ -642,7 +723,7 @@ class IMZMLExtract:
                 intra_norm = np.zeros(region_array.shape)
                 medianPixel = 0
 
-                bar = progressbar.ProgressBar()
+                bar = makeProgressBar()
 
                 for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
@@ -665,7 +746,7 @@ class IMZMLExtract:
                 global_fcs = Counter()
                 scalingFactor = 100000
 
-                bar = progressbar.ProgressBar()
+                bar = makeProgressBar()
 
                 self.logger.info("Collecting fold changes")
                 for i in bar(range(region_array.shape[0])):
@@ -899,7 +980,7 @@ class IMZMLExtract:
         idx2shift = {}
         idx2shifted = {}
         
-        bar = progressbar.ProgressBar()
+        bar = makeProgressBar()
         
         for idx, aspec in enumerate(bar(allspectra)):
             
@@ -941,14 +1022,29 @@ class IMZMLExtract:
         return np.dot(vA, vB) / (np.sqrt( vAL ) * np.sqrt( vBL ))
 
 
-    def to_called_peaks(self, region, masses, resolution):
+    def to_reduced_peaks(self, region, masses):
+        """
+
+        Args:
+            region (numpy.array): region/array of spectra
+            masses (numpy.array): m/z values corresponding to 3rd dimension in region
+
+        Returns:
+            numpy.array, numpy.array: new array of spectra, corresponding masses
+
+        """
+        pass
+
+
+
+    def to_called_peaks(self, region, masses, resolution,reduce_peaks=False):
         """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
         Args:
             region (numpy.array): region/array of spectra
             masses (numpy.array): m/z values for region
             resolution (int): Resolution to return
-
+            reduce_peaks (bool): if true, return only outarray of useful peaks
         Returns:
             numpy.array, numpy.array: new array of spectra, corresponding masses
         """
@@ -971,9 +1067,11 @@ class IMZMLExtract:
         print(outarray.shape)
         print(outmasses.shape)
 
-        bar = progressbar.ProgressBar()
+        bar = makeProgressBar()
         
-        px2res = {}
+        
+        peakIdx = set()
+
         for i in bar(range(0, region.shape[0])):
             for j in range(0, region.shape[1]):
 
@@ -999,19 +1097,25 @@ class IMZMLExtract:
                         rpeak2peak[rmz] = rpeak2peaks[rmz][0]
 
                     selPeak = rpeak2peak[rmz]
-
-                    fpeak = ms_peak_picker.peak_set.FittedPeak(rmz, selPeak.intensity, selPeak.signal_to_noise, selPeak.peak_count, selPeak.index, selPeak.full_width_at_half_max, selPeak.area,
-                        left_width=0, right_width=0)
-
-                    fpeaklist.append(fpeak)
-                
-                for peak in fpeaklist:
-                    idx = int((peak.mz / stepSize) - startSteps)
+                    #fpeak = ms_peak_picker.peak_set.FittedPeak(rmz, selPeak.intensity, selPeak.signal_to_noise, selPeak.peak_count, selPeak.index, selPeak.full_width_at_half_max, selPeak.area, left_width=0, right_width=0)
+                    #fpeaklist.append(fpeak)              
+                #for peak in fpeaklist:
+                    idx = int((selPeak.mz / stepSize) - startSteps)
 
                     if idx >= outarray.shape[2]:
-                        print(peak.mz)
+                        print(selPeak.mz)
 
-                    outarray[i,j,idx] = peak.intensity
+                    peakIdx.add(idx)
+                    outarray[i,j,idx] = selPeak.intensity
+
+        print("Identified peaks for", len(peakIdx), "of", outarray.shape[2], "fields")
+
+        if reduce_peaks:
+            peakIdx = sorted(peakIdx)
+            outarray = outarray[:,:,peakIdx]
+            outmasses = outmasses[peakIdx]
+
+            print(outarray.shape)
 
         return outarray, outmasses
 
@@ -1086,16 +1190,14 @@ class IMZMLExtract:
 
         bgShifts = 0
 
-        bar = progressbar.ProgressBar(widgets=[
-        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
-        ])
-
+        bar = makeProgressBar()
 
         for i in bar(range(0, array.shape[0])):
             for j in range(0, array.shape[1]):
 
                 aspec = array[i,j,:]
                 bestsim = 0
+                bestshift = 0
                 for ishift in range(-maxshift, maxshift, 1):
                     shifted = aspec[maxshift+ishift:-maxshift+ishift]
                     newsim = self.__cos_similarity(bspec, shifted)
@@ -1159,9 +1261,7 @@ class IMZMLExtract:
 
         outarray = np.zeros((array.shape[0], array.shape[1], array.shape[2]-2*window))
 
-        bar = progressbar.ProgressBar(widgets=[
-        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
-        ])
+        bar = makeProgressBar()
 
 
         for i in bar(range(0, array.shape[0])):
@@ -1205,7 +1305,7 @@ class IMZMLExtract:
 
         self.logger.info("Fetching region spectra")
         coord2spec = self.get_region_spectra(regionid)
-        bar = progressbar.ProgressBar()
+        bar = makeProgressBar()
 
 
         for coord in bar(coord2spec):
@@ -1426,7 +1526,7 @@ class IMZMLExtract:
         """
         allregions = []
 
-        bar = progressbar.ProgressBar()
+        bar = makeProgressBar()
 
 
         for idx, pixel in enumerate(bar(allpixels)):

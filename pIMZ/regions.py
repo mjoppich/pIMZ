@@ -37,7 +37,7 @@ import hdbscan
 import diffxpy.api as de
 import anndata
 
-from scipy import ndimage
+from scipy import ndimage, stats
 from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
@@ -48,7 +48,10 @@ import jinja2
 
 # applications
 import progressbar
-
+def makeProgressBar():
+    return progressbar.ProgressBar(widgets=[
+        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
+        ])
 
 
 
@@ -207,6 +210,8 @@ class SpectraRegion():
 
             formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
             consoleHandler.setFormatter(formatter)
+
+            self.logger.info("Added new Stream Handler")
 
 
     def __getstate__(self):
@@ -513,6 +518,122 @@ class SpectraRegion():
 
         return curMass, curIdx
 
+    def _fivenumber(self, valuelist, addfuncs=None):
+        """Creates five number statistics for values in valuelist.
+
+        Args:
+            valuelist (list/tuple/numpy.array (1D)): List of values to use for statistics.
+
+        Returns:
+            tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
+        """
+
+        min_ = np.min(valuelist)
+        max_ = np.max(valuelist)
+
+        (quan25_, quan50_, quan75_) = np.quantile(valuelist, [0.25, 0.5, 0.75])
+
+        addRes = []
+        if addfuncs != None:
+            addRes = [fx(valuelist) for fx in addfuncs]
+
+        return tuple([len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_] + addRes)
+
+    def detect_highly_variable_masses(self, topn=2000, bins=50, return_mz=False):
+        
+        """
+        https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
+        We calculated the mean and a dispersion measure (variance/mean) for each gene across all single cells,
+        
+        and placed genes into 20 bins based on their average expression. Within each bin
+        
+        we then z-normalized the dispersion measure of all genes within the bin to identify genes whose expression values were highly variable even when compared to genes with similar average expression.
+        
+        We used a z-score cutoff of 2 to identify 160 significantly variable genes, after excluding genes with very low average expression
+        
+        As expected, our highly variable genes consisted primarily of developmental and spatially regulated factors whose expression levels are expected to vary across the dissociated cells.
+        """
+
+        allMassMeanDisp = []  
+        bar = makeProgressBar()
+
+        for k in bar(range(0, self.region_array.shape[2])):
+
+            allMassIntensities = []
+            for i in range(self.region_array.shape[0]):
+                for j in range(self.region_array.shape[1]):
+                    allMassIntensities.append(self.region_array[i,j,k])
+
+            massMean = np.mean(allMassIntensities)
+            massVar = np.var(allMassIntensities)
+
+            allMassMeanDisp.append((k, massMean, massMean/massVar))
+
+        minmax = min([x[1] for x in allMassMeanDisp]), max([x[1] for x in allMassMeanDisp])
+        binSpace = np.linspace(0, minmax[1], bins)
+        binned = np.digitize([x[1] for x in allMassMeanDisp], binSpace)
+        
+        #print(minmax)
+        #print(binSpace)
+        #print(allMassMeanDisp[:10])
+        #print(binned[:10])
+
+        bin2elem = defaultdict(list)
+
+        for idx, binID in enumerate(binned):
+            bin2elem[binID].append( allMassMeanDisp[idx] )
+
+        allZElems = []
+        for binID in sorted([x for x in bin2elem])[1:]:
+
+            binDisps = [x[2] for x in bin2elem[binID]]
+            binZs = stats.zscore( binDisps , nan_policy="omit")
+
+            #print(binID, len(binDisps), binDisps[:10])
+            #print(binID, len(binZs), binZs[:10])
+            #return None
+
+            binElems = []
+            for disp, z in zip(bin2elem[binID], binZs):
+                binElems.append((disp[0], disp[1], z))
+
+            allZElems += binElems
+
+        allZElems = sorted(allZElems, key=lambda x: x[2], reverse=True)
+        quartile = np.quantile([x[1] for x in allZElems], [0.25])[0]
+
+        allZElems = [x for x in allZElems if x[1] > quartile]
+
+        hvMasses = []
+        for idx, massMean, massDisp in allZElems:
+            
+            if return_mz:
+                idx = self.idx2mass[idx]
+
+            hvMasses.append(idx)
+            if len(hvMasses) >= topn:
+                break
+
+        self.logger.info("Returning {} highly-variable masses.".format(len(hvMasses)))
+        print("Returning {} highly-variable masses.".format(len(hvMasses)))
+
+        return hvMasses
+        
+
+    def plot_intensity_distribution(self, mass):
+        bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
+        
+        allMassIntensities = []
+        for i in range(self.region_array.shape[0]):
+            for j in range(self.region_array.shape[1]):
+
+                allMassIntensities.append(self.region_array[i,j,bestExMassIdx])
+
+        print("Five Number stats + mean, var", self._fivenumber(allMassIntensities, addfuncs=[np.mean, lambda x: np.var(x)/np.mean(x)]))
+
+        plt.hist(allMassIntensities, bins=len(allMassIntensities))
+        plt.title("Mass intensity histogram (m/z = {})".format(round(bestExMassForMass, 3)))
+        plt.show()
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
         """Filters the region_region to the given masses and returns the matrix with summed
@@ -632,6 +753,7 @@ class SpectraRegion():
         Args:
             mode (str, optional): Must be "spectra", "spectra_log" or "spectra_log_dist". Defaults to "spectra".\n
                 - "spectra": Raw similarity matrix.\n
+                - "spectra_dist": Raw similarity matrix and elementwise adds the distance matrix with 5% rate to the similarity matrix..\n
                 - "spectra_log": Takes a logarithm and normalizes the similarity matrix by dividing by the maximum values.\n
                 - "spectra_log_dist": Takes a logarithm, normalizes the similarity matrix by dividing by the maximum values and elementwise adds the distance matrix with 5% rate to the similarity matrix.\n
             features (list, optional): A list of desired masses. Defaults to [] meaning all masses.
@@ -640,7 +762,7 @@ class SpectraRegion():
         Returns:
             numpy.array: Spectra similarity matrix
         """
-        assert(mode in ["spectra", "spectra_log", "spectra_log_dist"])
+        assert(mode in ["spectra", "spectra_dist", "spectra_log", "spectra_log_dist"])
 
         if len(features) > 0:
             for neighbor in range(neighbors):
@@ -666,7 +788,7 @@ class SpectraRegion():
 
             self.logger.info("Calculating spectra similarity done")
 
-        if mode in ["spectra_log_dist"]:
+        if mode in ["spectra_log_dist", "spectra_dist"]:
 
             if self.dist_pixel == None or self.dist_pixel.shape != self.spectra_similarity.shape:
                 self.dist_pixel = np.zeros((self.spectra_similarity.shape[0], self.spectra_similarity.shape[1]))
@@ -2958,7 +3080,7 @@ document.addEventListener('readystatechange', event => {
             if sample_max > 0 and len(allPixels) > sample_max:
                 allPixels = random.sample(allPixels, sample_max)
 
-            bar = progressbar.ProgressBar()
+            bar = makeProgressBar()
             for pxl in bar(allPixels):
 
                 pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
@@ -2977,7 +3099,7 @@ document.addEventListener('readystatechange', event => {
             if sample_max > 0 and len(allPixels) > sample_max:
                 allPixels = random.sample(allPixels, sample_max)
             
-            bar = progressbar.ProgressBar()
+            bar = makeProgressBar()
             for pxl in bar(allPixels):
 
                 pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
@@ -3179,20 +3301,25 @@ class ProteinWeights():
         self.logger = logging.getLogger('ProteinWeights')
         self.logger.setLevel(logging.INFO)
 
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setLevel(logging.INFO)
+        if len(self.logger.handlers) == 0:
 
-        self.logger.addHandler(consoleHandler)
+            consoleHandler = logging.StreamHandler()
+            consoleHandler.setLevel(logging.INFO)
 
-        formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
-        consoleHandler.setFormatter(formatter)
+            self.logger.addHandler(consoleHandler)
 
-    def __init__(self, filename, max_mass=-1):
+            formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+            consoleHandler.setFormatter(formatter)
+
+            self.logger.info("Added new Stream Handler")
+
+    def __init__(self, filename, min_mass=-1, max_mass=-1):
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
             filename (str): File with at least the following columns: protein_id, gene_symbol, mol_weight_kd, mol_weight.
             max_mass (float): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1.
+            max_mass (float): Minimal mass to consider/include in object. -1 for no filtering. Masses below threshold will be discarded. Default is -1.
         """
 
         self.__set_logger()
@@ -3227,6 +3354,9 @@ class ProteinWeights():
 
                     if max_mass >= 0 and molWeight > max_mass:
                         continue    
+
+                    if min_mass >= 0 and molWeight < min_mass:
+                        continue
 
                     if len(proteinNames) == 0:
                         proteinNames = proteinIDs
@@ -3370,16 +3500,16 @@ class ProteinWeights():
                 for prot in massProts:
                     protsWithCollision[prot] += 1
 
-        self.logger.info("         Number of total proteins: {}".format(len(self.protein2mass)))
+        self.logger.info("         Number of total protein/genes: {}".format(len(self.protein2mass)))
         self.logger.info("           Number of total masses: {}".format(len(mass2prot)))
-        self.logger.info("Number of proteins with collision: {}".format(len(protsWithCollision)))
+        self.logger.info("Number of proteins/genes with collision: {}".format(len(protsWithCollision)))
         self.logger.info("        Mean Number of collisions: {}".format(np.mean([protsWithCollision[x] for x in protsWithCollision])))
         self.logger.info("      Median Number of collisions: {}".format(np.median([protsWithCollision[x] for x in protsWithCollision])))
 
         if print_proteins:
-            self.logger.info("Proteins with collision: {}".format([x for x in protsWithCollision]))
+            self.logger.info("Proteins/genes with collision: {}".format([x for x in protsWithCollision]))
         else:
-            self.logger.info("Proteins with collision: {}".format(protsWithCollision.most_common(10)))
+            self.logger.info("Proteins/genes with collision: {}".format(protsWithCollision.most_common(10)))
         
 
     def get_protein_from_mass(self, mass, maxdist=2):
