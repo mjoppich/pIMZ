@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import random
+import math
 from collections import defaultdict, Counter
 import glob
 import shutil, io, base64
@@ -1108,6 +1109,54 @@ class SpectraRegion():
 
             self.segmented = image_UPGMA
             self.segmented_method = "UMAP_DBSCAN"
+
+    def segment__sa(self, radius):
+        sigma = (2*radius+1)/4
+        output_matrix = np.zeros((self.region_array.shape[0], self.region_array.shape[1], (2*radius+1)**2))
+        for x in range(self.region_array.shape[0]):
+            for y in range(self.region_array.shape[1]):
+                curr_spectrum = self.region_array[x][y]
+                f = list()
+                for i in range(-radius, radius+1):
+                    for j in range(-radius, radius+1):
+                        neighbor = (x+i, y+j)
+                        if neighbor[0]>=0 and neighbor[1]>=0 and neighbor[0]<self.region_array.shape[0] and neighbor[1]<self.region_array.shape[1]:
+                            weight = math.exp(-i**2-j**2)/(2*sigma**2)
+                            f.append(np.dot(curr_spectrum, self.region_array[neighbor[0]][neighbor[1]])*math.sqrt(weight))
+                        else:
+                            f.append(0.0)
+                output_matrix[x][y] = f
+        return output_matrix
+    
+    def get_beta(x, y, i, j, matrix, radius):
+        if x+i>=0 and y+j>=0 and x+i<matrix.shape[0] and y+j<matrix.shape[1]:
+            delta = np.linalg.norm(matrix[x+i][y+j]-matrix[x][y])
+        else:
+            delta = 0
+        deltas = [np.linalg.norm(matrix[x+r1][y+r2]-matrix[x][y]) for r1 in range(-radius, radius) for r2 in range(-radius, radius) if x+r1>=0 and y+r2>=0 and x+r1<matrix.shape[0] and y+r2<matrix.shape[1]]
+        min_delta = np.min(deltas)
+        deltas_hat = deltas - min_delta
+        lambda_ = 0.5*np.max(deltas_hat)
+        return math.exp(-delta**2/(2*lambda_**2))
+    
+    def segment__sasa(self, radius):
+        sigma = (2*radius+1)/4
+        output_matrix = np.zeros((self.region_array.shape[0], self.region_array.shape[1], (2*radius+1)**2))
+        for x in range(self.region_array.shape[0]):
+            for y in range(self.region_array.shape[1]):
+                curr_spectrum = self.region_array[x][y]
+                f = list()
+                for i in range(-radius, radius+1):
+                    for j in range(-radius, radius+1):
+                        neighbor = (x+i, y+j)
+                        if neighbor[0]>=0 and neighbor[1]>=0 and neighbor[0]<self.region_array.shape[0] and neighbor[1]<self.region_array.shape[1]:
+                            old_weight = math.exp(-i**2-j**2)/(2*sigma**2)
+                            new_weight = old_weight*math.sqrt(self.get_beta(x,y,i,j,self.region_array,radius) * self.get_beta(neighbor[0],neighbor[1],i,j,self.region_array,radius))
+                            f.append(np.dot(curr_spectrum, self.region_array[neighbor[0]][neighbor[1]])*math.sqrt(new_weight))
+                        else:
+                            f.append(0.0)
+                output_matrix[x][y] = f
+        return output_matrix
 
 
     def reduce_clusters(self, number_of_clusters):
