@@ -56,11 +56,6 @@ def makeProgressBar():
 
 
 
-
-
-
-
-
 class SpectraRegion():
     """
     SpectraRegion class for any analysis of imzML spectra regions
@@ -540,7 +535,7 @@ class SpectraRegion():
 
         return tuple([len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_] + addRes)
 
-    def detect_highly_variable_masses(self, topn=2000, bins=50, return_mz=False):
+    def detect_highly_variable_masses(self, topn=2000, bins=50, return_mz=False, meanThreshold=0.05):
         
         """
         https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
@@ -585,9 +580,9 @@ class SpectraRegion():
             bin2elem[binID].append( allMassMeanDisp[idx] )
 
         allZElems = []
-        for binID in sorted([x for x in bin2elem])[1:]:
+        for binID in sorted([x for x in bin2elem]):
 
-            binDisps = [x[2] for x in bin2elem[binID]]
+            binDisps = [x[2] for x in bin2elem[binID] if x[1] > meanThreshold]
             binZs = stats.zscore( binDisps , nan_policy="omit")
 
             #print(binID, len(binDisps), binDisps[:10])
@@ -1109,6 +1104,23 @@ class SpectraRegion():
 
             self.segmented = image_UPGMA
             self.segmented_method = "UMAP_DBSCAN"
+
+
+    def _calculate_sa_vector(self, array, current_spectrum, currentPos, radius, sigma):
+        f = list()
+        x,y = currentPos
+        for i in range(-radius, radius+1):
+            for j in range(-radius, radius+1):
+                
+                neighbor = (x+i, y+j)
+                
+                if neighbor[0]>=0 and neighbor[1]>=0 and neighbor[0]<self.region_array.shape[0] and neighbor[1]<self.region_array.shape[1]:
+                    weight = math.exp(-i**2-j**2)/(2*sigma**2)
+                    f.append(np.dot(current_spectrum, self.region_array[neighbor[0]][neighbor[1]])*math.sqrt(weight))
+                else:
+                    f.append(0.0)
+
+
 
     def segment__sa(self, radius):
         sigma = (2*radius+1)/4
