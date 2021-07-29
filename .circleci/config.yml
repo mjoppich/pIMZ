@@ -27,10 +27,7 @@ jobs:
           command: pip3 install Cython --upgrade
       - run:
           name: "pip install dependencies (4)"
-          command: sudo apt-get install -y python3-llvmlite
-      - run:
-          name: "pip install dependencies (5)"
-          command: pip3 install numba --upgrade
+          command: sudo apt-get install -y python3-llvmlite python3-numba
       - run:
           name: "Setup Project"
           command: python3 setup.py develop test
