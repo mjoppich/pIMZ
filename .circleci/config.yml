@@ -12,7 +12,7 @@ jobs:
           command: ls && pwd
       - run:
           name: "Install Deps"
-          command: sudo apt-get update && sudo apt-get install -y python3 python3-pip
+          command: sudo apt-get update && sudo apt-get install -y python3 python3-pip zlib1g-dev
       - run:
           name: "pip install dependencies (0)"
           command: sudo pip3 install dabest
