@@ -24,11 +24,10 @@ jobs:
           command: pip3 install ms_peak_picker wheezy.template
       - run:
           name: "pip install dependencies (3)"
-          ´: pip3 install Cython --upgrade
+          command: pip3 install Cython --upgrade
       -run:
           name: "pip install dependencies (4)"
-                    ´: pip3 install Cython --upgrade
-: sudo apt-get install -y python3-llvmlite
+          command: sudo apt-get install -y python3-llvmlite
       - run:
           name: "pip install dependencies (5)"
           command: pip3 install numba --upgrade
