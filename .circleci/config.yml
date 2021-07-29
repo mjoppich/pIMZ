@@ -15,22 +15,22 @@ jobs:
           command: sudo apt-get update && sudo apt-get install -y python3 python3-pip
       - run:
           name: "pip install dependencies (0)"
-          command: pip3 install dabest
+          command: sudo pip3 install dabest
       - run:
           name: "pip install dependencies (1)"
-          command: pip3 install numpy pandas --upgrade
+          command: sudo pip3 install numpy pandas --upgrade
       - run:
           name: "pip install dependencies (2)"
-          command: pip3 install ms_peak_picker wheezy.template
+          command: sudo pip3 install ms_peak_picker wheezy.template
       - run:
           name: "pip install dependencies (3)"
-          command: pip3 install Cython --upgrade
+          command: sudo pip3 install Cython --upgrade
       - run:
           name: "pip install dependencies (4)"
           command: sudo apt-get install -y python3-llvmlite python3-numba
       - run:
           name: "Setup Project"
-          command: python3 setup.py develop test
+          command: sudo python3 setup.py develop test
       - run:
           name: "Test Project"
           command: python3 -c "from pimz import IMZMLExtract"
