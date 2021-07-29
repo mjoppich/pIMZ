@@ -30,4 +30,4 @@ jobs:
           command: sudo python3 setup.py develop test
       - run:
           name: "Test Project"
-          command: python3 -c "from pimz import IMZMLExtract"
+          command: python3 -c "from pIMZ.imzml import IMZMLExtract"
