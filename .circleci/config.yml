@@ -17,17 +17,20 @@ jobs:
           name: "pip install dependencies (0)"
           command: pip3 install dabest
       - run:
-          name: "pip install dependencies (0)"
+          name: "pip install dependencies (1)"
           command: pip3 install numpy pandas --upgrade
       - run:
-          name: "pip install dependencies (1)"
+          name: "pip install dependencies (2)"
           command: pip3 install ms_peak_picker wheezy.template
       - run:
-          name: "pip install dependencies (2)"
-          command: pip3 install Cython --upgrade
-      - run:
           name: "pip install dependencies (3)"
-          command: pip3 install llvmlite numba --upgrade
+          command: pip3 install Cython --upgrade
+      -run:
+          name: "pip install dependencies (4)"
+          name: "sudo apt-get install -y python3-llvmlite"
+      - run:
+          name: "pip install dependencies (5)"
+          command: pip3 install numba --upgrade
       - run:
           name: "Setup Project"
           command: python3 setup.py develop test
