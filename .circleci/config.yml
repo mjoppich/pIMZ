@@ -25,7 +25,7 @@ jobs:
       - run:
           name: "pip install dependencies (3)"
           command: pip3 install Cython --upgrade
-      -run:
+      - run:
           name: "pip install dependencies (4)"
           command: sudo apt-get install -y python3-llvmlite
       - run:
