@@ -14,20 +14,20 @@ jobs:
           name: "Install Deps"
           command: sudo apt-get update && sudo apt-get install -y python3 python3-pip
       - run:
+          name: "pip install dependencies (0)"
+          command: pip3 install dabest
+      - run:
+          name: "pip install dependencies (0)"
+          command: pip3 install numpy pandas --upgrade
+      - run:
           name: "pip install dependencies (1)"
-          command: pip3 install numpy ms_peak_picker wheezy.template
+          command: pip3 install ms_peak_picker wheezy.template
       - run:
           name: "pip install dependencies (2)"
           command: pip3 install Cython --upgrade
       - run:
           name: "pip install dependencies (3)"
           command: pip3 install llvmlite numba --upgrade
-      - run:
-          name: "pip install dependencies (4)"
-          command: pip3 install dabest
-      - run:
-          name: "pip install dependencies (5)"
-          command: pip3 install pandas numpy --upgrade
       - run:
           name: "Setup Project"
           command: python3 setup.py develop test
