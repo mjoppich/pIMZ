@@ -1,7 +1,7 @@
 # pIMZ: an integrative framework for imaging mass spectrometry analysis
 
 [![Documentation Status](https://readthedocs.org/projects/pimz/badge/?version=latest)](https://pimz.readthedocs.io/en/latest/?badge=latest)
-[![Build Status](https://travis-ci.org/mjoppich/pIMZ.svg?branch=master)](https://travis-ci.org/mjoppich/pIMZ)
+[![CircleCI](https://circleci.com/gh/mjoppich/pIMZ/tree/master.svg?style=svg)](https://circleci.com/gh/mjoppich/pIMZ/tree/master)
 ![PyPI](https://img.shields.io/pypi/v/pIMZ)
 ![GitHub All Releases](https://img.shields.io/github/downloads/mjoppich/pIMZ/total)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pIMZ)
