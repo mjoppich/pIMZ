@@ -1299,6 +1299,147 @@ class SpectraRegion():
 
         return showcopy
 
+    def plot_volcano(self, method, comparison, title, outfile=None, topn=30, masses=None, gene_names=None):
+        """Plots a volcano plot representing the differential analysis results of the current object.
+
+        Args:
+            method (str): Test method for differential expression. “empire”, “ttest” or “rank”.
+            comparison (tuple): A tuple of two tuples each consisting of cluster ids compared.
+            title (str): Title of the plot.
+            outfile (str, optional): The path where to save the resulting plot. Defaults to None.
+            topn (int, optional): Number of the most significantly up/dowm regulated genes. Defaults to 30.
+            masses (list, optional): A collection of floats that represent the desired masses to be labled. Defaults to None.
+            gene_names (list, optional): A collection of strings that represent the desired gene names to be labled. Defaults to None.
+        """
+        dataframe = pd.merge(self.df_results_all[method][comparison], self.de_results_all[method][comparison], left_on=['gene_ident'],right_on=['gene'])
+        genes = ['{:.4f}'.format(x) for x in list(dataframe['gene_mass'])]
+        if masses:
+            dataframe = dataframe.loc[dataframe['gene_mass'].isin(masses)]
+            genes = ['{:.4f}'.format(x) for x in list(dataframe['gene_mass'])]
+        if gene_names:
+            dataframe = dataframe.loc[dataframe['gene_x'].isin(gene_names)]
+            genes = list(dataframe['gene_x'])
+        fc = list(dataframe['log2fc'])
+        pval = list(dataframe['pval'])
+        FcPvalGene = [(fc[i], pval[i], genes[i]) for i in range(len(genes))]
+        if topn>0:
+            _plot_volcano(FcPvalGene, title, outfile, showGeneCount=topn)
+        else:
+            _plot_volcano(FcPvalGene, title, outfile, showGeneCount=len(genes))
+
+    def _plot_volcano(FcPvalGene, title, outfile=None, showGeneCount=30):
+        """Fucntion that performs plotting of the volcano plot for plot_volcano() function.
+
+        Args:
+            FcPvalGene (list): List of tuples (fold change, p-value, identification mass or name)
+            title (str): Title of the plot.
+            outfile (str, optional): The path where to save the resulting plot. Defaults to None.
+            showGeneCount (int, optional): Number of the most significantly up/dowm regulated genes. Defaults to 30.
+        """
+        color1 = "#883656"  #"#BA507A"
+        color1_nosig = "#BA507A"
+        color1_nosig_less = "#d087a4"
+        color2 = "#4d6841"
+        color2_nosig = "#70975E"
+        color2_nosig_less = "#99b78b"
+        colors = {"down": (color1, color1_nosig, color1_nosig_less), "up": (color2, color2_nosig,color2_nosig_less)}
+        
+        with plt.style.context("default"):
+            plt.figure(figsize=(16,10))
+            FcPvalGene = sorted(FcPvalGene, key=lambda x: x[1])
+            xydots = [(x[0], -np.log10(x[1])) for x in FcPvalGene]
+            maxally = max([x[1] for x in xydots if not np.isinf(x[1])])
+            xydots = [(x, y if y <= maxally else maxally) for x,y in xydots]
+            dotgene = [x[2] for x in FcPvalGene]
+            pvalThresh = -np.log10(0.05)
+            showGeneCount_pos = showGeneCount
+            showGeneCount_neg = showGeneCount
+            showGenes = []
+            for x in FcPvalGene:
+                gene = x[2]
+                geneFC = x[0]
+                if geneFC < 0 and showGeneCount_neg > 0:
+                    showGenes.append(gene)
+                    showGeneCount_neg -= 1
+                if geneFC > 0 and showGeneCount_pos > 0:
+                    showGenes.append(gene)
+                    showGeneCount_pos -= 1
+            texts = []
+            sel_down_xy = []
+            nosig_down_xy = []
+            nosigless_down_xy = []
+            sel_up_xy = []
+            nosig_up_xy = []
+            nosigless_up_xy = []
+            upregCount = 0
+            downregCount = 0
+            upregSigCount = 0
+            downregSigCount = 0
+            unregCount = 0
+            for gi, (x,y) in enumerate(xydots):
+                if x < 0:
+                    if y < pvalThresh or abs(x) < 1:
+                        downregCount += 1
+                    else:
+                        downregSigCount += 1
+                elif x > 0:
+                    if y < pvalThresh or abs(x) < 1:
+                        upregCount += 1
+                    else:
+                        upregSigCount += 1
+                elif x == 0:
+                    unregCount += 1
+                if dotgene[gi] in showGenes:
+                    if x < 0:
+                        sel_down_xy.append((x,y))
+                    else:
+                        sel_up_xy.append((x,y))
+                    texts.append(plt.text(x * (1 + 0.01), y * (1 + 0.01) , dotgene[gi], fontsize=12, bbox=dict(boxstyle='round', facecolor='white', alpha=0.7)))
+                else:
+                    if x < 0:
+                        if y < pvalThresh or abs(x) < 1:
+                            nosigless_down_xy.append((x,y))
+                        else:
+                            nosig_down_xy.append((x,y))
+                    else:
+                        if y < pvalThresh or abs(x) < 1:
+                            nosigless_up_xy.append((x,y))
+                        else:
+                            nosig_up_xy.append((x,y))
+            #print(len(sel_xy), "of", len(genes))
+            ymax = max([y for x,y in xydots])
+            xmin = min([x for x,y in xydots])
+            xmax = max([x for x,y in xydots])
+            plt.plot([x[0] for x in nosigless_up_xy], [x[1] for x in nosigless_up_xy], '.', color=colors["up"][2])
+            plt.plot([x[0] for x in nosigless_down_xy], [x[1] for x in nosigless_down_xy], '.', color=colors["down"][2])
+            plt.plot([x[0] for x in nosig_up_xy], [x[1] for x in nosig_up_xy], 'o', color=colors["up"][1])
+            plt.plot([x[0] for x in nosig_down_xy], [x[1] for x in nosig_down_xy], 'o', color=colors["down"][1])
+            plt.plot([x[0] for x in sel_up_xy], [x[1] for x in sel_up_xy], 'o', color=colors["up"][0])
+            plt.plot([x[0] for x in sel_down_xy], [x[1] for x in sel_down_xy], 'o', color=colors["down"][0])
+            plt.hlines(y=pvalThresh, xmin=plt.xlim()[0], xmax=-1, linestyle="dotted")
+            plt.hlines(y=pvalThresh, xmin=1, xmax=plt.xlim()[1], linestyle="dotted")
+            yMaxLim = plt.ylim()[1]
+            plt.vlines(x=-1, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
+            plt.vlines(x=1, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
+            adjust_text(texts, force_points=0.2, force_text=0.2, expand_points=(2, 2), expand_text=(1, 1), arrowprops=dict(arrowstyle="-", color='black', lw=0.5))
+            #        texts.append(plt.text(x * (1 + 0.01), y * (1 + 0.01) , dotgene[gi], fontsize=12))
+            plt.title(title, fontsize = 40)
+            plt.xlabel("logFC", fontsize = 32)
+            plt.ylabel("Neg. Log. Adj. P-Value", fontsize = 32)
+            plt.xticks(fontsize=14)
+            infoText = "Total Genes: {}; Up-Reg. (sig.): {} ({}); Down-Reg. (sig.): {} ({}); Un-Reg.: {}".format(
+                upregCount+downregCount+upregSigCount+downregSigCount+unregCount,
+                upregCount, upregSigCount,
+                downregCount, downregSigCount,
+                unregCount
+            )
+            plt.figtext(0.5, 0.01, infoText, wrap=True, horizontalalignment='center', fontsize=14)
+            if outfile:
+                print(outfile)
+                plt.savefig(outfile, bbox_inches="tight")
+
+        
+
 
     def set_null_spectra(self, condition):
         """Goes thought the region array and sets the intensity values to zero if the condition is met.
@@ -1364,7 +1505,7 @@ class SpectraRegion():
         """Performs clustering on similarity matrix.
 
         Args:
-            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD" and "DENSMAP". Defaults to "UPGMA".\n
+            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_WAR" or "DENSMAP_DBSCAN". Defaults to "UPGMA".\n
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
                 - "WARD": Ward variance minimization algorithm.\n
