@@ -100,7 +100,8 @@ setup(name="pIMZ",
         'seaborn',
         'llvmlite',
         'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
-        'Pillow'], #dabest
+        'Pillow',
+        'adjustText'], #dabest
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
         'console_scripts': 

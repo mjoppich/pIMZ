@@ -1429,11 +1429,15 @@ class SpectraRegion():
             plt.plot([x[0] for x in nosig_down_xy], [x[1] for x in nosig_down_xy], 'o', color=colors["down"][1])
             plt.plot([x[0] for x in sel_up_xy], [x[1] for x in sel_up_xy], 'o', color=colors["up"][0])
             plt.plot([x[0] for x in sel_down_xy], [x[1] for x in sel_down_xy], 'o', color=colors["down"][0])
-            plt.hlines(y=pvalThresh, xmin=plt.xlim()[0], xmax=-1, linestyle="dotted")
-            plt.hlines(y=pvalThresh, xmin=1, xmax=plt.xlim()[1], linestyle="dotted")
+
+            if plt.xlim()[0]<-0.5:
+                plt.hlines(y=pvalThresh, xmin=plt.xlim()[0], xmax=-0.5, linestyle="dotted")
+            if plt.xlim()[1]>0.5:
+                plt.hlines(y=pvalThresh, xmin=0.5, xmax=plt.xlim()[1], linestyle="dotted")
+
             yMaxLim = plt.ylim()[1]
-            plt.vlines(x=-1, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
-            plt.vlines(x=1, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
+            plt.vlines(x=0.5, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
+            plt.vlines(x=-0.5, ymin=pvalThresh, ymax=yMaxLim, linestyle="dotted")
             adjust_text(texts, force_points=0.2, force_text=0.2, expand_points=(2, 2), expand_text=(1, 1), arrowprops=dict(arrowstyle="-", color='black', lw=0.5))
             #        texts.append(plt.text(x * (1 + 0.01), y * (1 + 0.01) , dotgene[gi], fontsize=12))
             plt.title(title, fontsize = 40)
