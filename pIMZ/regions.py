@@ -19,6 +19,7 @@ import h5py
 # image
 import skimage
 from skimage import measure as sk_measure
+from adjustText import adjust_text
 
 # processing
 import ctypes
@@ -1299,35 +1300,38 @@ class SpectraRegion():
 
         return showcopy
 
-    def plot_volcano(self, method, comparison, title, outfile=None, topn=30, masses=None, gene_names=None):
+    def plot_volcano(self, method, comparison, title, outfile=None, topn=30, masses=None, gene_names=None, only_selected=False):
         """Plots a volcano plot representing the differential analysis results of the current object.
 
         Args:
-            method (str): Test method for differential expression. “empire”, “ttest” or “rank”.
+            method (str): Test method for differential expression analysis. “empire”, “ttest” or “rank”.
             comparison (tuple): A tuple of two tuples each consisting of cluster ids compared.
-            title (str): Title of the plot.
+            title ((str): Title of the resulting plot.
             outfile (str, optional): The path where to save the resulting plot. Defaults to None.
             topn (int, optional): Number of the most significantly up/dowm regulated genes. Defaults to 30.
             masses (list, optional): A collection of floats that represent the desired masses to be labled. Defaults to None.
             gene_names (list, optional): A collection of strings that represent the desired gene names to be labled. Defaults to None.
+            only_selected (bool, optional): Whether to plot all results and highlight the selected masses/genes (=False) or plot only selectred masses/genes (=True). Defaults to False.
         """
         dataframe = pd.merge(self.df_results_all[method][comparison], self.de_results_all[method][comparison], left_on=['gene_ident'],right_on=['gene'])
         genes = ['{:.4f}'.format(x) for x in list(dataframe['gene_mass'])]
         if masses:
-            dataframe = dataframe.loc[dataframe['gene_mass'].isin(masses)]
+            if only_selected:
+                dataframe = dataframe.loc[dataframe['gene_mass'].isin(masses)]
             genes = ['{:.4f}'.format(x) for x in list(dataframe['gene_mass'])]
         if gene_names:
-            dataframe = dataframe.loc[dataframe['gene_x'].isin(gene_names)]
+            if only_selected:
+                dataframe = dataframe.loc[dataframe['gene_x'].isin(gene_names)]
             genes = list(dataframe['gene_x'])
         fc = list(dataframe['log2fc'])
         pval = list(dataframe['pval'])
         FcPvalGene = [(fc[i], pval[i], genes[i]) for i in range(len(genes))]
         if topn>0:
-            _plot_volcano(FcPvalGene, title, outfile, showGeneCount=topn)
+            SpectraRegion._plot_volcano(FcPvalGene, title, outfile, showGeneCount=topn, showGene=gene_names)
         else:
-            _plot_volcano(FcPvalGene, title, outfile, showGeneCount=len(genes))
+            SpectraRegion._plot_volcano(FcPvalGene, title, outfile, showGeneCount=len(genes), showGene=gene_names)
 
-    def _plot_volcano(FcPvalGene, title, outfile=None, showGeneCount=30):
+    def _plot_volcano(FcPvalGene, title, outfile=None, showGeneCount=30, showGene=None):
         """Fucntion that performs plotting of the volcano plot for plot_volcano() function.
 
         Args:
@@ -1335,6 +1339,7 @@ class SpectraRegion():
             title (str): Title of the plot.
             outfile (str, optional): The path where to save the resulting plot. Defaults to None.
             showGeneCount (int, optional): Number of the most significantly up/dowm regulated genes. Defaults to 30.
+            showGene (list, optional): A collection of strings that represent the desired gene names to be labled. Defaults to None.
         """
         color1 = "#883656"  #"#BA507A"
         color1_nosig = "#BA507A"
@@ -1358,12 +1363,20 @@ class SpectraRegion():
             for x in FcPvalGene:
                 gene = x[2]
                 geneFC = x[0]
-                if geneFC < 0 and showGeneCount_neg > 0:
-                    showGenes.append(gene)
-                    showGeneCount_neg -= 1
-                if geneFC > 0 and showGeneCount_pos > 0:
-                    showGenes.append(gene)
-                    showGeneCount_pos -= 1
+                if showGene:
+                    if gene in showGene and showGeneCount_neg > 0:
+                        showGenes.append(gene)
+                        showGeneCount_neg -= 1
+                    if gene in showGene and showGeneCount_pos > 0:
+                        showGenes.append(gene)
+                        showGeneCount_pos -= 1
+                else:
+                    if geneFC < 0 and showGeneCount_neg > 0:
+                        showGenes.append(gene)
+                        showGeneCount_neg -= 1
+                    if geneFC > 0 and showGeneCount_pos > 0:
+                        showGenes.append(gene)
+                        showGeneCount_pos -= 1
             texts = []
             sel_down_xy = []
             nosig_down_xy = []
@@ -1505,7 +1518,7 @@ class SpectraRegion():
         """Performs clustering on similarity matrix.
 
         Args:
-            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_WAR" or "DENSMAP_DBSCAN". Defaults to "UPGMA".\n
+            method (str, optional): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "UMAP_WARD", "DENSMAP_WARD" or "DENSMAP_DBSCAN". Defaults to "UPGMA".\n
                 - "UPGMA": Unweighted pair group method with arithmetic mean.\n
                 - "WPGMA": Weighted pair group method with arithmetic mean.\n
                 - "WARD": Ward variance minimization algorithm.\n
