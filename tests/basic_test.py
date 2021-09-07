@@ -9,5 +9,9 @@ Copyright 2019, Markus Joppich
 Licensed under MIT
 '''
 
+from pIMZ.imzml import IMZMLExtract
+from pIMZ.regions import SpectraRegion, ProteinWeights
+
+
 def test_example():
     assert True

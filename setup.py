@@ -61,6 +61,8 @@ setup(name="pIMZ",
         'Intended Audience :: Developers',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Topic :: Scientific/Engineering :: Bio-Informatics',
@@ -76,7 +78,7 @@ setup(name="pIMZ",
       zip_safe=False,
       tests_require=['pytest'],
       cmdclass={'test': PyTest},
-      python_requires='>=3.8',
+      python_requires='>=3.6',
       # TODO: List of packages that this one depends upon:  
       install_requires=[
         'numpy>=1.17.5', 
@@ -98,7 +100,8 @@ setup(name="pIMZ",
         'seaborn',
         'llvmlite', 'pykeops',
         'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
-        'Pillow'], #dabest
+        'Pillow',
+        'adjustText'], #dabest
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
         'console_scripts': 
