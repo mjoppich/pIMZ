@@ -33,9 +33,10 @@ import dabest
 import matplotlib
 import matplotlib.pyplot as plt
 
-from scipy import ndimage, misc, sparse, signal, stats
+from scipy import ndimage, misc, sparse, signal, stats, interpolate
 from scipy.sparse.linalg import spsolve
 
+from pykeops.numpy import LazyTensor
 
 
 #web/html
@@ -514,7 +515,7 @@ class IMZMLExtract:
         elif normalize in ["tic"]:
             specSum = sum(retSpectrum)
             if specSum > 0:
-                retSpectrum = retSpectrum / specSum
+                retSpectrum = (retSpectrum / specSum) * len(retSpectrum)
             return retSpectrum
 
         elif normalize in ["zscore"]:
@@ -1022,7 +1023,73 @@ class IMZMLExtract:
         return np.dot(vA, vB) / (np.sqrt( vAL ) * np.sqrt( vBL ))
 
 
-    def to_reduced_peaks(self, region, masses):
+    @classmethod
+    def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05):        
+        """
+        https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
+        We calculated the mean and a dispersion measure (variance/mean) for each gene across all single cells,
+        
+        and placed genes into 20 bins based on their average expression. Within each bin
+        
+        we then z-normalized the dispersion measure of all genes within the bin to identify genes whose expression values were highly variable even when compared to genes with similar average expression.
+        
+        We used a z-score cutoff of 2 to identify 160 significantly variable genes, after excluding genes with very low average expression
+        
+        As expected, our highly variable genes consisted primarily of developmental and spatially regulated factors whose expression levels are expected to vary across the dissociated cells.
+        """
+
+        allMassMeanDisp = []  
+        bar = makeProgressBar()
+
+        for k in bar(range(0, region.shape[2])):
+
+            allMassIntensities = []
+            for i in range(region.shape[0]):
+                for j in range(region.shape[1]):
+                    allMassIntensities.append(region[i,j,k])
+
+            massMean = np.mean(allMassIntensities)
+            massVar = np.var(allMassIntensities)
+
+            allMassMeanDisp.append((k, massMean, massMean/massVar))
+
+        minmax = min([x[1] for x in allMassMeanDisp]), max([x[1] for x in allMassMeanDisp])
+        binSpace = np.linspace(0, minmax[1], bins)
+        binned = np.digitize([x[1] for x in allMassMeanDisp], binSpace)
+        bin2elem = defaultdict(list)
+
+        for idx, binID in enumerate(binned):
+            bin2elem[binID].append( allMassMeanDisp[idx] )
+
+        allZElems = []
+        for binID in sorted([x for x in bin2elem]):
+
+            binDisps = [x[2] for x in bin2elem[binID] if x[1] > meanThreshold]
+            binZs = stats.zscore( binDisps , nan_policy="omit")
+
+            binElems = []
+            for disp, z in zip(bin2elem[binID], binZs):
+                binElems.append((disp[0], disp[1], z))
+
+            allZElems += binElems
+
+        allZElems = sorted(allZElems, key=lambda x: x[2], reverse=True)
+        quartile = np.quantile([x[1] for x in allZElems], [0.25])[0]
+
+        allZElems = [x for x in allZElems if x[1] > quartile]
+
+        hvMasses = []
+        for idx, massMean, massDisp in allZElems:
+            hvMasses.append(idx)
+            if len(hvMasses) >= topn:
+                break
+
+        print("Returning {} highly-variable masses.".format(len(hvMasses)))
+
+        return sorted(hvMasses)
+
+
+    def to_reduced_peaks(self, region, masses, topn=2000):
         """
 
         Args:
@@ -1033,11 +1100,64 @@ class IMZMLExtract:
             numpy.array, numpy.array: new array of spectra, corresponding masses
 
         """
-        pass
+
+        hvIndices = IMZMLExtract.detect_hv_masses(region, topn=topn, bins=50)
+
+        print("Identified", len(hvIndices), "HV indices")
+
+        retArray = np.copy(region)
+        retArray[:,:,:] = 0
+
+        retArray[:,:,hvIndices] = region[:,:,hvIndices]
+
+        return retArray
 
 
 
-    def to_called_peaks(self, region, masses, resolution,reduce_peaks=False):
+    def interpolate_data(self, region, masses, resolution, method="akima"):
+        """Interpolate all spectra within region to the specified resolution
+
+        Args:
+            region (numpy.array): array of spectra
+            masses (list): list of corresponding m/z values (same length as spectra)
+            resolution (float): step-size for interpolated spectra
+        """
+        assert(len(masses) == region.shape[2])
+
+        massesNew = [x for x in np.arange(min(masses), max(masses), 0.1)]
+
+
+        outarray = np.zeros((region.shape[0], region.shape[1], len(massesNew)))
+        bar = makeProgressBar()
+
+
+        for i in bar(range(0, region.shape[0])):
+            for j in range(0, region.shape[1]):
+
+                ijSpec = region[i,j]
+
+                if method == "akima":
+                    f = interpolate.Akima1DInterpolator(masses, ijSpec)
+                    specNew = f(massesNew)
+                else:
+                    raise Exception("Unknown interpolation method")
+
+                outarray[i,j] = specNew
+
+        outarray[ outarray < 0] = 0
+
+
+        return outarray, massesNew
+
+    def call_peaks(self, region, masses, accepted_difference=1.0):
+
+        assert(len(masses) == region.shape[2])
+
+        
+
+
+
+    def to_called_peaks(self, region, masses, resolution, reduce_peaks=False, picking_method="quadratic"):
         """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
         Args:
@@ -1055,6 +1175,11 @@ class IMZMLExtract:
         maxMZ = round(max(masses)*resolution)/resolution
         stepSize = 1/resolution
         requiredFields = int( (maxMZ-minMZ)/stepSize )
+
+        currentSteps = masses[-1]-masses[-2]
+
+        if stepSize < currentSteps:
+            print("WARNING: Selected steps ({}) are smaller than current step size ({})".format(stepSize, currentSteps))
 
         startSteps = minMZ / stepSize
 
@@ -1078,7 +1203,7 @@ class IMZMLExtract:
                 pixel = (i,j)
                 intensity_array, mz_array = region[i,j,:], masses
 
-                peak_list = ms_peak_picker.pick_peaks(mz_array, intensity_array, fit_type="quadratic")
+                peak_list = ms_peak_picker.pick_peaks(mz_array, intensity_array, fit_type=picking_method)
                 #retlist.append(peak_list)
 
                 rpeak2peaks = defaultdict(list)
@@ -1115,8 +1240,9 @@ class IMZMLExtract:
             outarray = outarray[:,:,peakIdx]
             outmasses = outmasses[peakIdx]
 
-            print(outarray.shape)
+            return self.to_reduced_peaks(outarray, outmasses)
 
+        print("Returning Peaks")
         return outarray, outmasses
 
 

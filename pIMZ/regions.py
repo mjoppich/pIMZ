@@ -43,6 +43,7 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 
+from .imzml import IMZMLExtract
 
 #web/html
 import jinja2
@@ -299,7 +300,7 @@ class SpectraRegion():
             plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
         else:
             
-            heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=fig.number)
+            heatmap = plt.matshow(arr, cmap=plt.cm.get_cmap('viridis'), fignum=fig.number)
             plt.colorbar(heatmap)
         
         return fig
@@ -537,83 +538,12 @@ class SpectraRegion():
 
     def detect_highly_variable_masses(self, topn=2000, bins=50, return_mz=False, meanThreshold=0.05):
         
-        """
-        https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
-        We calculated the mean and a dispersion measure (variance/mean) for each gene across all single cells,
-        
-        and placed genes into 20 bins based on their average expression. Within each bin
-        
-        we then z-normalized the dispersion measure of all genes within the bin to identify genes whose expression values were highly variable even when compared to genes with similar average expression.
-        
-        We used a z-score cutoff of 2 to identify 160 significantly variable genes, after excluding genes with very low average expression
-        
-        As expected, our highly variable genes consisted primarily of developmental and spatially regulated factors whose expression levels are expected to vary across the dissociated cells.
-        """
+        hvIndices = IMZMLExtract.detect_hv_masses(self.region, topn=topn, bins=bins, meanThreshold=meanThreshold)
 
-        allMassMeanDisp = []  
-        bar = makeProgressBar()
+        if return_mz:
+            return [self.idx2mass[x] for x in hvIndices]
 
-        for k in bar(range(0, self.region_array.shape[2])):
-
-            allMassIntensities = []
-            for i in range(self.region_array.shape[0]):
-                for j in range(self.region_array.shape[1]):
-                    allMassIntensities.append(self.region_array[i,j,k])
-
-            massMean = np.mean(allMassIntensities)
-            massVar = np.var(allMassIntensities)
-
-            allMassMeanDisp.append((k, massMean, massMean/massVar))
-
-        minmax = min([x[1] for x in allMassMeanDisp]), max([x[1] for x in allMassMeanDisp])
-        binSpace = np.linspace(0, minmax[1], bins)
-        binned = np.digitize([x[1] for x in allMassMeanDisp], binSpace)
-        
-        #print(minmax)
-        #print(binSpace)
-        #print(allMassMeanDisp[:10])
-        #print(binned[:10])
-
-        bin2elem = defaultdict(list)
-
-        for idx, binID in enumerate(binned):
-            bin2elem[binID].append( allMassMeanDisp[idx] )
-
-        allZElems = []
-        for binID in sorted([x for x in bin2elem]):
-
-            binDisps = [x[2] for x in bin2elem[binID] if x[1] > meanThreshold]
-            binZs = stats.zscore( binDisps , nan_policy="omit")
-
-            #print(binID, len(binDisps), binDisps[:10])
-            #print(binID, len(binZs), binZs[:10])
-            #return None
-
-            binElems = []
-            for disp, z in zip(bin2elem[binID], binZs):
-                binElems.append((disp[0], disp[1], z))
-
-            allZElems += binElems
-
-        allZElems = sorted(allZElems, key=lambda x: x[2], reverse=True)
-        quartile = np.quantile([x[1] for x in allZElems], [0.25])[0]
-
-        allZElems = [x for x in allZElems if x[1] > quartile]
-
-        hvMasses = []
-        for idx, massMean, massDisp in allZElems:
-            
-            if return_mz:
-                idx = self.idx2mass[idx]
-
-            hvMasses.append(idx)
-            if len(hvMasses) >= topn:
-                break
-
-        self.logger.info("Returning {} highly-variable masses.".format(len(hvMasses)))
-        print("Returning {} highly-variable masses.".format(len(hvMasses)))
-
-        return hvMasses
+        return hvIndices
         
 
     def plot_intensity_distribution(self, mass):
@@ -892,18 +822,7 @@ class SpectraRegion():
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
-    def __segment__umap_ward(self, number_of_regions, densmap=False, dims=None, n_neighbors=10):
-        """Performs UMAP dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
-
-        Args:
-            number_of_regions (int): Number of desired clusters.
-            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
-            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
-            n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
-
-        Returns:
-            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
-        """
+    def prepare_elem_matrix(self, dims=None):
         self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
 
         ndims = self.region_array.shape[2]
@@ -914,9 +833,9 @@ class SpectraRegion():
             else:
                 ndims = len(dims)
 
-        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+        elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
 
-        print("Elem Matrix", self.elem_matrix.shape)
+        print("Elem Matrix", elem_matrix.shape)
 
         """
         
@@ -936,11 +855,28 @@ class SpectraRegion():
                 idx = i * self.region_array.shape[1] + j
 
                 if not dims is None:
-                    self.elem_matrix[idx, :] = self.region_array[i,j,dims]
+                    elem_matrix[idx, :] = self.region_array[i,j,dims]
                 else:
-                    self.elem_matrix[idx, :] = self.region_array[i,j,:]
+                    elem_matrix[idx, :] = self.region_array[i,j,:]
 
                 idx2ij[idx] = (i,j)
+
+        return elem_matrix, idx2ij
+
+
+    def __segment__umap_ward(self, number_of_regions, densmap=False, dims=None, n_neighbors=10):
+        """Performs UMAP dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
+
+        Args:
+            number_of_regions (int): Number of desired clusters.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+            n_neighbors (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+
+        Returns:
+            numpy.ndarray: An array where each element is the flat cluster number to which original observation belongs.
+        """
+        self.elem_matrix, idx2ij = self.prepare_elem_matrix(dims)
 
 
         self.logger.info("UMAP reduction")
@@ -980,40 +916,7 @@ class SpectraRegion():
             list: A list of HDBSCAN labels. 
         """
 
-        self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
-
-        ndims = self.region_array.shape[2]
-
-        if not dims is None:
-            ndims = len(dims)
-
-        self.elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
-
-        self.logger.info("Elem Matrix of shape: {}".format(self.elem_matrix.shape))
-
-        """
-        
-        ----------> spectra ids
-        |
-        |
-        | m/z values
-        |
-        v
-        
-        """
-
-        idx2ij = {}
-
-        for i in range(0, self.region_array.shape[0]):
-            for j in range(0, self.region_array.shape[1]):
-                idx = i * self.region_array.shape[1] + j
-
-                if not dims is None:
-                    self.elem_matrix[idx, :] = self.region_array[i,j,dims]
-                else:
-                    self.elem_matrix[idx, :] = self.region_array[i,j,:]
-
-                idx2ij[idx] = (i,j)
+        self.elem_matrix, idx2ij = self.prepare_elem_matrix(dims)
 
         self.logger.info("UMAP reduction")
         self.dimred_elem_matrix = umap.UMAP(

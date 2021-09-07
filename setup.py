@@ -96,7 +96,7 @@ setup(name="pIMZ",
         'pyimzml',
         'natsort',
         'seaborn',
-        'llvmlite',
+        'llvmlite', 'pykeops',
         'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
         'Pillow'], #dabest
       # TODO: List executable scripts, provided by the package (this is just an example)
