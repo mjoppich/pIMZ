@@ -29,7 +29,8 @@ If not already done, you must first install the following dependencies manually.
     sudo pip3 install dabest
     sudo pip3 install numpy pandas --upgrade
 
-Only then we should install ``pIMZ`` ::
+Only then we should install ``pIMZ`` :
+
     sudo pip3 install pIMZ
 
 ``pIMZ`` is now ready to go!
