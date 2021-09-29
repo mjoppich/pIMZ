@@ -776,6 +776,376 @@ class CombinedSpectra():
 
         return spectraMatrix
 
+    def get_masks(self, regions):
+        if not isinstance(regions, (list, tuple, set)):
+            regions = [regions]
+
+        outmasks = dict()
+        
+        for region in self.regions:
+            outmasks[region] = np.zeros(self.regions[region].segmented.shape)
+            for cluster in regions:
+                outmasks[region][self.regions[region].segmented == cluster] = 1
+
+        return outmasks
+
+    def export_deres(self, method, resKey, region_image, outpath, title="DE Result"):
+        """This methods writes out a HTMl-formatted table for all found DE results.
+
+        Args:
+            method (str): Method to export result for
+            resKey (tuple): List of regions to look for result for
+            region_image (int/str): The name of the region for which the DE results should be visualized.
+            outpath (str): outpath of HTML table. Required js-sources are copied into the same folder.
+            title (str, optional): Title for result table
+        """
+        
+       
+        expDF = self.df_results_all[method][resKey].copy(deep=True)
+
+        mass2image = {}
+        requiredMasses = set(self.df_results_all[method][resKey]["gene_mass"].values)
+        self.logger.info("Fetching Mass Heatmaps for all {} required masses".format(len(requiredMasses)))
+
+
+        fgMask = self.get_masks(regions=resKey[1])[region_image]
+        bgMask = self.get_masks(regions=resKey[3])[region_image]
+
+
+        for mass in set(requiredMasses):
+            mass_data = self.mass_heatmap(mass, plot=False, verbose=False)
+            heatmap = plt.matshow(mass_data, fignum=100)
+            plt.colorbar(heatmap)
+
+
+            # Find contours at a constant value of 0.5
+            contours = sk_measure.find_contours(bgMask, 0.5)
+            # Display the image and plot all contours found
+            for n, contour in enumerate(contours):
+                plt.plot(contour[:, 1], contour[:, 0], linewidth=2, color="blue")
+
+
+            # Find contours at a constant value of 0.5
+            contours = sk_measure.find_contours(fgMask, 0.5)
+
+            # Display the image and plot all contours found
+            for n, contour in enumerate(contours):
+                plt.plot(contour[:, 1], contour[:, 0], linewidth=2, color="green")
+
+
+
+            pic_IObytes = io.BytesIO()
+            plt.savefig(pic_IObytes,  format='png')
+            pic_IObytes.seek(0)
+            pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+            plt.close(100)
+
+            imgStr = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+            mass2image[mass] = imgStr
+
+
+        massImgValues = [mass2image.get(mass, "") for mass in expDF["gene_mass"].values]
+        pos = expDF.columns.values.tolist().index("gene_mass")+1
+
+        self.logger.info("Adding Mass Heatmap at pos {} of {} with {} entries".format(pos, len(expDF.columns.values.tolist()), len(massImgValues)))
+        
+        expDF.insert(loc = pos, 
+          column = 'Mass Heatmap', 
+          value = massImgValues) 
+
+        (headpart, bodypart) = self._makeHTMLStringFilterTable(expDF)
+
+        #
+        # Plot segments
+        #
+        #
+        valid_vals = np.unique(self.regions[region_image].segmented)
+        heatmap = plt.matshow(self.regions[region_image].segmented, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=100)
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        formatter = plt.FuncFormatter(formatter_func)
+
+        # We must be sure to specify the ticks matching our target names
+        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+
+        pic_IObytes = io.BytesIO()
+        plt.savefig(pic_IObytes,  format='png')
+        pic_IObytes.seek(0)
+        pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+        plt.close(100)
+
+        imgStrSegments = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+        #
+        # Plot segment highlights
+        #
+        #
+        showcopy = np.copy(self.regions[region_image].segmented)
+
+        for i in range(0, showcopy.shape[0]):
+            for j in range(0, showcopy.shape[1]):
+                if showcopy[i,j] != 0:
+                    if showcopy[i,j] in resKey[1]:
+                        showcopy[i,j] = 2
+                    elif showcopy[i,j] != 0:
+                        showcopy[i,j] = 1
+
+        valid_vals = np.unique(showcopy)
+        heatmap = plt.matshow(showcopy, cmap=plt.cm.get_cmap('viridis', len(valid_vals)), fignum=100)
+        min_ = min(valid_vals)
+        max_ = max(valid_vals)
+
+        positions = np.linspace(min_, max_, len(valid_vals))
+        val_lookup = dict(zip(positions, valid_vals))
+
+        def formatter_func(x, pos):
+            'The two args are the value and tick position'
+            val = val_lookup[x]
+            return val
+
+        formatter = plt.FuncFormatter(formatter_func)
+
+        # We must be sure to specify the ticks matching our target names
+        plt.colorbar(heatmap, ticks=positions, format=formatter, spacing='proportional')
+
+        pic_IObytes = io.BytesIO()
+        plt.savefig(pic_IObytes,  format='png')
+        pic_IObytes.seek(0)
+        pic_hash = base64.b64encode(pic_IObytes.read()).decode()
+        plt.close(100)
+
+        imgStrSegmentHighlight = "<img src='data:image/png;base64,{}' alt='Red dot' />".format(pic_hash)
+
+        bodypart = "<p>{}<p><p>{}<p>\n{}".format(imgStrSegments, imgStrSegmentHighlight, bodypart)
+
+        if title != None:
+            bodypart = "<h1>"+title+"</h1>" + bodypart
+
+        htmlfile="<html>\n<head>\n" + headpart + "</head>\n<body>\n" + bodypart + "</body>\n</html>"
+
+        with open(outpath, 'w') as outHtml:
+            outHtml.write(htmlfile)
+
+        def copyFolders(root_src_dir, root_target_dir):
+
+            for src_dir, dirs, files in os.walk(root_src_dir):
+                dst_dir = src_dir.replace(root_src_dir, root_target_dir)
+                if not os.path.exists(dst_dir):
+                    os.mkdir(dst_dir)
+                for file_ in files:
+                    src_file = os.path.join(src_dir, file_)
+                    dst_file = os.path.join(dst_dir, file_)
+                    if os.path.exists(dst_file):
+                        os.remove(dst_file)
+
+                    shutil.copy(src_file, dst_dir)
+
+
+        sourceDir = os.path.dirname(__file__) + "/tablefilter"
+        targetDir = os.path.dirname(outpath) + "/tablefilter"
+
+        self.logger.info("copy tablefilter files from {} to {}".format(sourceDir, targetDir))
+        copyFolders(sourceDir, targetDir)
+
+    def _makeHTMLStringFilterTable(self, expDF):
+        """Transform given pandas dataframe into HTML output.
+
+        Args:
+            expDF (pd.DataFrame): Values for output.
+
+        Returns:
+            htmlHead, htmlBody (str): HTML code for head and body.
+        """
+
+        headpart = """
+        """
+
+        bodypart = """
+        {% if title %}
+        {{title}}
+        {% endif %}
+        
+        <button id="csvButton" type="button">Save current table!</button>
+        
+        <table id="{{html_element_id}}" class="display" cellspacing="0" width="100%">
+                <thead>
+                <tr>
+                {% for column in columns %}
+                    <th>{{column}}</th>
+                {% endfor %}
+                </tr>
+                </thead>
+
+                <tbody>
+                {% for key,row in rows.iterrows() %}
+                <tr>
+                    {% for column in columns %}
+                    <td>{{ row[column] }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                </tbody>
+
+                <tfoot>
+                <tr>
+                {% for column in columns %}
+                    <th>{{column}}</th>
+                    {% endfor %}
+                </tr>
+                </tfoot>
+
+                </table>
+
+<script src="tablefilter/tablefilter.js"></script>
+
+<script data-config>
+    var filtersConfig = {
+        base_path: 'tablefilter/',
+        alternate_rows: true,
+        rows_counter: true,
+        btn_reset: true,
+        loader: true,
+        status_bar: true,
+        mark_active_columns: true,
+        highlight_keywords: true,
+        sticky_headers: true,
+        col_types: [{{coltypes}}],
+        custom_options: {
+            cols:[],
+            texts: [],
+            values: [],
+            sorts: []
+        },
+        col_widths: [],
+        extensions:[{ name: 'sort' }]
+    };
+
+    var tf = new TableFilter("{{html_element_id}}", filtersConfig);
+    tf.init();
+
+function download_csv(csv, filename) {
+    var csvFile;
+    var downloadLink;
+
+    // CSV FILE
+    csvFile = new Blob([csv], {type: "text/csv"});
+
+    // Download link
+    downloadLink = document.createElement("a");
+
+    // File name
+    downloadLink.download = filename;
+
+    // We have to create a link to the file
+    downloadLink.href = window.URL.createObjectURL(csvFile);
+
+    // Make sure that the link is not displayed
+    downloadLink.style.display = "none";
+
+    // Add the link to your DOM
+    document.body.appendChild(downloadLink);
+
+    // Lanzamos
+    downloadLink.click();
+}
+
+function isHidden(el) {
+    var style = window.getComputedStyle(el);
+    return ((style.display === 'none') || (style.visibility === 'hidden'))
+}
+
+function export_table_to_csv(html, filename) {
+	var csv = [];
+	var rows = document.querySelectorAll("table tr");
+	
+    for (var i = 0; i < rows.length; i++) {
+		var row = [], cols = rows[i].querySelectorAll("td, th");
+
+        if (!isHidden(rows[i]))
+        {
+            for (var j = 0; j < cols.length; j++) 
+            {
+                colText = ""+cols[j].innerText;
+                colText = colText.replace(/(\\r\\n|\\n|\\r)/gm, ';')
+                row.push(colText);
+
+            }
+
+            if (row.length > 0)
+            {
+                csv.push(row.join("\\t"));
+            }		
+
+        }
+		    
+	}
+
+    // Download CSV
+    download_csv(csv.join("\\n"), filename);
+}
+
+document.addEventListener('readystatechange', event => {
+
+    if (event.target.readyState === "interactive") {      //same as:  document.addEventListener("DOMContentLoaded"...   // same as  jQuery.ready
+            console.log("Ready state");
+
+        document.getElementById("csvButton").addEventListener("click", function () {
+            var html = document.getElementById("{{html_element_id}}").outerHTML;
+            export_table_to_csv(html, "table.tsv");
+        });
+
+    }
+
+    if (event.target.readyState === "complete") {
+        console.log("Now external resources are loaded too, like css,src etc... ");
+        
+        document.getElementById("csvButton").addEventListener("click", function () {
+            var html = document.getElementById("{{html_element_id}}").outerHTML;
+            export_table_to_csv(html, "table.tsv");
+        });
+    }
+
+});
+
+                </script>
+
+        """
+        jsCols = []
+       
+        columnNames = expDF.columns.values.tolist()
+        for cname in columnNames:
+
+            if expDF[cname].dtypes in [int, float]:
+                jsCols.append("\"number\"")
+            else:
+                jsCols.append("\"string\"")
+
+
+        vHeader = [str(x) for x in columnNames]
+        #print()
+
+        self.logger.info("Got Columns: {}".format([x for x in zip(vHeader, jsCols)]))
+
+        html_element_id= None
+        if html_element_id == None:
+            html_element_id = "dftable"
+
+        jinjaTemplate = jinja2.Template(bodypart)
+        output = jinjaTemplate.render(rows=expDF, columns=vHeader, title="",
+                                      html_element_id=html_element_id, coltypes=", ".join(jsCols))
+
+        return (headpart, output)
+
 
     def deres_to_df(self, deResDF, resKey, protWeights, mz_dist=3, mz_best=False, keepOnlyProteins=True, inverse_fc=False, max_adj_pval=0.05, min_log2fc=0.5, scaled=True):
         """Transforms differetial expression (de) result into a DataFrame form.
