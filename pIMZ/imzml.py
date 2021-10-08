@@ -1441,7 +1441,7 @@ class IMZMLExtract:
             spectra = coord2spec[coord]
 
             if len(spectra) < sc:
-                spectra = np.pad(spectra, ((0,0),(0, sc-len(spectra) )), mode='constant', constant_values=0)
+                spectra = np.pad(spectra, (0, sc-len(spectra)), mode='constant', constant_values=0)
 
             spectra = np.array(spectra, copy=True)
 
