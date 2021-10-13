@@ -588,6 +588,7 @@ class IMZMLExtract:
 
         startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
         if startedLog == 0:
+            # TODO set this to 0.5 * smallest positive value
             startedLog = 0.001
 
         self.logger.info("Started Log Value: {}".format(startedLog))
