@@ -125,6 +125,9 @@ class CombinedSpectra():
         Returns:
             float: cosine similarity.
         """
+        if (np.all((vA == 0)) or np.all((vB == 0))):
+            return 0
+
         return np.dot(vA, vB) / (np.sqrt(np.dot(vA,vA)) * np.sqrt(np.dot(vB,vB)))
 
 
@@ -374,7 +377,8 @@ class CombinedSpectra():
                 ax = axes[ddidx]
                 ax.axis('off')
 
-            fig.colorbar(heatmap, ax=axes[-1])
+            #fig.colorbar(heatmap, ax=axes[-1])
+            plt.colorbar(heatmap, ax=axes[:], spacing='proportional')
             plt.suptitle(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
 
             plt.show()
@@ -1397,7 +1401,7 @@ document.addEventListener('readystatechange', event => {
         return (len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_)
 
 
-    def get_internormed_regions(self, method="median"):
+    def get_internormed_regions(self, method="median", backgroundIDs = None):
         """
             Scales region arrays with either average or median of the fold changes. Updates region_array_scaled. Additionally plots the range of scaled fold changes with a boxplot.
             # TODO: specify which clusters are used for normalization! (dict: region => clusterids)
@@ -1416,6 +1420,16 @@ document.addEventListener('readystatechange', event => {
 
         print(allRegionNames)
 
+        if backgroundIDs is None:
+            backgroundIDs = {}
+
+            for regionName in allRegionNames:
+                backgroundIDs[regionName] = [0]
+
+        
+        for regionName in allRegionNames:
+            print("Region", regionName, "NormalizationClusters", backgroundIDs[regionName])
+
         fcDict = {}
         bar = progressbar.ProgressBar(maxval=len(allRegionNames))
         for rIdx, regionName in bar(enumerate(allRegionNames)):
@@ -1429,7 +1443,13 @@ document.addEventListener('readystatechange', event => {
 
             scaledRegionArray = np.array(regionElement.region_array, copy=True)
 
-            bgFoldChanges = referenceMedianSpectra[0] / regionMedianSpectra[0]
+            bgFoldChanges = []
+
+            for clusterID_ref in backgroundIDs[allRegionNames[0]]:
+                for clusterID_reg in backgroundIDs[regionName]:
+                    print(clusterID_ref, clusterID_reg, referenceMedianSpectra[clusterID_ref], regionMedianSpectra[clusterID_reg])
+                    bgFoldChangesComp = referenceMedianSpectra[clusterID_ref] / regionMedianSpectra[clusterID_reg]
+                    bgFoldChanges += list(bgFoldChangesComp)
 
             fcDict["{}_before".format(regionName)] = bgFoldChanges
 
@@ -1440,12 +1460,21 @@ document.addEventListener('readystatechange', event => {
 
             self.logger.info("FiveNumber Stats for bgFoldChanges before: {}".format(self._fivenumber(bgFoldChanges)))
             self.logger.info("scaleFactor: {}".format(scaleFactor))
+            print(scaleFactor)
 
             scaledRegionArray = regionElement.region_array * scaleFactor
 
 
             scaledRegionMedianSpectra = regionElement.consensus_spectra(method="median", set_consensus=False, array=scaledRegionArray)
-            scaledbgFoldChanges = referenceMedianSpectra[0] / scaledRegionMedianSpectra[0]
+            scaledbgFoldChanges = []#= referenceMedianSpectra[0] / scaledRegionMedianSpectra[0]
+
+            for clusterID_ref in backgroundIDs[allRegionNames[0]]:
+                for clusterID_reg in backgroundIDs[regionName]:
+                    scaledFoldChangesComp = referenceMedianSpectra[clusterID_ref] / scaledRegionMedianSpectra[clusterID_reg]
+                    scaledbgFoldChanges += list(scaledFoldChangesComp)
+
+
+
             self.logger.info("FiveNumber Stats for scaledbgFoldChanges after: {}".format(self._fivenumber(scaledbgFoldChanges)))
             fcDict["{}_after".format(regionName)] = scaledbgFoldChanges 
 

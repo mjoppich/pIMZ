@@ -64,24 +64,21 @@ class RegionClusterer(metaclass=abc.ABCMeta):
 
     def __init__(self, region:SpectraRegion) -> None:
         self.region = region
-        self.segmentation = None
 
     @classmethod
     def __subclasshook__(cls, subclass):
         return (hasattr(subclass, 'fit') and callable(subclass.fit) and
                 hasattr(subclass, 'transform') and callable(subclass.transform) and
                 hasattr(subclass, 'fit_transform') and callable(subclass.fit_transform) and
-                hasattr(subclass, 'region') and hasattr(subclass, 'segmentation')
+                hasattr(subclass, 'segmentation') and callable(subclass.segmentation) and
+                hasattr(subclass, 'region')
                 )
 
-    @abc.abstractmethod
     def methodname(self):
         """Brief description of the specific clusterer
 
-        Raises:
-            NotImplementedError: [description]
         """
-        raise NotImplementedError
+        return self.__class__.__name__
 
 
     @abc.abstractmethod
@@ -577,6 +574,9 @@ class SpectraRegion():
         emass, eidx = self._get_exmass_for_mass(mass)
 
         return eidx
+
+    def get_mass_from_index(self, idx):
+        return self.idx2mass[idx]
  
     def _get_exmass_for_mass(self, mass, threshold=None):
         """Returns the closest mass and index in .imzML file for a specific mass.
@@ -1449,7 +1449,7 @@ class SpectraRegion():
         segmentation = clusterer.segmentation()
 
         # segmentation has same dimensions as original array
-        assert ((segmentation.shape == (self.region_array.shape[0], self.region_array.shape[1])).all())
+        assert (segmentation.shape == (self.region_array.shape[0], self.region_array.shape[1]))
 
         self.segmented = segmentation
         self.segmented_method = clusterer.methodname()

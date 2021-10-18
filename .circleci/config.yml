@@ -21,7 +21,7 @@ jobs:
           command: sudo pip3 install numpy pandas --upgrade
       - run:
           name: "pip install dependencies (2)"
-          command: sudo pip3 install ms_peak_picker wheezy.template
+          command: sudo pip3 install ms_peak_picker wheezy.template fuzzy-c-means
       - run:
           name: "pip install dependencies (3)"
           command: sudo pip3 install numba llvmlite Cython --upgrade
