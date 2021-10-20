@@ -64,7 +64,22 @@ class RegionClusterer(metaclass=abc.ABCMeta):
 
     def __init__(self, region:SpectraRegion) -> None:
         self.region = region
+        self.logger = None
+        self.__set_logger()
 
+    def __set_logger(self):
+        self.logger = logging.getLogger(self.methodname())
+        self.logger.setLevel(logging.INFO)
+
+        if not logging.getLogger().hasHandlers():
+
+            consoleHandler = logging.StreamHandler()
+            consoleHandler.setLevel(logging.INFO)
+
+            self.logger.addHandler(consoleHandler)
+
+            formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
+            consoleHandler.setFormatter(formatter)
     @classmethod
     def __subclasshook__(cls, subclass):
         return (hasattr(subclass, 'fit') and callable(subclass.fit) and
@@ -3457,7 +3472,7 @@ class ProteinWeights():
         self.logger = logging.getLogger('ProteinWeights')
         self.logger.setLevel(logging.INFO)
 
-        if len(self.logger.handlers) == 0:
+        if not logging.getLogger().hasHandlers():
 
             consoleHandler = logging.StreamHandler()
             consoleHandler.setLevel(logging.INFO)

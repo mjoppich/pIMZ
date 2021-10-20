@@ -390,61 +390,7 @@ class IMZMLExtract:
         return spectraShape
 
 
-    def __get_peaks(self, spectrum, window):
-        """Calculates m/z values that correspond to the peaks with at least five times higher intensity as a median value within the sliding window and extra test within an epsilon hull of the expectant.
-
-
-        Args:
-            spectrum (numpy.array): Sequence of intensity values of the spectrum.
-            window (int): The size of the sliding windowing within the peaks should be compared.
-
-        Returns:
-            list: sorted m/z indexes that were selected as peaks.
-        """
-        peaks=set()
-
-        for i in range(0, len(spectrum)-window):
-
-            intens = spectrum[i:i+window]
-
-            maxI = 0
-            maxMZ = 0
-
-            epshull = (max(intens) - min(intens)) / 2
-
-            for mzIdx, mzVal in enumerate(intens):
-                if mzVal > maxI:
-                    maxI = mzVal
-                    maxMZ = mzIdx
-
-            tmp = maxMZ
-
-            addPeak = True
-            if len(peaks) > 0:
-
-                # exist already registered peak within epsilon hull with lower intensity?
-                for p in peaks:
-
-                    if abs(p - tmp) < epshull:
-                        if spectrum[p] < spectrum[tmp]:
-                            peaks.remove(p)
-                            peaks.add(tmp)
-                            addPeak = False
-                            break
-                        else:
-
-                            addPeak = False
-                            break
-
-            if addPeak:
-
-                if maxI > 5 * np.median(intens):
-                    peaks.add(tmp)
-
-        return sorted(peaks)
-
-
-    def get_peaks_fast(self, spectrum, window):
+    def _get_peaks(self, spectrum, window):
         """Calculates m/z values that correspond to the peaks with at least twice as high intensity as the minimum value within the sliding window.
 
 
@@ -488,7 +434,7 @@ class IMZMLExtract:
         """
         avg_spectrum = self.get_avg_spectrum(region_array)
 
-        peaks = self.get_peaks_fast(avg_spectrum, peak_window)
+        peaks = self._get_peaks(avg_spectrum, peak_window)
         peak_region = np.zeros((region_array.shape[0], region_array.shape[1], len(peaks)))
 
         for i in range(0, region_array.shape[0]):
@@ -822,7 +768,8 @@ class IMZMLExtract:
         outarray = np.array(region_array, copy=True)
 
         maxInt = 0.0
-        for i in range(0, region_dims[0]):
+        bar = makeProgressBar()
+        for i in bar(range(0, region_dims[0])):
             for j in range(0, region_dims[1]):
 
                 procSpectrum = region_array[i, j, :]
@@ -842,7 +789,8 @@ class IMZMLExtract:
                 mzs, intensities = p.getspectrum(idx)
                 maxInt = max(maxInt, np.max(intensities))
 
-        for i in range(0, region_dims[0]):
+        bar = makeProgressBar()
+        for i in bar(range(0, region_dims[0])):
             for j in range(0, region_dims[1]):
 
                 spectrum = outarray[i, j, :]
@@ -1189,7 +1137,7 @@ class IMZMLExtract:
         return specNew
 
 
-    def to_called_peaks(self, region, masses, resolution, reduce_peaks=False, picking_method="quadratic"):
+    def to_called_peaks(self, region, masses, resolution=0.1, reduce_peaks=False, picking_method="quadratic"):
         """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
         Args:
@@ -1203,9 +1151,9 @@ class IMZMLExtract:
 
         assert(len(masses) == region.shape[2])
 
-        minMZ = round(min(masses)*resolution)/resolution
-        maxMZ = round(max(masses)*resolution)/resolution
-        stepSize = 1/resolution
+        minMZ = round(min(masses)/resolution)*resolution
+        maxMZ = round(max(masses)/resolution)*resolution
+        stepSize = resolution
         requiredFields = int( (maxMZ-minMZ)/stepSize )
 
         currentSteps = masses[-1]-masses[-2]
