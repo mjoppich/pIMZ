@@ -44,7 +44,7 @@ from scipy import ndimage, stats
 from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
-from sklearn import cluster
+from sklearn import cluster, decomposition
 from fcmeans import FCM
 
 from .imzml import IMZMLExtract
@@ -61,6 +61,251 @@ def makeProgressBar():
         ])
 
 import abc
+
+import networkx as nx
+
+class RegionModel:
+
+    def __init__(self, no_relation_weight=0, bi_directional=True) -> None:
+
+        self.no_relation_weight = no_relation_weight
+        self.bi_directional = bi_directional
+        self.relations = nx.DiGraph()
+
+
+    def from_image(self, filepath, mapping=None, diagonal=True):
+
+        regImg =np.load(filepath)
+
+        if mapping is None:
+            mapping = {x:x for x in np.unique(regImg)} #id
+
+        if not set(np.unique(regImg)).issubset([x for x in mapping]):
+            raise ValueError
+
+        adjacencyCounter = Counter()
+
+        for i in range(0, regImg.shape[0]):
+            for j in range(0, regImg.shape[1]):
+
+                curFieldRegion = regImg[i,j]
+
+                otherRegions = []  
+                #right
+
+                if i+1 < regImg.shape[0]:
+                    otherRegions.append(regImg[i+1, j])
+                #bottom
+
+                if j+1 < regImg.shape[1]:
+                    otherRegions.append(regImg[i, j+1])
+
+                if diagonal and i+1 < regImg.shape[0] and j+1 < regImg.shape[1]:
+                    #diagonal
+                    otherRegions.append(regImg[i+1, j+1])
+
+                for oRegion in otherRegions:
+                    adjacencyCounter[ (mapping[curFieldRegion], mapping[oRegion]) ] += 1
+                    adjacencyCounter[ (mapping[oRegion],mapping[curFieldRegion]) ] += 1
+
+        for interaction in adjacencyCounter:
+            self.add_relation(interaction[0], interaction[1], weight=1)        
+
+
+    def add_relation(self, src, tgt, weight=1.0):
+
+        self.relations.add_edge(src, tgt, weight=weight)
+
+        if self.bi_directional:
+            self.relations.add_edge(tgt, src, weight=weight)
+
+    
+    def get_score(self, src, tgt):
+
+        if (src, tgt) in self.relations.edges:
+            return self.relations.edges[(src, tgt)]["weight"]
+
+        return self.no_relation_weight
+
+    def plot_model(self):
+
+        plt.figure()
+
+        labels = {n: "{} ({})".format(n, self.relations.nodes[n]['weight']) for n in self.relations.nodes}
+        colors = [self.relations.nodes[n]['weight'] for n in self.relations.nodes]
+
+        edgeColors = [self.relations.edges[n]['weight'] for n in self.relations.edges]
+
+        nx.draw(self.relations, with_labels=True, labels=labels, node_color=colors, edge_colors=edgeColors)
+        plt.show()
+        plt.close()
+
+
+class RegionEmbedding(metaclass=abc.ABCMeta):
+
+    def __init__(self, region:SpectraRegion) -> None:
+        self.region = region
+        self.embedded_matrix = None
+
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (hasattr(subclass, 'fit_transform') and callable(subclass.fit_transform) and
+                hasattr(subclass, 'embedding') and callable(subclass.embedding) and
+                hasattr(subclass, 'region')
+                )
+
+    def methodname(self):
+        """Brief description of the specific clusterer
+
+        """
+        return self.__class__.__name__
+
+    @abc.abstractmethod
+    def embedding(self) -> np.array:
+        """Returns the final embedding for given region
+
+        Raises:
+            NotImplementedError: [description]
+
+        Returns:
+            np.array: embedding
+        """
+
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def fit_transform(self, verbose:bool=False) -> np.array:
+        """
+        Returns the final embedding
+
+        Args:
+            num_target_clusters (int): number of target clusters
+            verbose (bool, optional): Verbose output. Defaults to False.
+
+
+        Raises:
+            NotImplementedError: (abstract class)
+
+        Returns:
+            np.array: segmentation
+        """
+        raise NotImplementedError
+
+class PCAEmbedding(RegionEmbedding):
+
+    def __init__(self, region: SpectraRegion, dimensions: int=2) -> None:
+        super().__init__(region)
+
+        self.dimensions = dimensions
+        self.idx2coord = None
+        self.embedding_object = None
+
+    def fit_transform(self, verbose: bool = False) -> np.array:
+        
+        elem_matrix, self.idx2coord = self.region.prepare_elem_matrix()
+        #np-array dims  (n_samples, n_features)
+
+        self.logger.info("PCA reduction")
+        self.embedding_object = decomposition.PCA(
+            n_components=self.dimensions,
+            random_state=42,
+        )
+
+        self.logger.info("PCA fit+transform")
+        self.embedded_matrix = self.embedding_object.fit_transform(elem_matrix)
+
+    def embedding(self) -> np.array:
+        
+        outArray = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1], self.dimensions))
+
+        for idx in self.idx2coord:
+            (x,y) = self.idx2coord[idx]
+            outArray[x,y,:] = self.embedded_matrix[idx]
+        
+        return outArray
+
+    def covariances(self):
+        return self.embedding_object.get_covariance()
+
+    def loading(self):
+
+        # according to https://scentellegher.github.io/machine-learning/2020/01/27/pca-loadings-sklearn.html
+        computedPCs = ["PC{}".format(x) for x in range(1, self.dimensions+1)] # 1-based
+        loadings = pd.DataFrame(self.embedding_object.components_.T, columns=computedPCs, index=self.region.idx2mass)
+
+        return loadings
+
+
+
+class UMAPEmbedding(RegionEmbedding):
+
+    def __init__(self, region: SpectraRegion, dimensions: int=2) -> None:
+        super().__init__(region)
+
+        self.dimensions = dimensions
+        self.idx2coord = None
+        self.embedding_object = None
+
+    def fit_transform(self, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0) -> np.array:
+        
+        elem_matrix, self.idx2coord = self.region.prepare_elem_matrix()
+        #np-array dims  (n_samples, n_features)
+
+        self.logger.info("UMAP reduction")
+        self.embedding_object = umap.UMAP(
+            densmap=densmap,
+            n_neighbors=n_neighbours,
+            min_dist=min_dist,
+            n_components=self.dimensions,
+            random_state=42,
+        )
+
+        self.embedded_matrix = self.embedding_object.fit_transform(elem_matrix)
+
+    def embedding(self) -> np.array:
+        
+        outArray = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1], self.dimensions))
+
+        for idx in self.idx2coord:
+            (x,y) = self.idx2coord[idx]
+            outArray[x,y,:] = self.embedded_matrix[idx]
+        
+        return outArray
+
+
+
+
+class UMAP_DBSCAN_Clusterer(RegionClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.segmented = None
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        
+        elem_matrix, idx2ij = self.region.prepare_elem_matrix()
+        kmeans = cluster.KMeans(n_clusters=num_target_clusters, random_state=0).fit(elem_matrix)
+
+        if hasattr(kmeans, 'labels_'):
+            y_pred = kmeans.labels_.astype(int)
+        else:
+            y_pred = kmeans.predict(elem_matrix)
+
+        clusts = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1]))
+
+        for idx, ypred in enumerate(y_pred):
+            clusts[idx2ij[idx]] = y_pred[idx]
+
+        self.segmented = clusts
+
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        return self.segmented
+
+    def segmentation(self) -> np.array:
+        return self.segmented
+
 
 
 

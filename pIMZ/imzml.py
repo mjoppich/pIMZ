@@ -88,29 +88,40 @@ class IMZMLExtract:
 
         if self.specStart != 0:
             self.mzValues = self.mzValues[self.specStart:]
-            print("WARNING: SPECTRA STARTING AT POSITION", self.specStart)
+            self.logger.warning("WARNING: SPECTRA STARTING AT POSITION {}".format(self.specStart))
+
 
         self.find_regions()
 
-    def check_binned_mz(self):
-        """
-        Checks whether all spectra have same m/z values
+        self.check_binned_mz()
+        
+
+    def check_binned_mz(self, spectra_to_check=1000):
+        """ Checks whether all spectra have same m/z values
+
+
+        Args:
+            spectra_to_check (int, optional): Only checks the first spectra_to_check many spectra. Defaults to 1000.
 
         Returns:
             bool: True if all spectra have same m/z values
-
         """
 
         bar = makeProgressBar()
 
 
-        for coord in bar(self.coord2index):
+        for (ci, coord) in enumerate(bar(self.coord2index)):
             idx = self.coord2index[coord]
+            
+            if ci == spectra_to_check:
+                self.logger.info("Checked {} spectra. All have same m/z Values.".format(ci))
+                break
 
             if not np.array_equal(self.mzValues,self.parser.getspectrum(idx)[0]):
-                print("Unequal mzValues", idx, coord)
+                self.logger.error("Not all Spectra have same m/z recording. Please bin spectra! You may use `get_region_array_for_continuous_region` to extract region array.")
                 return False
 
+        self.logger.info("All have same m/z Values.")
         return True
 
 
@@ -127,7 +138,7 @@ class IMZMLExtract:
         return retDict
 
 
-    def get_spectrum(self, specid, normalize=False):
+    def get_spectrum(self, specid, normalize=False, withmz=False):
         """ Reads the spectrum at the specified index and can be normalized by dividing each intensity value by the maximum value observed.
 
         Args:
@@ -139,12 +150,18 @@ class IMZMLExtract:
         """
 
         spectra1 = self.parser.getspectrum(specid)
-        spectra1 = spectra1[1]
+        spectra = spectra1[1]
+        
 
         if normalize:
-            spectra1 = spectra1 / max(spectra1)
+            spectra = spectra / max(spectra)
+
+        if withmz:
+            mz = spectra1[0]
+
+            return spectra, mz
         
-        return spectra1
+        return spectra
 
     def compare_spectra(self, specid1, specid2):
         """Calculates cosine similarity between two desired spectra.
@@ -268,6 +285,8 @@ class IMZMLExtract:
         return outspectra
 
 
+
+
     def get_avg_region_spectrum(self, regionid):
         """Returns an average spectrum for spectra that belong to a given region.
 
@@ -328,7 +347,8 @@ class IMZMLExtract:
         maxz = max([x[2] for x in allpixels])
 
         spectraLength = 0
-        for coord in self.dregions[regionid]:
+        bar = makeProgressBar()
+        for coord in bar(self.dregions[regionid]):
 
             spectID = self.coord2index.get(coord, None)
 
@@ -1115,7 +1135,7 @@ class IMZMLExtract:
 
 
 
-    def interpolate_data(self, region, masses, resolution, method="akima"):
+    def interpolate_data(self, region, masses, resolution=0.1, method="akima"):
         """Interpolate all spectra within region to the specified resolution
 
         Args:
@@ -1125,7 +1145,7 @@ class IMZMLExtract:
         """
         assert(len(masses) == region.shape[2])
 
-        massesNew = [x for x in np.arange(min(masses), max(masses), 0.1)]
+        massesNew = [x for x in np.arange(min(masses), max(masses), resolution)]
 
 
         outarray = np.zeros((region.shape[0], region.shape[1], len(massesNew)))
@@ -1137,11 +1157,7 @@ class IMZMLExtract:
 
                 ijSpec = region[i,j]
 
-                if method == "akima":
-                    f = interpolate.Akima1DInterpolator(masses, ijSpec)
-                    specNew = f(massesNew)
-                else:
-                    raise Exception("Unknown interpolation method")
+                specNew = self.interpolate_spectrum(ijSpec, masses, massesNew, method=method)
 
                 outarray[i,j] = specNew
 
@@ -1150,12 +1166,27 @@ class IMZMLExtract:
 
         return outarray, massesNew
 
-    def call_peaks(self, region, masses, accepted_difference=1.0):
+    def interpolate_spectrum(self, spec, masses, masses_new, method="Pchip"):
 
-        assert(len(masses) == region.shape[2])
+        if method == "akima":
+            f = interpolate.Akima1DInterpolator(masses, spec)
+            specNew = f(masses_new)
+        elif method == "interp1d":
+            f = interpolate.interp1d(masses, spec)
+            specNew = f(masses_new)
+        elif method == "CubicSpline":
+            f = interpolate.CubicSpline(masses, spec)
+            specNew = f(masses_new)
+        elif method == "Pchip":
+            f = interpolate.PchipInterpolator(masses, spec)
+            specNew = f(masses_new)
+        elif method == "Barycentric":
+            f = interpolate.BarycentricInterpolator(masses, spec)
+            specNew = f(masses_new)
+        else:
+            raise Exception("Unknown interpolation method")
 
-        
-
+        return specNew
 
 
     def to_called_peaks(self, region, masses, resolution, reduce_peaks=False, picking_method="quadratic"):
@@ -1434,7 +1465,7 @@ class IMZMLExtract:
         coord2spec = self.get_region_spectra(regionid)
         bar = makeProgressBar()
 
-
+        paddedSpectra = 0
         for coord in bar(coord2spec):
             xpos = coord[0]-xr[0]
             ypos = coord[1]-yr[0]
@@ -1443,6 +1474,7 @@ class IMZMLExtract:
 
             if len(spectra) < sc:
                 spectra = np.pad(spectra, (0, sc-len(spectra)), mode='constant', constant_values=0)
+                paddedSpectra += 1
 
             spectra = np.array(spectra, copy=True)
 
@@ -1454,6 +1486,9 @@ class IMZMLExtract:
                 spectra = spectra - np.min(spectra)
 
             sarray[xpos, ypos, :] = spectra
+
+        self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
+
 
         return sarray
 
@@ -1642,70 +1677,99 @@ class IMZMLExtract:
         return outregions
 
 
-    def __detectRegions__old(self, allpixels):
-        """Returns a dictionary of region coordinates and creates a visualization of their location.
+
+
+
+    """
+
+    CONTINUOUS SPECTRA SUPPORT
+
+
+    """
+    def get_continuous_region_spectra(self, regionid):
+        """Returns a dictionary with the location of the region-specific pixels mapped to their spectra in the .imzML file, and a dict with mz values
 
         Args:
-            allpixels (numpy.array): Array of allpixels.
+            regionid (int): Id of the desired region in the .imzML file, as specified in dregions dictionary.
 
         Returns:
-            dict: region id to its coordinates
+            dict: Dictionary of spatial (x, y, 1) coordinates to each corresponding spectrum in the .imzML file.
         """
-        allregions = []
+        if not regionid in self.dregions:
+            return None
+        
+        outspectra = {}
+        outmzvalues = {}
 
         bar = makeProgressBar()
 
+        for coord in bar(self.dregions[regionid]):
 
-        for idx, pixel in enumerate(bar(allpixels)):
+            spectID = self.coord2index.get(coord)
 
-            if len(allregions) == 0:
-                allregions.append([pixel])
+            if spectID == None or spectID < 0:
+                print("Invalid coordinate", coord)
                 continue
 
-            if idx % 10000 == 0:
-                print("At pixel", idx , "of", len(allpixels), "with", len(allregions), "regions")
+            cspec, cspec_mz = self.get_spectrum( spectID, withmz=True )
+            cspec = cspec[self.specStart:]# / 1.0
+            cspec_mz = cspec_mz[self.specStart:]# / 1.0
+            outspectra[coord] = cspec
+            outmzvalues[coord] = cspec_mz
+
+        return outspectra, outmzvalues
 
 
-            accRegions = []
+    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima"):
 
-            for ridx, region in enumerate(allregions):
+        self.logger.info("Fetching region range")
+        xr,yr,zr,sc = self.get_region_range(regionid)
 
-                pixelAdded = False
-                for coord in region:
-                    if self.__dist(coord, pixel) <= 1:
-                        accRegions.append(ridx)
-                        pixelAdded = False
-                        break
+        self.logger.info("Fetching region spectra")
+        coord2spec, coord2mz = self.get_continuous_region_spectra(regionid)
+       
+        self.logger.info("Identifying mz-range")
 
-            if len(accRegions) == 0:
-                allregions.append([pixel])
+        discr_coord2spec = {}
 
-            elif len(accRegions) == 1:
+        mz_range = (np.inf, -np.inf)
+        bar = makeProgressBar()
+        for x in bar(coord2mz):
+            min_max = (min(coord2mz[x]), max(coord2mz[x]))
+            mz_range = (min([min_max[0], mz_range[0]]), max([min_max[1], mz_range[1]]))
 
-                for ridx in accRegions:
-                    allregions[ridx].append(pixel)
+        self.logger.info("Identified mz-range: {}".format(mz_range))
 
-            elif len(accRegions) > 1:
+        masses_new = [x for x in np.arange(mz_range[0], mz_range[1], resolution)]
 
-                bc = len(allregions)
+        rs = self.get_region_shape(regionid)
+        rs = (rs[0], rs[1], len(masses_new))
+        self.logger.info("Identified region {} as shape {}".format(regionid, rs))
+        sarray = np.zeros( rs, dtype=np.float32 )
 
-                totalRegion = [pixel]
-                for ridx in accRegions:
-                    totalRegion += allregions[ridx]
+        bar = makeProgressBar()
+        for coord in bar(coord2spec):
+            discr_spec = self.interpolate_spectrum(coord2spec[coord], coord2mz[coord], masses_new, method=method)
+            discr_coord2spec[coord] = discr_spec
 
-                for ridx in sorted(accRegions, reverse=True):
-                    del allregions[ridx]
+        paddedSpectra = 0
 
-                allregions.append(totalRegion)
+        bar = makeProgressBar()
+        for coord in bar(discr_coord2spec):
+            xpos = coord[0]-xr[0]
+            ypos = coord[1]-yr[0]
 
-                ac = len(allregions)
+            spectra = discr_coord2spec[coord]
 
-                assert(ac == bc + 1 - len(accRegions))
+            if len(spectra) < sc:
+                spectra = np.pad(spectra, (0, sc-len(spectra)), mode='constant', constant_values=0)
+                paddedSpectra += 1
 
-        outregions = {}
+            spectra = np.array(spectra, copy=True)
+            sarray[xpos, ypos, :] = spectra
 
-        for i in range(0, len(allregions)):
-            outregions[i] = [tuple(x) for x in allregions[i]]
+        self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
 
-        return outregions
+
+        return sarray, masses_new
 
