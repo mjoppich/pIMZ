@@ -564,7 +564,8 @@ class IMZMLExtract:
         return median_profile
 
 
-    def _fivenumber(self, valuelist):
+    @classmethod
+    def _fivenumber(cls, valuelist):
         """Creates five number statistics for values in valuelist.
 
         Args:
@@ -1045,20 +1046,21 @@ class IMZMLExtract:
         allZElems = sorted(allZElems, key=lambda x: x[2], reverse=True)
         quartile = np.quantile([x[1] for x in allZElems], [0.25])[0]
 
-        allZElems = [x for x in allZElems if x[1] > quartile]
+        allZElems_selected = [x for x in allZElems if x[1] > quartile]
 
         hvMasses = []
-        for idx, massMean, massDisp in allZElems:
+        for idx, massMean, massDisp in allZElems_selected:
             hvMasses.append(idx)
             if len(hvMasses) >= topn:
                 break
 
-        print("Returning {} highly-variable masses.".format(len(hvMasses)))
+        print("Returning {} highly-variable masses with z > {}".format(len(hvMasses), quartile))
+        print(cls._fivenumber([x[1] for x in allZElems]))
 
         return sorted(hvMasses)
 
 
-    def to_reduced_peaks(self, region, masses, topn=2000):
+    def to_reduced_peaks(self, region, topn=2000, bins=50, return_indices=False):
         """
 
         Args:
@@ -1070,7 +1072,7 @@ class IMZMLExtract:
 
         """
 
-        hvIndices = IMZMLExtract.detect_hv_masses(region, topn=topn, bins=50)
+        hvIndices = IMZMLExtract.detect_hv_masses(region, topn=topn, bins=bins)
 
         print("Identified", len(hvIndices), "HV indices")
 
@@ -1078,6 +1080,9 @@ class IMZMLExtract:
         retArray[:,:,:] = 0
 
         retArray[:,:,hvIndices] = region[:,:,hvIndices]
+
+        if return_indices:
+            return retArray, hvIndices
 
         return retArray
 
@@ -1151,20 +1156,23 @@ class IMZMLExtract:
 
         assert(len(masses) == region.shape[2])
 
-        minMZ = round(min(masses)/resolution)*resolution
-        maxMZ = round(max(masses)/resolution)*resolution
-        stepSize = resolution
-        requiredFields = int( (maxMZ-minMZ)/stepSize )
+        minMZ = math.floor(min(masses)/resolution)*resolution
+        maxMZ = math.ceil(max(masses)/resolution)*resolution
 
-        currentSteps = masses[-1]-masses[-2]
+        print("minMZ:", minMZ, min(masses))
+        print("maxMZ:", maxMZ, max(masses))
 
-        if stepSize < currentSteps:
-            print("WARNING: Selected steps ({}) are smaller than current step size ({})".format(stepSize, currentSteps))
+        requiredFields = int( (maxMZ-minMZ)/resolution )
 
-        startSteps = minMZ / stepSize
+        currentRes = masses[-1]-masses[-2]
 
-        outarray = np.zeros((region.shape[0], region.shape[1], requiredFields+1))
-        outmasses = np.array([minMZ + x*stepSize for x in range(0, requiredFields+1)])
+        if resolution < currentRes:
+            print("WARNING: Selected steps ({}) are smaller than current step size ({})".format(resolution, currentRes))
+
+        startSteps = round(minMZ / resolution)
+
+        outarray = np.zeros((region.shape[0], region.shape[1], requiredFields+1), dtype=np.float32)
+        outmasses = np.array([minMZ + x*resolution for x in range(0, requiredFields+1)])
 
         print(min(masses), max(masses))
         print(min(outmasses), max(outmasses))
@@ -1189,7 +1197,8 @@ class IMZMLExtract:
                 rpeak2peaks = defaultdict(list)
                 for peak in peak_list:
                     if peak.area > 0.0:
-                        rpeak2peaks[round(peak.mz*resolution)/resolution].append(peak)
+                        resampledPeakMZ = round(peak.mz/resolution)*resolution
+                        rpeak2peaks[resampledPeakMZ].append(peak)
 
 
                 rpeak2peak = {}
@@ -1205,10 +1214,10 @@ class IMZMLExtract:
                     #fpeak = ms_peak_picker.peak_set.FittedPeak(rmz, selPeak.intensity, selPeak.signal_to_noise, selPeak.peak_count, selPeak.index, selPeak.full_width_at_half_max, selPeak.area, left_width=0, right_width=0)
                     #fpeaklist.append(fpeak)              
                 #for peak in fpeaklist:
-                    idx = int((selPeak.mz / stepSize) - startSteps)
+                    idx = round(selPeak.mz / resolution) - startSteps
 
-                    if idx >= outarray.shape[2]:
-                        print(selPeak.mz)
+                    if idx >= outarray.shape[2] or idx < 0:
+                        print("invalid idx for mz", selPeak.mz, ":", idx)
 
                     peakIdx.add(idx)
                     outarray[i,j,idx] = selPeak.intensity

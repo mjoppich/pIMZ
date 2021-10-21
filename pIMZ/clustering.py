@@ -254,7 +254,28 @@ class PCAEmbedding(RegionEmbedding):
 
         return loadings
 
+    def explained_variance_ratio(self):
+        return self.embedding_object.explained_variance_ratio_
 
+    def plot_embedding(self):
+
+        dimExplained = self.embedding_object.explained_variance_ratio_
+
+        reductionName = "PCA"
+
+        plt.figure(figsize=(12, 12))
+
+
+        plt.scatter(self.embedded_matrix[:, 0], self.embedded_matrix[:, 1])
+
+        plt.xlabel("{} dim1 ({:.2})".format(reductionName, dimExplained[0]))
+        plt.ylabel("{} dim2 ({:.2})".format(reductionName, dimExplained[1]))
+
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.legend(bbox_to_anchor=(0, -0.2, 1, 0), loc="upper left", mode="expand", ncol=2)
+
+        plt.show()
+        plt.close()
 
 class UMAPEmbedding(RegionEmbedding):
 

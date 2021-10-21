@@ -12,6 +12,7 @@ import shutil, io, base64, abc
 from natsort import natsorted
 import pandas as pd
 import numpy as np
+from scipy.sparse import csr_matrix
 
 import regex as re
 import h5py
@@ -924,8 +925,8 @@ class SpectraRegion():
         c = spc.hierarchy.fcluster(Z, t=number_of_regions, criterion='maxclust')
         return c
 
-    def prepare_elem_matrix(self, dims=None):
-        self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+    def prepare_elem_matrix(self, sparse=False, dims=None):
+
 
         ndims = self.region_array.shape[2]
 
@@ -935,7 +936,16 @@ class SpectraRegion():
             else:
                 ndims = len(dims)
 
-        elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+        if not sparse:
+            self.dimred_elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+            elem_matrix = np.zeros((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+
+        else:
+            self.dimred_elem_matrix = csr_matrix((self.region_array.shape[0]*self.region_array.shape[1], self.region_array.shape[2]))
+            elem_matrix = csr_matrix((self.region_array.shape[0]*self.region_array.shape[1], ndims))
+
+
+
 
         print("Elem Matrix", elem_matrix.shape)
 
