@@ -45,7 +45,7 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from sklearn import cluster, decomposition
-#from fcmeans import FCM
+from fcmeans import FCM
 
 from .imzml import IMZMLExtract
 from .regions import SpectraRegion, RegionClusterer
@@ -348,7 +348,6 @@ class UMAP_DBSCAN_Clusterer(RegionClusterer):
 
 
 
-'''
 class FuzzyCMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -377,7 +376,6 @@ class FuzzyCMeansClusterer(RegionClusterer):
 
     def segmentation(self) -> np.array:
         return self.segmented
-'''
         
 class KMeansClusterer(RegionClusterer):
 
