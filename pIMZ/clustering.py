@@ -7,7 +7,7 @@ import math
 from collections import defaultdict, Counter
 import glob
 import shutil, io, base64
-from typing import OrderedDict
+from collections import OrderedDict
 
 # general package
 from natsort import natsorted
@@ -45,7 +45,7 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from sklearn import cluster, decomposition
-from fcmeans import FCM
+#from fcmeans import FCM
 
 from .imzml import IMZMLExtract
 from .regions import SpectraRegion, RegionClusterer
@@ -348,7 +348,7 @@ class UMAP_DBSCAN_Clusterer(RegionClusterer):
 
 
 
-
+'''
 class FuzzyCMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -377,7 +377,7 @@ class FuzzyCMeansClusterer(RegionClusterer):
 
     def segmentation(self) -> np.array:
         return self.segmented
-
+'''
         
 class KMeansClusterer(RegionClusterer):
 
@@ -409,6 +409,317 @@ class KMeansClusterer(RegionClusterer):
 
     def segmentation(self) -> np.array:
         return self.segmented
+
+class ModifiedKMeansClusterer(RegionClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.segmented = None
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, smoothing_iter: int = 2, verbose: bool = False, init_mode='random_centroids', distance='tibshirani'):
+        """[summary]
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            max_iterations (int, optional): Number of iterations of k-means algorithm. Defaults to 100.
+            smoothing_iter (int, optional): Number of iterations to smooth the clustering by assigning penalties. Defaults to 2.
+            verbose (bool, optional): Verbose output. Defaults to False.
+            init_mode (str, optional): Type of initialisation stategy. Defaults to 'random_centroids'.\n
+                - 'random': each pixel is randomly assigned to a cluster ID, centroids are computed as average of the spectra that belong to the correspondingly cluster ID\n
+                - 'random_centroids': each pixel is randomly assigned to a cluster ID, each centroid is a randomly chosen spectrum that belong to the corresponding cluster ID\n
+            distance (str, optional): Method to compute distance between spectra. Defaults to 'tibshirani'.\n
+                - 'tibshirani': \n
+                - 'squared': \n
+                - 'sa': distance for spatially-aware clustering\n
+                - 'sasa': distance for spatially-aware structurally-adaptive clustering\n
+        """
+        assert(init_mode in ['random', 'random_centroids'])
+        assert(distance in ['tibshirani', 'squared', 'sa', 'sasa'])
+
+        elem_matrix, _ = self.region.prepare_elem_matrix()
+        init_centroids, centroids2ids = self._kmeans_init_centroids(elem_matrix=elem_matrix, num_target_clusters=num_target_clusters, mode=init_mode)
+        centroids, idx, centroids2ids = self._run_kmeans(elem_matrix=elem_matrix, init_centroids=init_centroids, centroids2ids=centroids2ids, max_iter=max_iterations, smoothing_iter=smoothing_iter, distance=distance)
+
+
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        return self.segmented
+
+    def segmentation(self) -> np.array:
+        return self.segmented
+
+    def _kmeans_init_centroids(self, elem_matrix, num_target_clusters, mode='random_centroids'):
+        if mode=="random":
+            random_clustering = np.random.randint(num_target_clusters, size=(elem_matrix.shape[0]))
+            return self._compute_centroids(elem_matrix, random_clustering, num_target_clusters)
+
+        elif mode=="random_centroids":
+            # store centroids in Kxn
+            centroids = dict()
+            centroids2ids = dict()
+            random_clustering = np.random.randint(num_target_clusters, size=(elem_matrix.shape[0]))
+
+            for i in range(num_target_clusters):
+                elems = np.argwhere(random_clustering == i)
+                elems = list([e[0] for e in elems])
+                centroids2ids[i] = elems
+                centroids[i] = elem_matrix[elems[np.random.randint(len(elems), size=1)[0]]].reshape(elem_matrix.shape[1])
+                self._update_segmented(elem_matrix, centroids2ids)
+            return centroids, centroids2ids 
+
+    def _compute_centroids(self, elem_matrix, idx, num_target_clusters):
+        m = elem_matrix.shape[0]
+        n = elem_matrix.shape[1]
+        
+        centroids = dict()
+        centroids2ids = dict()
+        
+        # recalculate each cluster
+        for i in range(num_target_clusters):
+            centroids[i] = np.zeros((n))
+            ids = list()
+            
+            num_examples = sum(idx == i) # samples per cluster
+            old = centroids[i]
+                
+            # divide by num_examples to get mean for that centroid
+            if num_examples == 0:
+                centroids[i] = old
+            else:
+                # add up all samples in the centroid
+                for j in range(m):
+                    if idx[j] == i:
+                        ids.append(j)
+                        centroids[i] = centroids[i] + elem_matrix[j, :]
+                centroids[i] = centroids[i] / num_examples
+            centroids2ids[i] = ids
+        self._update_segmented(elem_matrix, centroids2ids)
+        return centroids, centroids2ids
+
+    def _update_segmented(self, elem_matrix, centroids2ids):
+        original = self.region.region_array
+        segmented = np.zeros((elem_matrix.shape[0],))
+        for i in centroids2ids.keys():
+            segmented[centroids2ids[i]] = i
+        self.segmented = segmented.reshape(original.shape[0], original.shape[1])
+
+    def _run_kmeans(self, elem_matrix, init_centroids, centroids2ids, max_iter, smoothing_iter, distance):
+        # initialize values
+        m = elem_matrix.shape[0]
+        K = len(init_centroids)
+        centroids = init_centroids
+        idx = np.zeros((m,1)).reshape(-1,1)
+        bar = makeProgressBar()
+
+        # run k-means for specified iterations
+        for i in bar(range(max_iter)):
+            idx = self._find_closest_centroid(elem_matrix, centroids, centroids2ids, distance=distance) # get closest centroid for each pixel
+            """
+            This is the modification to allow for pseudo-normalized cuts:
+            
+            - check surrounding assignments
+            - if diff, assign penalty
+            - change assignment if penalty high enough
+            """
+            if i == (max_iter - 1):
+                idx = self._modify_idx(idx, smoothing_iter)
+            centroids, centroids2ids = self._compute_centroids(elem_matrix, idx, K) # calculate new centroids
+            
+        return centroids, idx, centroids2ids
+
+    def _find_closest_centroid(self, elem_matrix, curr_centroids, centroids2ids, distance):
+        m = len(elem_matrix)
+        K = len(curr_centroids.keys())
+        idx = np.zeros((m,1)).reshape(-1,1)
+        n = elem_matrix.shape[0]
+
+        if distance=='tibshirani':
+            #scc = ShrunkenCentroidClusterer(self.region)
+
+            #global sSumSq Tibshirani
+            s_list = self._get_all_s_vec(elem_matrix=elem_matrix, centroids=curr_centroids, centroids2ids=centroids2ids)
+            s_0 = np.median(s_list)
+            sSum = s_list+s_0
+            sSumSq = np.multiply(sSum, sSum)
+
+            # go over each sample, find the closest centroid
+            for i in range(m):
+                dists = np.zeros((K,2)) # store squared distances
+                dists[:, 1] = [j for j in range(1,K+1)] # assign K values
+
+                for j in range(K):
+                    
+                    centroidProbability = len(centroids2ids[j])/n
+                    if centroidProbability==0:
+                        print('smth wrong')
+                        centroidProbability = 0.01
+                    
+                    specDiff = elem_matrix[i, :] - curr_centroids[j]
+                    sigma = np.divide(np.multiply(specDiff, specDiff), sSumSq)
+                    sigma = np.nan_to_num(sigma, copy=True, nan=0.0, posinf=0.0, neginf=0.0)
+
+                    sigma = np.sum(sigma)
+                    sigma = sigma - 2*math.log(centroidProbability)
+                    dists[j, 0] = sigma
+                    
+                    #dists[j, 0] = scc._distance_tibschirani(matrix=elem_matrix, pxCoord=i,centroid=curr_centroids[j], sqSStats=sSumSq, centroidProbability=centroidProbability)
+                # find closest centroid for each example
+                # add centroid index to idx
+                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                idx[i] = centroid_idx[0][0]
+
+
+        elif distance=='squared':
+            for i in range(m):
+                dists = np.zeros((K,2)) 
+                dists[:, 1] = [j for j in range(1,K+1)]
+                
+                for j in range(K):
+                    dists[j, 0] = np.sum((elem_matrix[i, :] - curr_centroids[j])**2, axis=0)
+
+                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                idx[i] = centroid_idx[0][0]
+
+        elif distance=='sa':
+            for i in range(m):
+                coord_x = i % self.region.region_array.shape[0]
+                coord_y = i // self.region.region_array.shape[0]
+
+                dists = np.zeros((K,2))
+                dists[:, 1] = [j for j in range(1,K+1)]
+                
+                for j in range(K):
+                    dists[j, 0] =  SARegionClusterer._distance_sa(None, matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=None, centroidProbability=None)
+                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                idx[i] = centroid_idx[0][0]
+
+
+        elif distance=='sasa':
+            s_list = self._get_all_s_vec(elem_matrix=elem_matrix, centroids=curr_centroids, centroids2ids=centroids2ids)
+            s_0 = np.median(s_list)
+            sSum = s_list+s_0
+            sSumSq = np.multiply(sSum, sSum)
+
+            for i in range(m):
+                coord_x = i % self.region.region_array.shape[0]
+                coord_y = i // self.region.region_array.shape[0]
+
+                dists = np.zeros((K,2))
+                dists[:, 1] = [j for j in range(1,K+1)] 
+                
+                for j in range(K):
+                    centroidProbability = len(centroids2ids[j])/n
+                    if centroidProbability==0:
+                        centroidProbability = 0.01
+                    dists[j, 0] =  SASARegionClusterer._distance_sasa(SASARegionClusterer(self.region), matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=sSumSq, centroidProbability=centroidProbability)
+                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                idx[i] = centroid_idx[0][0]
+                
+        return idx
+
+    def _get_all_s_vec(self, elem_matrix, centroids, centroids2ids, verbose=False):
+        n = elem_matrix.shape[0]
+        K = len(centroids2ids.keys())
+        seenCoords = 0
+
+        curS = np.zeros((elem_matrix.shape[1],))
+
+        for k in centroids2ids:
+            seg_centroid = centroids[k]
+            coordinates = centroids2ids[k]
+            for coord in coordinates:
+                seenCoords += 1
+                curS += np.multiply(elem_matrix[coord, :]-seg_centroid, elem_matrix[coord, :]-seg_centroid)
+
+        curS = (1.0/(n-K)) * curS
+        curS = np.sqrt(curS)
+
+        if verbose:
+            print(seenCoords, "of",n )
+
+        return curS
+
+    def _modify_idx(self, old_idx, smoothing_iter):
+    
+        idx = old_idx.reshape(self.region.region_array.shape[0], self.region.region_array.shape[1])  # reshape to 2D
+        
+        neighbor_idx = [(-1, -1), # top left
+                            (-1, 0), # top
+                            (-1, 1), # top right
+                            (0, -1), # left
+                            (0, 1), # right
+                            (1, -1), # bottom left
+                            (1, 0), # bottom
+                            (1, 1), # bottom right
+                        
+                            (-2, -2), # begin second layer
+                            (-2, -1),
+                            (-2, 0),
+                            (-2, 1),
+                            (-2, 2),
+                            (-1, -2),
+                            (-1, 2),
+                            (0, -2),
+                            (0, 2),
+                            (1, -2),
+                            (1, 2),
+                            (2, -2),
+                            (2, -1),
+                            (2, 0),
+                            (2, 1),
+                            (2, 2)
+                            ]
+        
+        for m in range(smoothing_iter): # smoothing iterations
+        
+            # grab each pixel and compare to neighbors
+            for i in range(len(idx)):
+                for j in range(idx.shape[1]):
+                    curr_pix = idx[i, j]
+
+                    # get neighbors
+                    immediate_neighbors = []
+                    secondary_neighbors = []
+                    for k in range(len(neighbor_idx)):
+
+                        # inner layer
+                        if k < 8:
+                            try:
+                                immediate_neighbors.append(idx[i + neighbor_idx[k][0], j + neighbor_idx[k][1]])
+
+                            except:
+                                pass
+
+                        # outer neighbors
+                        else:
+                            try:
+                                secondary_neighbors.append(idx[i + neighbor_idx[k][0], j + neighbor_idx[k][1]])
+
+                            except:
+                                pass
+
+
+                    # penalty criteria
+                    penalty = 0
+                    top_color_immediate = max(set(immediate_neighbors), key=immediate_neighbors.count) # top color in immediate neighbors
+                    top_color_secondary = max(set(secondary_neighbors), key=secondary_neighbors.count) # top color in outer neighbors
+
+                    if top_color_immediate != curr_pix and immediate_neighbors.count(top_color_immediate) > 4:
+                        penalty += 1
+
+                    elif top_color_immediate != curr_pix and immediate_neighbors.count(top_color_immediate) <= 4:
+                        penalty += 0.5
+
+                        if top_color_secondary != curr_pix and secondary_neighbors.count(top_color_secondary) > 8:
+                            penalty += 0.5
+
+                    if penalty == 1:
+                        idx[i, j] = top_color_immediate # reassign index color
+
+        idx = idx.reshape(old_idx.shape[0], old_idx.shape[1])
+        return idx
+
 
 class ShrunkenCentroidClusterer(RegionClusterer):
 
