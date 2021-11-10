@@ -3693,12 +3693,13 @@ class ProteinWeights():
             self.logger.info("Proteins/genes with collision: {}".format(protsWithCollision.most_common(10)))
         
 
-    def get_protein_from_mass(self, mass, maxdist=2):
+    def get_protein_from_mass(self, mass, maxdist=2, ppm=None):
         """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
 
         Args:
             mass (float): mass to search for
             maxdist (float, optional): allowed offset for lookup. Defaults to 2.
+            ppm (float, optional): allowed relative offset for lookup. Defaults to 2.
 
         Returns:
             list: sorted list (by abs mass difference) of all (protein, weight) tuple which have a protein in the given mass range
@@ -3710,14 +3711,41 @@ class ProteinWeights():
             protMasses = self.protein2mass[protein]
 
             for protMass in protMasses:
-                if abs(mass-protMass) < maxdist:
-                    protDist = abs(mass-protMass)
-                    possibleMatches.append((protein, protMass, protDist))
+
+                if not maxdist is None:
+                    if abs(mass-protMass) < maxdist:
+                        protDist = abs(mass-protMass)
+                        possibleMatches.append((protein, protMass, protDist))
+                elif not ppm is None:
+                    
+                    ppmDist = mass * ppm / 1000000
+                    if abs(mass-protMass) < ppmDist:
+                        protDist = abs(mass-protMass)
+                        possibleMatches.append((protein, protMass, protDist))
+
+                else:
+                    raise ValueError()
 
         possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
         possibleMatches = [(x[0], x[1]) for x in possibleMatches]
 
         return possibleMatches
+
+    def get_protein_from_mz(self, mzval, maxdist=None, ppm=None, mzoffset=1):
+        """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
+
+        Args:
+            mass (float): mass to search for
+            maxdist (float, optional): allowed offset for lookup. Defaults to 2.
+            ppm (float, optional): allowed relative offset for lookup. Defaults to 2.
+            mzoffset (float): m/z to mass offset; m/z-mzoffset = mass
+
+        Returns:
+            list: sorted list (by abs mass difference) of all (protein, weight) tuple which have a protein in the given mass range
+        """
+
+        return self.get_protein_from_mass( mzval-mzoffset, maxdist=maxdist, ppm=ppm )
+
 
     def get_masses_for_protein(self, protein):
         """Returns all recorded masses for a given protein. Return None if protein not found

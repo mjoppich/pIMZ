@@ -479,7 +479,7 @@ class IMZMLExtract:
             return retSpectrum
 
         elif normalize in ["tic"]:
-            specSum = sum(retSpectrum)
+            specSum = np.sum(retSpectrum)
             if specSum > 0:
                 retSpectrum = (retSpectrum / specSum) * len(retSpectrum)
             return retSpectrum
@@ -793,10 +793,7 @@ class IMZMLExtract:
         bar = makeProgressBar()
         for i in bar(range(0, region_dims[0])):
             for j in range(0, region_dims[1]):
-
-                spectrum = outarray[i, j, :]
-                spectrum = self.normalize_spectrum(spectrum, normalize=normalize, max_region_value=maxInt)
-                outarray[i, j, :] = spectrum
+                outarray[i, j, :] = self.normalize_spectrum(outarray[i, j, :], normalize=normalize, max_region_value=maxInt)
 
         return outarray
 
@@ -810,9 +807,7 @@ class IMZMLExtract:
         peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
-                spectrum = region_array[i, j, :]
-                peakplot[i,j] = sum(spectrum)
+                peakplot[i,j] = np.sum(region_array[i, j, :])
 
         heatmap = plt.matshow(peakplot)
         plt.title("TIC (total summed intensity per pixel)", y=1.08)
@@ -830,9 +825,7 @@ class IMZMLExtract:
         peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
         for i in range(0, region_dims[0]):
             for j in range(0, region_dims[1]):
-
-                spectrum = region_array[i, j, :]
-                peakplot[i,j] = np.linalg.norm(spectrum)
+                peakplot[i,j] = np.linalg.norm(region_array[i, j, :])
 
         heatmap = plt.matshow(peakplot)
         plt.title("TNC (total normed intensity per pixel)", y=1.08)
@@ -1188,21 +1181,25 @@ class IMZMLExtract:
         for i in bar(range(0, region.shape[0])):
             for j in range(0, region.shape[1]):
 
-                pixel = (i,j)
-                intensity_array, mz_array = region[i,j,:], masses
+                if np.sum(region[i,j,:]) == 0:
+                    continue
 
-                peak_list = ms_peak_picker.pick_peaks(mz_array, intensity_array, fit_type=picking_method)
+                peak_list = ms_peak_picker.pick_peaks(region[i,j,:], masses, fit_type=picking_method)
                 #retlist.append(peak_list)
+                allPeaksMZ = set([x.mz for x in peak_list])
+                #print((i,j), min(allPeaksMZ), max(allPeaksMZ))
 
                 rpeak2peaks = defaultdict(list)
                 for peak in peak_list:
+                    if peak.mz < minMZ or peak.mz > maxMZ:
+                        continue
+
                     if peak.area > 0.0:
                         resampledPeakMZ = round(peak.mz/resolution)*resolution
                         rpeak2peaks[resampledPeakMZ].append(peak)
 
 
                 rpeak2peak = {}
-                fpeaklist = []
 
                 for rmz in rpeak2peaks:
                     if len(rpeak2peaks[rmz]) > 1:
@@ -1211,13 +1208,13 @@ class IMZMLExtract:
                         rpeak2peak[rmz] = rpeak2peaks[rmz][0]
 
                     selPeak = rpeak2peak[rmz]
-                    #fpeak = ms_peak_picker.peak_set.FittedPeak(rmz, selPeak.intensity, selPeak.signal_to_noise, selPeak.peak_count, selPeak.index, selPeak.full_width_at_half_max, selPeak.area, left_width=0, right_width=0)
-                    #fpeaklist.append(fpeak)              
-                #for peak in fpeaklist:
+
                     idx = round(selPeak.mz / resolution) - startSteps
 
                     if idx >= outarray.shape[2] or idx < 0:
-                        print("invalid idx for mz", selPeak.mz, ":", idx)
+                        print("invalid idx for mz", selPeak.mz, "(",rmz,")", ":", idx, "with startsteps", startSteps)
+                        print(min(masses), max(masses))
+                        return None
 
                     peakIdx.add(idx)
                     outarray[i,j,idx] = selPeak.intensity
@@ -1233,6 +1230,104 @@ class IMZMLExtract:
 
         print("Returning Peaks")
         return outarray, outmasses
+
+
+    def to_peaks(self, region, masses, resolution=None, min_peak_prominence=0.5, min_peak_width=0.5, background_quantile=0.5):
+        """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
+
+        Args:
+            region (numpy.array): region/array of spectra
+            masses (numpy.array): m/z values for region
+            resolution (int): Resolution to return
+            reduce_peaks (bool): if true, return only outarray of useful peaks
+        Returns:
+            numpy.array, numpy.array: new array of spectra, corresponding masses
+        """
+
+        assert(len(masses) == region.shape[2])
+
+        if resolution is None:
+            resolution = masses[1]-masses[0]
+
+        minMZ = math.floor(min(masses)/resolution)*resolution
+        maxMZ = math.ceil(max(masses)/resolution)*resolution
+
+        print("resolution:", resolution)
+        print("minMZ:", minMZ, min(masses))
+        print("maxMZ:", maxMZ, max(masses))
+
+        requiredFields = int( (maxMZ-minMZ)/resolution )
+
+        currentRes = masses[-1]-masses[-2]
+
+        if resolution < currentRes:
+            print("WARNING: Selected steps ({}) are smaller than current step size ({})".format(resolution, currentRes))
+
+        startSteps = round(minMZ / resolution)
+
+        outarray = np.zeros((region.shape[0], region.shape[1], requiredFields+1), dtype=np.float32)
+        outmasses = np.array([minMZ + x*resolution for x in range(0, requiredFields+1)])
+
+        print(min(masses), max(masses))
+        print(min(outmasses), max(outmasses))
+
+        print(outarray.shape)
+        print(outmasses.shape)
+
+        bar = makeProgressBar()
+        
+        
+        peakIdx = set()
+
+        quantile_height = np.quantile(region, [background_quantile])[0]
+        print("background intensity:", quantile_height, np.min(region), np.max(region))
+
+
+        for i in bar(range(0, region.shape[0])):
+            for j in range(0, region.shape[1]):
+
+                if np.sum(region[i,j,:]) == 0:
+                    continue
+
+                peaks, properties = signal.find_peaks(region[i,j,:], width=min_peak_width, prominence=min_peak_prominence, rel_height=0.5, height=quantile_height)
+
+                rpeak2peaks = defaultdict(list)
+                for p in range(0, len(peaks)):
+                    
+                    peak_mz = masses[peaks[p]]
+                    peak_intensity = region[i,j,peaks[p]]                  
+                    peak_half_width = properties["width_heights"][p]
+
+                    resampledPeakMZ = round(peak_mz/resolution)*resolution
+                    rpeak2peaks[resampledPeakMZ].append({"mz": resampledPeakMZ, "intensity": peak_intensity})
+
+
+                rpeak2peak = {}
+
+                for rmz in rpeak2peaks:
+                    if len(rpeak2peaks[rmz]) > 1:
+                        rpeak2peak[rmz] = sorted(rpeak2peaks[rmz], key=lambda x: x["intensity"], reverse=True)[0]
+                    else:
+                        rpeak2peak[rmz] = rpeak2peaks[rmz][0]
+
+                    selPeak = rpeak2peak[rmz]
+
+                    idx = round(selPeak["mz"]/ resolution) - startSteps
+
+                    if idx >= outarray.shape[2] or idx < 0:
+                        print("invalid idx for mz", selPeak, "(",rmz,")", ":", idx, "with startsteps", startSteps)
+                        print(min(masses), max(masses))
+                        return None
+
+                    peakIdx.add(idx)
+                    outarray[i,j,idx] = selPeak["intensity"]
+
+        print("Identified peaks for", len(peakIdx), "of", outarray.shape[2], "fields")
+
+        print("Returning Peaks")
+        return outarray, outmasses
+
+
 
 
 
@@ -1677,7 +1772,7 @@ class IMZMLExtract:
         return outspectra, outmzvalues
 
 
-    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima"):
+    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None):
 
         self.logger.info("Fetching region range")
         xr,yr,zr,sc = self.get_region_range(regionid)
@@ -1689,40 +1784,45 @@ class IMZMLExtract:
 
         discr_coord2spec = {}
 
-        mz_range = (np.inf, -np.inf)
-        bar = makeProgressBar()
-        for x in bar(coord2mz):
-            min_max = (min(coord2mz[x]), max(coord2mz[x]))
-            mz_range = (min([min_max[0], mz_range[0]]), max([min_max[1], mz_range[1]]))
+        if new_masses is None:
+            mz_range = (np.inf, -np.inf)
+            bar = makeProgressBar()
+            for x in bar(coord2mz):
+                min_max = (min(coord2mz[x]), max(coord2mz[x]))
+                mz_range = (min([min_max[0], mz_range[0]]), max([min_max[1], mz_range[1]]))
 
-        self.logger.info("Identified mz-range: {}".format(mz_range))
-
-        masses_new = [x for x in np.arange(mz_range[0], mz_range[1], resolution)]
-
+            self.logger.info("Identified mz-range: {}".format(mz_range))
+            masses_new = [x for x in np.arange(mz_range[0], mz_range[1], resolution)]
+        else:
+            mz_range = (np.min(new_masses), np.max(new_masses))
+            self.logger.info("Identified mz-range: {}".format(mz_range))
+            masses_new = new_masses
+        
+        
         rs = self.get_region_shape(regionid)
         rs = (rs[0], rs[1], len(masses_new))
         self.logger.info("Identified region {} as shape {}".format(regionid, rs))
         sarray = np.zeros( rs, dtype=np.float32 )
 
+        self.logger.info("Creating spectra")
+
         bar = makeProgressBar()
         for coord in bar(coord2spec):
             discr_spec = self.interpolate_spectrum(coord2spec[coord], coord2mz[coord], masses_new, method=method)
+            assert(len(discr_spec) == rs[2])
             discr_coord2spec[coord] = discr_spec
 
         paddedSpectra = 0
+
+        self.logger.info("Forming region array from spectra")
+
 
         bar = makeProgressBar()
         for coord in bar(discr_coord2spec):
             xpos = coord[0]-xr[0]
             ypos = coord[1]-yr[0]
 
-            spectra = discr_coord2spec[coord]
-
-            if len(spectra) < sc:
-                spectra = np.pad(spectra, (0, sc-len(spectra)), mode='constant', constant_values=0)
-                paddedSpectra += 1
-
-            spectra = np.array(spectra, copy=True)
+            spectra = np.array(discr_coord2spec[coord], copy=True)
             sarray[xpos, ypos, :] = spectra
 
         self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
