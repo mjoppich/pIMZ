@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 # general package
 from natsort import natsorted
+from numpy.lib.recfunctions import _repack_fields_dispatcher
 import pandas as pd
 import numpy as np
 import regex as re
@@ -45,7 +46,7 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from sklearn import cluster, decomposition
-from fcmeans import FCM
+#from fcmeans import FCM
 
 from .imzml import IMZMLExtract
 from .regions import SpectraRegion, RegionClusterer
@@ -257,7 +258,7 @@ class PCAEmbedding(RegionEmbedding):
     def explained_variance_ratio(self):
         return self.embedding_object.explained_variance_ratio_
 
-    def plot_embedding(self, colors=None):
+    def plot_embedding(self):
 
         dimExplained = self.embedding_object.explained_variance_ratio_
 
@@ -265,28 +266,8 @@ class PCAEmbedding(RegionEmbedding):
 
         plt.figure(figsize=(12, 12))
 
-        dotlabels = None
-        labels=None
 
-        if not colors is None:
-            dotlabels = [0] * self.embedded_matrix.shape[0]
-
-            cmap = matplotlib.cm.get_cmap('viridis')
-            norm = matplotlib.colors.Normalize(vmin=np.min(colors), vmax=np.max(colors))
-
-            for idx in self.idx2coord:
-                (x,y) = self.idx2coord[idx]
-                dotlabels[idx] = colors[x,y]
-
-            dotlabels = np.array(dotlabels)
-
-            for g in np.unique(dotlabels):
-                grpIndices = np.where(dotlabels == g)
-                labelColor = cmap(norm(g))
-                plt.scatter(self.embedded_matrix[grpIndices, 0], self.embedded_matrix[grpIndices, 1], color=labelColor, label=g, s=10, cmap='viridis')
-                
-        else:
-            scatter=plt.scatter(self.embedded_matrix[:, 0], self.embedded_matrix[:, 1], s=10, cmap='viridis')
+        plt.scatter(self.embedded_matrix[:, 0], self.embedded_matrix[:, 1])
 
         plt.xlabel("{} dim1 ({:.2})".format(reductionName, dimExplained[0]))
         plt.ylabel("{} dim2 ({:.2})".format(reductionName, dimExplained[1]))
@@ -333,41 +314,238 @@ class UMAPEmbedding(RegionEmbedding):
         return outArray
 
 
+class UMAP_WARD_Clusterer(RegionClusterer):
 
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+        self.umapEmbedding = UMAPEmbedding(region=region, dimensions=2)
+        self.pwdist = None
+        self.dimred_labels = None
+        self.segmented = None
+
+    def fit(self, num_target_clusters: int, densmap: bool = False, n_neighbours: int = 10, min_dist: float = 0, verbose: bool = False):
+        """Performs UMAP dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False. To use densMAP please use UMAP_WARD_Clusterer instead.
+            n_neighbours (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_dist (float, optional): The min_dist parameter controls how tightly UMAP is allowed to pack points together. For more information check UMAP documentation. Defaults to 0.
+            verbose (bool, optional): Defaults to False.
+        """
+        self.umapEmbedding.fit_transform(verbose=verbose, densmap=densmap, n_neighbours=n_neighbours, min_dist=min_dist)
+        dimred_elem_matrix = self.umapEmbedding.embedded_matrix
+
+        self.pwdist = pdist(dimred_elem_matrix, metric='euclidean')
+
+        _ = self.transform(num_target_clusters=num_target_clusters)
+
+
+    def _update_segmented(self):
+
+        image = np.zeros(self.region.region_array.shape, dtype=np.int16)
+        image = image[:,:,0]
+
+        # cluster 0 has special meaning: not assigned !
+        assert(not 0 in [self.dimred_labels[x] for x in self.dimred_labels])
+
+        for i in range(0, image.shape[0]):
+            for j in range(0, image.shape[1]):
+                image[i,j] = self.dimred_labels[self.region.pixel2idx[(i,j)]]
+
+        self.segmented = image
+
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        """Allows to redo the WARD's clustering using the reduced data during fit operation.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            np.array: Segmented array.
+        """
+        Z = spc.hierarchy.ward(self.pwdist)
+        self.dimred_labels = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+        self._update_segmented()
+        return self.segmented
+
+    def segmentation(self) -> np.array:
+        return self.segmented
+
+class DENSMAP_WARD_Clusterer(UMAP_WARD_Clusterer):
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, n_neighbours: int = 10, min_dist: float = 0, verbose: bool = True):
+        """Uses densMAP (density-preserving visualization tool based on UMAP) dimension reduction on region array followed by Euclidean pairwise distance calculation in order to do Ward's linkage.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            n_neighbours (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_dist (float, optional): The min_dist parameter controls how tightly UMAP is allowed to pack points together. For more information check UMAP documentation. Defaults to 0.
+            verbose (bool, optional): Defaults to False.
+        """
+        return super().fit(num_target_clusters=num_target_clusters, densmap=True, n_neighbours=n_neighbours, min_dist=min_dist, verbose=verbose)
+
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        """Allows to redo the WARD's clustering using the reduced data during fit operation.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            np.array: Segmented array.
+        """
+        return super().transform(num_target_clusters, verbose)
+
+    def segmentation(self) -> np.array:
+        return super().segmentation()
 
 class UMAP_DBSCAN_Clusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.umapEmbedding = UMAPEmbedding(region=region, dimensions=2)
+        self.dimred_labels = None
+        self.dimred_elem_matrix = None
         self.segmented = None
 
-    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
-        
-        elem_matrix, idx2ij = self.region.prepare_elem_matrix()
-        kmeans = cluster.KMeans(n_clusters=num_target_clusters, random_state=0).fit(elem_matrix)
+    def fit(self, num_target_clusters: int, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0, min_cluster_size: int=15, num_samples: int=10000) -> np.array:
+        """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
 
-        if hasattr(kmeans, 'labels_'):
-            y_pred = kmeans.labels_.astype(int)
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            verbose (bool, optional): Defaults to False.
+            densmap (bool, optional): Whether to use densMAP (density-preserving visualization tool based on UMAP). Defaults to False. If you want to apply densMAP please use DENSMAP_DBSCAN_Clusterer instead.
+            n_neighbours (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_dist (float, optional): The min_dist parameter controls how tightly UMAP is allowed to pack points together. For more information check UMAP documentation. Defaults to 0.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 15.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+        """
+        self.umapEmbedding.fit_transform(verbose=verbose, densmap=densmap, n_neighbours=n_neighbours, min_dist=min_dist)
+        self.dimred_elem_matrix = self.umapEmbedding.embedded_matrix
+
+        _ = self.transform(num_target_clusters=num_target_clusters, min_cluster_size=min_cluster_size, num_samples=num_samples)
+
+    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> np.array:
+        """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) on the previously reduced data.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 15.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            np.array: Segmented array.
+        """
+        self.logger.info("HDBSCAN reduction")
+        if num_samples > self.dimred_elem_matrix.shape[0]:
+            num_samples = self.dimred_elem_matrix.shape[0]
+            self.logger.info("HDBSCAN reduction num_samples reset: {}".format(num_samples))
+
+        if num_samples == -1 or self.dimred_elem_matrix.shape[0] < num_samples:
+            selIndices = [x for x in range(0, self.dimred_elem_matrix.shape[0])]
         else:
-            y_pred = kmeans.predict(elem_matrix)
+            selIndices = random.sample([x for x in range(0, self.dimred_elem_matrix.shape[0])], num_samples)
 
-        clusts = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1]))
+        dr_matrix = self.dimred_elem_matrix[selIndices, :]
 
-        for idx, ypred in enumerate(y_pred):
-            clusts[idx2ij[idx]] = y_pred[idx]
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, prediction_data=True).fit(dr_matrix)
+        clusterer.generate_prediction_data()
+        soft_clusters = hdbscan.prediction.membership_vector(clusterer, self.dimred_elem_matrix)
 
-        self.segmented = clusts
+        self.dimred_labels = np.array([np.argmax(x) for x in soft_clusters])+1 # +1 avoids 0
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        if len(np.unique(self.dimred_labels)) > num_target_clusters:
+            self.segmented = np.reshape(self.dimred_labels, (self.region.region_array.shape[0], self.region.region_array.shape[1]))
+
+            self._reduce_clusters(num_target_clusters)
+            self.dimred_labels = np.reshape(self.segmented, (self.region.region_array.shape[0] * self.region.region_array.shape[1],))
+
+        self.dimred_labels = list(self.dimred_labels)
+
+        self._update_segmented()
         return self.segmented
+
+    def _reduce_clusters(self, number_of_clusters):
+        """Reducing the number of clusters in segmented array by "reclustering" after the Ward's clustering on pairwise similarity matrix between consensus spectra.
+
+        Args:
+            number_of_clusters (int): Number of desired clusters.
+        """
+        self.logger.info("Cluster Reduction")
+
+        self.region.segmented = self.segmented
+        _ = self.region.consensus_spectra()
+        self.region.consensus_similarity()
+
+        Z = spc.hierarchy.ward(self.region.consensus_similarity_matrix)
+        c = spc.hierarchy.fcluster(Z, t=number_of_clusters, criterion='maxclust')
+
+        dimred_labels = np.reshape(self.segmented, (self.region.region_array.shape[0] * self.region.region_array.shape[1],))
+        origlabels = np.array(dimred_labels, copy=True)
+
+        for cidx, cval in enumerate(c):
+            dimred_labels[origlabels == (cidx+1)] = cval
+
+        self.segmented = np.reshape(dimred_labels, (self.region.region_array.shape[0], self.region.region_array.shape[1]))
+
+    def _update_segmented(self):
+        image= np.zeros(self.region.region_array.shape, dtype=np.int16)
+        image = image[:,:,0]
+
+        # cluster 0 has special meaning: not assigned !
+        assert(not 0 in [self.dimred_labels[x] for x in self.dimred_labels])
+
+        for i in range(0, image.shape[0]):
+            for j in range(0, image.shape[1]):
+                image[i,j] = self.dimred_labels[self.region.pixel2idx[(i,j)]]
+
+        self.segmented = image
 
     def segmentation(self) -> np.array:
         return self.segmented
 
+class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
 
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
 
+    def fit(self, num_target_clusters: int, verbose: bool = False, n_neighbours: int = 10, min_dist: float = 0, min_cluster_size: int = 20, num_samples: int = 10000) -> np.array:
+        """Uses densMAP (density-preserving visualization tool based on UMAP) followed by the HDBSCAN clustering.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            verbose (bool, optional): Defaults to False.
+            n_neighbours (int, optional): The size of the local neighborhood (in terms of number of neighboring sample points) used for manifold approximation. For more information check UMAP documentation. Defaults to 10.
+            min_dist (float, optional): The min_dist parameter controls how tightly UMAP is allowed to pack points together. For more information check UMAP documentation. Defaults to 0.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 15.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+        """
+        return super().fit(num_target_clusters, verbose=verbose, densmap=True, n_neighbours=n_neighbours, min_dist=min_dist, min_cluster_size=min_cluster_size, num_samples=num_samples)
+
+    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> np.array:
+        """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) on the previously reduced data.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+            min_cluster_size (int, optional): The minimum size of HDBSCAN clusters. Defaults to 15.
+            num_samples (int, optional): Number of intensity values that will be used during HDBSCAN clustering. Defaults to 10000.
+            verbose (bool, optional): Defaults to False.
+
+        Returns:
+            np.array: Segmented array.
+        """
+        return super().transform(num_target_clusters, min_cluster_size, num_samples, verbose)
+
+    def segmentation(self) -> np.array:
+        return super().segmentation()
+'''
 class FuzzyCMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -396,7 +574,7 @@ class FuzzyCMeansClusterer(RegionClusterer):
 
     def segmentation(self) -> np.array:
         return self.segmented
-        
+'''        
 class KMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -433,7 +611,6 @@ class ModifiedKMeansClusterer(RegionClusterer):
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-        self.matrix_mz = np.copy(self.region.idx2mass)
         self.segmented = None
 
     def fit(self, num_target_clusters: int, max_iterations: int = 100, smoothing_iter: int = 2, verbose: bool = False, init_mode='random_centroids', distance='tibshirani'):
@@ -1254,3 +1431,130 @@ class SASARegionClusterer(ShrunkenCentroidClusterer):
 
         return shr_segmented, ams
 
+class HierarchicalClusterer(RegionClusterer, metaclass=abc.ABCMeta):
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+        self.segmented = None
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        return super().fit(num_target_clusters, max_iterations=max_iterations, verbose=verbose)
+
+    def _update_segmented(self, flat_clust):
+        image = np.zeros(self.region.region_array.shape, dtype=np.int16)
+        image= image[:,:,0]
+        
+        # cluster 0 has special meaning: not assigned !
+        assert(not 0 in [flat_clust[x] for x in flat_clust])
+
+        for i in range(0, image.shape[0]):
+            for j in range(0, image.shape[1]):
+                image[i,j] = flat_clust[self.region.pixel2idx[(i,j)]]
+
+        self.segmented = image
+
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+        return self.segmented
+
+    def segmentation(self) -> np.array:
+        return self.segmented
+
+class UPGMAClusterer(HierarchicalClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        """Forms flat clusters with UPGMA clustering method (see scipy.cluster.hierarchy.linkage method='average' for more information) on the similarity matrix.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+        """
+        self.region.calculate_similarity()
+        ssim = 1-self.region.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='average', metric='cosine')
+        flat_clust = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+
+        self._update_segmented(flat_clust)
+
+class WPGMAClusterer(HierarchicalClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        """Performs WPGMA linkage (see scipy.cluster.hierarchy.weighted for more information to the method) on the similarity matrix.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+        """
+        self.region.calculate_similarity()
+        ssim = 1-self.region.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.weighted(squareform(ssim))
+        flat_clust = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+
+        self._update_segmented(flat_clust)
+
+class WARDClusterer(HierarchicalClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        """Performs Ward’s linkage (see scipy.cluster.hierarchy.ward for more information to the method) on the similarity matrix.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+        """
+        self.region.calculate_similarity()
+        ssim = 1-self.region.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.ward(squareform(ssim))
+        flat_clust = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+
+        self._update_segmented(flat_clust)
+
+class MedianClusterer(HierarchicalClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        """Forms flat clusters with median clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+        """
+        self.region.calculate_similarity()
+        ssim = 1-self.region.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='median', metric='cosine')
+        flat_clust = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+
+        self._update_segmented(flat_clust)
+
+class CentroidClusterer(HierarchicalClusterer):
+
+    def __init__(self, region: SpectraRegion) -> None:
+        super().__init__(region)
+
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+        """Forms flat clusters with centroid clustering method (see scipy.cluster.hierarchy.linkage for more information to the method) on the similarity matrix.
+
+        Args:
+            num_target_clusters (int): Number of desired clusters.
+        """
+        self.region.calculate_similarity()
+        ssim = 1-self.region.spectra_similarity
+        ssim[range(ssim.shape[0]), range(ssim.shape[1])] = 0
+
+        Z = spc.hierarchy.linkage(squareform(ssim), method='centroid', metric='cosine')
+        flat_clust = spc.hierarchy.fcluster(Z, t=num_target_clusters, criterion='maxclust')
+
+        self._update_segmented(flat_clust)
