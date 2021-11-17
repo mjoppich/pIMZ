@@ -60,7 +60,7 @@ autodoc_mock_imports = [
         'llvmlite',
         'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
         'Pillow', 'mpl_toolkits',
-        'pykeops', 'adjustText', 'fcmeans']
+        'pykeops', 'adjustText', 'fcmeans', 'networkx']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
