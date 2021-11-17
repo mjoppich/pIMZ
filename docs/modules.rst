@@ -24,6 +24,16 @@ a SpectraRegion
     :inherited-members:
     :show-inheritance:
 
+Clustering Module
+-------------
+a Clustering
+
+
+.. automodule:: pIMZ.clustering
+    :members:
+    :inherited-members:
+    :show-inheritance:
+
 Comparative
 -----------
 
