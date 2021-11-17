@@ -25,7 +25,7 @@ a SpectraRegion
     :show-inheritance:
 
 Clustering Module
--------------
+-----------------
 a Clustering
 
 
