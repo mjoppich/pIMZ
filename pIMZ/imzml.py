@@ -622,13 +622,27 @@ class IMZMLExtract:
 
 
     def smooth_spectrum(self, spectrum, method="savgol", window_length=5, polyorder=2):
-        assert (method in ["savgol", "gaussian"])
+        """Smoothes the given spectrum.
 
-        
+        Args:
+            spectrum (numpy.array): Spectrum of intensities.
+            method (str, optional): [Either Savitzky-Golay filter ("savgol"), 1-D Gaussian filter ("gaussian") or Kaiser filter/Finite-Impulse-Response (FIR) filter ("kaiser"). Defaults to "savgol".
+            window_length (int, optional): Length of the filter window for "savgol"/"kaiser" and standard deviation for Gaussian kernel. Defaults to 5.
+            polyorder (int, optional): The order of the polynomial used to fit the samples for "savgol" method. Defaults to 2.
+
+        Returns:
+            numpy.array: Smoothed spectrum.
+        """
+        assert (method in ["savgol", "gaussian", "kaiser"])
+
         if method=="savgol":
             outspectrum = signal.savgol_filter(spectrum, window_length=window_length, polyorder=polyorder, mode='nearest')
         elif method=="gaussian":
             outspectrum = ndimage.gaussian_filter1d(spectrum, sigma=window_length, mode='nearest')
+        elif method=="kaiser":
+            b = (np.ones(window_length))/window_length #numerator co-effs of filter transfer function
+            a = np.ones(1)  #denominator co-effs of filter transfer function
+            outspectrum = signal.lfilter(b,a,spectrum)
 
         outspectrum[outspectrum < 0] = 0
 
@@ -636,8 +650,18 @@ class IMZMLExtract:
 
 
     def smooth_region_array(self, region_array, method="savgol", window_length=5, polyorder=2):
-        
-        assert (method in ["savgol", "gaussian"])
+        """Performs smoothing of all spectra in the given region array.
+
+        Args:
+            region_array (numpy.array): Array of spectra to smooth.
+            method (str, optional): Either Savitzky-Golay filter ("savgol"), 1-D Gaussian filter ("gaussian") or Kaiser filter/Finite-Impulse-Response (FIR) filter ("kaiser"). Defaults to "savgol".
+            window_length (int, optional): Length of the filter window for "savgol"/"kaiser" and standard deviation for Gaussian kernel. Defaults to 5.
+            polyorder (int, optional): The order of the polynomial used to fit the samples for "savgol" method. Defaults to 2.
+
+        Returns:
+            numpy.array: Array of smoothed spectra.
+        """
+        assert (method in ["savgol", "gaussian", "kaiser"])
         bar = makeProgressBar()
 
         outarray = np.zeros(region_array.shape)
