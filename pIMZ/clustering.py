@@ -46,7 +46,7 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from sklearn import cluster, decomposition
-from fcmeans import FCM
+#from fcmeans import FCM
 
 from .imzml import IMZMLExtract
 from .regions import SpectraRegion, RegionClusterer
@@ -545,7 +545,7 @@ class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
 
     def segmentation(self) -> np.array:
         return super().segmentation()
-
+'''
 class FuzzyCMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -574,7 +574,7 @@ class FuzzyCMeansClusterer(RegionClusterer):
 
     def segmentation(self) -> np.array:
         return self.segmented
-       
+'''       
 class KMeansClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion) -> None:
@@ -630,7 +630,7 @@ class ModifiedKMeansClusterer(RegionClusterer):
                 - 'sa': distance for spatially-aware clustering\n
                 - 'sasa': distance for spatially-aware structurally-adaptive clustering\n
         """
-        assert(init_mode in ['random', 'random_centroids'])
+        assert(init_mode in ['random', 'random_centroids', 'random_2normdist'])
         assert(distance in ['tibshirani', 'squared', 'sa', 'sasa'])
 
         elem_matrix, _ = self.region.prepare_elem_matrix()
@@ -662,6 +662,37 @@ class ModifiedKMeansClusterer(RegionClusterer):
                 centroids[i] = elem_matrix[elems[np.random.randint(len(elems), size=1)[0]]].reshape(elem_matrix.shape[1])
                 self._update_segmented(elem_matrix, centroids2ids)
             return centroids, centroids2ids 
+
+        elif mode=='random_2normdist':
+
+            foundCentroidCoords = set()
+            centroids2ids = dict()
+            while len(foundCentroidCoords) < num_target_clusters:
+                xRand = np.random.randint(0, elem_matrix.shape[0]-1)
+                
+                if not xRand in foundCentroidCoords:
+                    foundCentroidCoords.add(xRand)
+                    
+            foundCentroidCoords = sorted(foundCentroidCoords)
+            
+            for i in range(0, elem_matrix.shape[0]):
+                    
+                dist2centroid = []
+                for cI, coord in enumerate(foundCentroidCoords):
+                    distScalar = np.linalg.norm(np.array(coord)- np.array([i]))
+                    dist2centroid.append( (cI, distScalar)  )
+                        
+                dist2centroid = sorted(dist2centroid, key=lambda x: x[1])
+                if dist2centroid[0][0] in centroids2ids:
+                    centroids2ids[dist2centroid[0][0]].append(i)
+                else:
+                    centroids2ids[dist2centroid[0][0]]= [i]
+                    
+            foundCentroids = defaultdict(list)
+            for cI, coord in enumerate(foundCentroidCoords):
+                foundCentroids[cI] = elem_matrix[coord]
+                
+            return foundCentroids, centroids2ids
 
     def _compute_centroids(self, elem_matrix, idx, num_target_clusters):
         m = elem_matrix.shape[0]
@@ -796,6 +827,10 @@ class ModifiedKMeansClusterer(RegionClusterer):
             sSum = s_list+s_0
             sSumSq = np.multiply(sSum, sSum)
 
+            #for coord_x in range(self.region.region_array.shape[0]):
+                #for coord_y in range(self.region.region_array.shape[1]):
+
+                    #i = coord_x + coord_y*self.region.region_array.shape[0]
             for i in range(m):
                 coord_x = i % self.region.region_array.shape[0]
                 coord_y = i // self.region.region_array.shape[0]
@@ -809,7 +844,7 @@ class ModifiedKMeansClusterer(RegionClusterer):
                         centroidProbability = 0.01
                     dists[j, 0] =  SASARegionClusterer._distance_sasa(SASARegionClusterer(self.region), matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=sSumSq, centroidProbability=centroidProbability)
                 centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
-                idx[i] = centroid_idx[0][0]
+                idx[i] = centroid_idx[0][0] 
                 
         return idx
 
