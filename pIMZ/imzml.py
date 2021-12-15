@@ -35,6 +35,8 @@ import matplotlib.pyplot as plt
 
 from scipy import ndimage, misc, sparse, signal, stats, interpolate
 from scipy.sparse.linalg import spsolve
+from scipy.stats import kurtosis
+from scipy.interpolate import interp1d
 
 from pykeops.numpy import LazyTensor
 
@@ -536,6 +538,42 @@ class IMZMLExtract:
             w = p * (y > z) + (1-p) * (y < z)
         return z
 
+    def baseline_cor(self, spectrum, division=100, simple=True):       
+        nblocks = len(spectrum)//division
+        ref_value = np.mean(spectrum)
+
+        x_1 = -1
+        s_int_1 = -1
+        m_int_1 = -1
+
+        m_int = 0
+        x_int = 0
+
+        m_vec = list()
+        x_vec = list()
+
+        for block in range(1,nblocks):
+            interval = spectrum[1+(block-1)*division:block*division]
+
+            if x_1 == -1 and s_int_1 == -1:
+                m_int_1 = np.min(interval)
+                x_1 = np.mean(self.mzValues[1+(block-1)*division:block*division])
+                s_int_1 = np.std(interval)
+            if kurtosis(interval) > 1 and np.mean(interval)<ref_value:
+                m_int = np.min(interval)
+                x_int = np.mean(self.mzValues[1+(block-1)*division:block*division])
+
+                m_vec.append(m_int)
+                x_vec.append(x_int)
+
+        if simple:
+            baseline= interp1d([self.mzValues[0],x_int,self.mzValues[self.mzValues.shape[0]-1]],[m_int_1,m_int,0])
+        else:
+            baseline = interp1d([self.mzValues[0]]+x_vec+[self.mzValues[self.mzValues.shape[0]-1]],[m_int_1]+m_vec+[0])
+        new_base = baseline(self.mzValues)
+
+        return spectrum-new_base
+
     def _get_median_spectrum(self, region_array):
         """Calculates the median spectrum of all spectra in region_array.
 
@@ -673,12 +711,12 @@ class IMZMLExtract:
 
 
 
-    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10):
+    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10, division=100, simple=True):
         """Returns a normalized array of spectra.
 
         Args:
             region_array (numpy.array): Array of spectra to normlaize.
-            normalize (str, optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor". Defaults to None.\n
+            normalize (str, optional): Normalization method. Must be in "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor", "baseline_cor_local". Defaults to None.\n
                 - "max_intensity_spectrum": normalizes each spectrum with "max_instensity_spectrum" method in normalize_spectrum function.\n
                 - "max_intensity_region": normalizes each spectrum with "max_intensity_region" method using the maximum intensity value within the region.\n
                 - "max_intensity_all_regions": normalizes each spectrum with "max_intensity_all_regions" method using the maximum intensity value within all regions.\n
@@ -686,16 +724,19 @@ class IMZMLExtract:
                 - "inter_median": divides each spectrum by its median to make intensities consistent within each array.\n
                 - "intra_median": divides each spectrum by the global median to achieve consistency between arrays.\n
                 - "baseline_cor": Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens. Requires lam, p and iters parameters.\n
+                - "baseline_cor_local": Subtraction of a baseline, estimated after the elimination of the most significant peaks in the mass spectrum.\n
                 - "tic": normalizes each spectrum by its TIC (total ion current)
             lam (int, optional): Lambda for baseline correction (if selected). Defaults to 105.
             p (float, optional): p for baseline correction (if selected). Defaults to 0.01.
             iters (int, optional): iterations for baseline correction (if selected). Defaults to 10.
+            division (int, optional): number of separate blocks to consider by baseline_cor_local, if selected. Defaults to 100.
+            simple (bool, optional): Whether to use three or more values for interpolation by baseline_cor_local, if selected. Defaults to True, three values only. 
 
         Returns:
             numpy.array: Normalized region_array.
         """
         
-        assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor"])
+        assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor", "baseline_cor_local"])
 
         if normalize in ["vector"]:
             outarray = np.zeros(region_array.shape)
@@ -703,6 +744,10 @@ class IMZMLExtract:
 
         if normalize in ["baseline_cor"]:
             outarray = np.array([[self.baseline_als(y, lam, p, iters) for y in x] for x in region_array])
+            return outarray
+
+        if normalize in ["baseline_cor_local"]:
+            outarray = np.array([[self.baseline_cor(spectrum=y, division=division, simple=simple) for y in x] for x in region_array])
             return outarray
 
         if normalize in ["inter_median", "intra_median"]:
