@@ -634,8 +634,11 @@ class ModifiedKMeansClusterer(RegionClusterer):
         assert(distance in ['tibshirani', 'squared', 'sa', 'sasa'])
 
         elem_matrix, _ = self.region.prepare_elem_matrix()
-        init_centroids, centroids2ids = self._kmeans_init_centroids(elem_matrix=elem_matrix, num_target_clusters=num_target_clusters, mode=init_mode)
-        centroids, idx, centroids2ids = self._run_kmeans(elem_matrix=elem_matrix, init_centroids=init_centroids, centroids2ids=centroids2ids, max_iter=max_iterations, smoothing_iter=smoothing_iter, distance=distance)
+        init_centroids, init_centroids2ids = self._kmeans_init_centroids(elem_matrix=elem_matrix, num_target_clusters=num_target_clusters, mode=init_mode)
+        centroids, idx, centroids2ids = self._run_kmeans(elem_matrix=elem_matrix, init_centroids=init_centroids, centroids2ids=init_centroids2ids, max_iter=max_iterations, smoothing_iter=smoothing_iter, distance=distance)
+        if centroids is None:
+            return self.fit(num_target_clusters, max_iterations, smoothing_iter, verbose, init_mode, distance)
+        return elem_matrix, init_centroids, init_centroids2ids, centroids, idx, centroids2ids
 
 
     def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
@@ -737,25 +740,41 @@ class ModifiedKMeansClusterer(RegionClusterer):
         centroids = init_centroids
         idx = np.zeros((m,1)).reshape(-1,1)
         bar = makeProgressBar()
+        centroids2ids_before = None
+        centroids2ids_after = centroids2ids
+        switcher = {
+            'sa': SARegionClusterer(self.region),
+            'sasa': SASARegionClusterer(self.region)
+        }
+        object = switcher.get(distance, None)
 
         # run k-means for specified iterations
         for i in bar(range(max_iter)):
-            idx = self._find_closest_centroid(elem_matrix, centroids, centroids2ids, distance=distance) # get closest centroid for each pixel
-            """
-            This is the modification to allow for pseudo-normalized cuts:
-            
-            - check surrounding assignments
-            - if diff, assign penalty
-            - change assignment if penalty high enough
-            """
-            if i == (max_iter - 1):
+            if not (centroids2ids_before == centroids2ids_after):
+                centroids2ids_before = centroids2ids_after
+                idx = self._find_closest_centroid(object, elem_matrix, centroids, centroids2ids_before, distance=distance) # get closest centroid for each pixel
+                if idx is None:
+                    return None, None, None
+                """
+                This is the modification to allow for pseudo-normalized cuts:
+                
+                - check surrounding assignments
+                - if diff, assign penalty
+                - change assignment if penalty high enough
+                """
+                if i == (max_iter - 1):
+                    idx = self._modify_idx(idx, smoothing_iter)
+                centroids, centroids2ids_after = self._compute_centroids(elem_matrix, idx, K) # calculate new centroids
+            else:
                 idx = self._modify_idx(idx, smoothing_iter)
-            centroids, centroids2ids = self._compute_centroids(elem_matrix, idx, K) # calculate new centroids
+                centroids, centroids2ids_after = self._compute_centroids(elem_matrix, idx, K) # calculate new centroids
+                self.logger.info('Finished early, iteration '+str(i)+'.')
+                break
             
-        return centroids, idx, centroids2ids
+        return centroids, idx, centroids2ids_after
 
-    def _find_closest_centroid(self, elem_matrix, curr_centroids, centroids2ids, distance):
-        m = len(elem_matrix)
+    def _find_closest_centroid(self, object, elem_matrix, curr_centroids, centroids2ids, distance):
+        m = elem_matrix.shape[0]
         K = len(curr_centroids.keys())
         idx = np.zeros((m,1)).reshape(-1,1)
         n = elem_matrix.shape[0]
@@ -778,8 +797,8 @@ class ModifiedKMeansClusterer(RegionClusterer):
                     
                     centroidProbability = len(centroids2ids[j])/n
                     if centroidProbability==0:
-                        print('smth wrong')
-                        centroidProbability = 0.01
+                        self.logger.info('Restarting...')
+                        return None
                     
                     specDiff = elem_matrix[i, :] - curr_centroids[j]
                     sigma = np.divide(np.multiply(specDiff, specDiff), sSumSq)
@@ -808,17 +827,16 @@ class ModifiedKMeansClusterer(RegionClusterer):
                 idx[i] = centroid_idx[0][0]
 
         elif distance=='sa':
-            for i in range(m):
-                coord_x = i % self.region.region_array.shape[0]
-                coord_y = i // self.region.region_array.shape[0]
-
-                dists = np.zeros((K,2))
-                dists[:, 1] = [j for j in range(1,K+1)]
-                
-                for j in range(K):
-                    dists[j, 0] =  SARegionClusterer._distance_sa(None, matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=None, centroidProbability=None)
-                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
-                idx[i] = centroid_idx[0][0]
+            for coord_x in range(0,self.region.region_array.shape[0]):
+                for coord_y in range(0,self.region.region_array.shape[1]):
+                    i = coord_x * self.region.region_array.shape[1] + coord_y
+                    dists = np.zeros((K,2))
+                    dists[:, 1] = [j for j in range(1,K+1)]
+                    
+                    for j in range(K):
+                        dists[j, 0] =  object._distance_sa(matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=None, centroidProbability=None)
+                    centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                    idx[i] = centroid_idx[0][0]
 
 
         elif distance=='sasa':
@@ -826,25 +844,19 @@ class ModifiedKMeansClusterer(RegionClusterer):
             s_0 = np.median(s_list)
             sSum = s_list+s_0
             sSumSq = np.multiply(sSum, sSum)
-
-            #for coord_x in range(self.region.region_array.shape[0]):
-                #for coord_y in range(self.region.region_array.shape[1]):
-
-                    #i = coord_x + coord_y*self.region.region_array.shape[0]
-            for i in range(m):
-                coord_x = i % self.region.region_array.shape[0]
-                coord_y = i // self.region.region_array.shape[0]
-
-                dists = np.zeros((K,2))
-                dists[:, 1] = [j for j in range(1,K+1)] 
-                
-                for j in range(K):
-                    centroidProbability = len(centroids2ids[j])/n
-                    if centroidProbability==0:
-                        centroidProbability = 0.01
-                    dists[j, 0] =  SASARegionClusterer._distance_sasa(SASARegionClusterer(self.region), matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=sSumSq, centroidProbability=centroidProbability)
-                centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
-                idx[i] = centroid_idx[0][0] 
+            for coord_x in range(0,self.region.region_array.shape[0]):
+                for coord_y in range(0,self.region.region_array.shape[1]):
+                    i = coord_x * self.region.region_array.shape[1] + coord_y
+                    dists = np.zeros((K,2))
+                    dists[:, 1] = [j for j in range(1,K+1)] 
+                    
+                    for j in range(K):
+                        centroidProbability = len(centroids2ids[j])/n
+                        if centroidProbability==0:
+                            centroidProbability = 0.01
+                        dists[j, 0] =  object._distance_sasa(matrix=self.region.region_array, pxCoord=(coord_x, coord_y), centroid=curr_centroids[j], sqSStats=sSumSq, centroidProbability=centroidProbability)
+                    centroid_idx = np.where(dists == np.amin(dists[:, 0], axis=0))
+                    idx[i] = centroid_idx[0][0] 
                 
         return idx
 
