@@ -630,7 +630,7 @@ class ModifiedKMeansClusterer(RegionClusterer):
                 - 'sa': distance for spatially-aware clustering\n
                 - 'sasa': distance for spatially-aware structurally-adaptive clustering\n
         """
-        assert(init_mode in ['random', 'random_centroids', 'random_2normdist'])
+        assert(init_mode in ['random', 'kmeans','random_centroids', 'random_2normdist'])
         assert(distance in ['tibshirani', 'squared', 'sa', 'sasa'])
 
         elem_matrix, _ = self.region.prepare_elem_matrix()
@@ -652,6 +652,19 @@ class ModifiedKMeansClusterer(RegionClusterer):
             random_clustering = np.random.randint(num_target_clusters, size=(elem_matrix.shape[0]))
             return self._compute_centroids(elem_matrix, random_clustering, num_target_clusters)
 
+        elif mode=="kmeans":
+            centroids = dict()
+            centroids2ids = dict()
+            centroid, label = kmeans2(elem_matrix, k=num_target_clusters, iter=100, minit='++')
+            for i in range(num_target_clusters):
+                elems = np.argwhere(label == i)
+                elems = list([e[0] for e in elems])
+                centroids2ids[i] = elems
+                centroids[i] = centroid[i]
+            self._update_segmented(elem_matrix, centroids2ids)
+            return centroids, centroids2ids 
+
+
         elif mode=="random_centroids":
             # store centroids in Kxn
             centroids = dict()
@@ -663,7 +676,7 @@ class ModifiedKMeansClusterer(RegionClusterer):
                 elems = list([e[0] for e in elems])
                 centroids2ids[i] = elems
                 centroids[i] = elem_matrix[elems[np.random.randint(len(elems), size=1)[0]]].reshape(elem_matrix.shape[1])
-                self._update_segmented(elem_matrix, centroids2ids)
+            self._update_segmented(elem_matrix, centroids2ids)
             return centroids, centroids2ids 
 
         elif mode=='random_2normdist':
