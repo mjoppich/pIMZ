@@ -1123,15 +1123,16 @@ class IMZMLExtract:
 
 
     def to_reduced_peaks(self, region, topn=2000, bins=50, return_indices=False):
-        """
+        """_summary_
 
         Args:
             region (numpy.array): region/array of spectra
-            masses (numpy.array): m/z values corresponding to 3rd dimension in region
+            topn (int, optional): Top HV indices. Defaults to 2000.
+            bins (int, optional): _description_. Defaults to 50.
+            return_indices (bool, optional): _description_. Defaults to False.
 
         Returns:
-            numpy.array, numpy.array: new array of spectra, corresponding masses
-
+            numpy.array: new array of spectra
         """
 
         hvIndices = IMZMLExtract.detect_hv_masses(region, topn=topn, bins=bins)
@@ -1295,13 +1296,13 @@ class IMZMLExtract:
             outarray = outarray[:,:,peakIdx]
             outmasses = outmasses[peakIdx]
 
-            return self.to_reduced_peaks(outarray, outmasses)
+            return outarray, outmasses
 
         print("Returning Peaks")
         return outarray, outmasses
 
 
-    def to_peaks(self, region, masses, resolution=None, min_peak_prominence=0.5, min_peak_width=0.5, background_quantile=0.5):
+    def to_peaks(self, region, masses, resolution=None, reduce_peaks=False, min_peak_prominence=0.5, min_peak_width=0.5, background_quantile=0.5):
         """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
         Args:
@@ -1392,7 +1393,14 @@ class IMZMLExtract:
                     outarray[i,j,idx] = selPeak["intensity"]
 
         print("Identified peaks for", len(peakIdx), "of", outarray.shape[2], "fields")
+        
+        if reduce_peaks:
+            peakIdx = sorted(peakIdx)
+            outarray = outarray[:,:,peakIdx]
+            outmasses = outmasses[peakIdx]
 
+            return outarray, outmasses
+        
         print("Returning Peaks")
         return outarray, outmasses
 

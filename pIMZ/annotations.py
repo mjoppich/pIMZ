@@ -13,6 +13,7 @@ from natsort import natsorted
 import pandas as pd
 import numpy as np
 from scipy.sparse import csr_matrix
+from intervaltree import IntervalTree
 
 import regex as re
 import h5py
@@ -79,7 +80,7 @@ class ProteinWeights():
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, filename, min_mass=-1, max_mass=-1):
+    def __init__(self, filename, ppm=5, min_mass=-1, max_mass=-1):
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
@@ -91,6 +92,7 @@ class ProteinWeights():
         self.__set_logger()
 
         self.protein2mass = defaultdict(set)
+        self.protein_tree = IntervalTree()
         self.category2id = defaultdict(set)
         self.protein_name2id = {}
 
@@ -129,6 +131,8 @@ class ProteinWeights():
 
                     for proteinName in proteinNames:
                         self.protein2mass[proteinName].add(molWeight)
+                        ppmDist = molWeight * ppm / 1000000
+                        self.protein_tree.addi(molWeight - ppmDist, molWeight + ppmDist, proteinName)
                         self.protein_name2id[proteinName] = proteinIDs
 
             allMasses = self.get_all_masses()
@@ -214,7 +218,7 @@ class ProteinWeights():
             self.logger.info("Proteins/genes with collision: {}".format(protsWithCollision.most_common(10)))
         
 
-    def get_protein_from_mass(self, mass, maxdist=2, ppm=None):
+    def get_protein_from_mass_old(self, mass, maxdist=2, ppm=None):
         """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
 
         Args:
@@ -246,6 +250,31 @@ class ProteinWeights():
 
                 else:
                     raise ValueError()
+
+        possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
+        possibleMatches = [(x[0], x[1]) for x in possibleMatches]
+
+        return possibleMatches
+
+    def get_protein_from_mass(self, mass, maxdist=2, ppm=5):
+        """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
+
+        Args:
+            mass (float): mass to search for
+            maxdist (float, optional): allowed offset for lookup. Defaults to 2.
+
+        Returns:
+            list: sorted list (by abs mass difference) of all (protein, weight) tuple which have a protein in the given mass range
+        """
+
+        possibleMatches = []
+
+        ppmDist = mass * ppm / 1000000
+        overlaps = self.protein_tree.overlap(mass-ppmDist, mass+ppmDist)
+        for overlap in overlaps:
+            protMass = (1 + ppm / 1000000) / overlap[1]
+            protDist = abs(mass-protMass)
+            possibleMatches.append((overlap[2], protMass, protDist))
 
         possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
         possibleMatches = [(x[0], x[1]) for x in possibleMatches]
