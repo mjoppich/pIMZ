@@ -145,7 +145,8 @@ class IMZMLExtract:
 
         Args:
             specid (int): Index of the desired spectrum in the .imzML file.
-            normalize (bool, optional): [description]. Defaults to False.
+            normalize (bool, optional): Whether to divide the spectrum by its maximum intensity. Defaults to False.
+            withmz (bool, optional): Whether to return the respective m/z values. Defaults to False.
 
         Returns:
             numpy.array: Sequence of intensity values corresponding to mz_array of the given specid.
@@ -1123,13 +1124,13 @@ class IMZMLExtract:
 
 
     def to_reduced_peaks(self, region, topn=2000, bins=50, return_indices=False):
-        """_summary_
+        """Detects HV (highly variable) masses and reduces the spectra array accordingly.
 
         Args:
             region (numpy.array): region/array of spectra
             topn (int, optional): Top HV indices. Defaults to 2000.
-            bins (int, optional): _description_. Defaults to 50.
-            return_indices (bool, optional): _description_. Defaults to False.
+            bins (int, optional): Number of bins for sorting based on average expression. Defaults to 50.
+            return_indices (bool, optional): Whether to include the HV indices as a further return value. Defaults to False.
 
         Returns:
             numpy.array: new array of spectra
@@ -1157,7 +1158,11 @@ class IMZMLExtract:
         Args:
             region (numpy.array): array of spectra
             masses (list): list of corresponding m/z values (same length as spectra)
-            resolution (float): step-size for interpolated spectra
+            resolution (float, optional): step-size for interpolated spectra. Defaults to 0.1
+            method (str, optional): Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "akima".
+
+        Returns:
+            numpy.array, numpy.array: array of spectra, corresponding masses
         """
         assert(len(masses) == region.shape[2])
 
@@ -1183,7 +1188,17 @@ class IMZMLExtract:
         return outarray, massesNew
 
     def interpolate_spectrum(self, spec, masses, masses_new, method="Pchip"):
+        """_summary_
 
+        Args:
+            spec (list/numpy.array, optional): spectrum
+            masses (list): list of corresponding m/z values (same length as spectra)
+            masses_new (list): list of m/z values
+            method (str, optional):  Method to use to interpolate the spectra: "akima", "interp1d", "CubicSpline", "Pchip" or "Barycentric". Defaults to "Pchip".
+
+        Returns:
+            lisr: updated spectrum
+        """
         if method == "akima":
             f = interpolate.Akima1DInterpolator(masses, spec)
             specNew = f(masses_new)
@@ -1211,8 +1226,9 @@ class IMZMLExtract:
         Args:
             region (numpy.array): region/array of spectra
             masses (numpy.array): m/z values for region
-            resolution (int): Resolution to return
-            reduce_peaks (bool): if true, return only outarray of useful peaks
+            resolution (int, optional): Resolution to return. Defaults to 0.1
+            reduce_peaks (bool, optional): if true, return only outarray of useful peaks. Defaults to False.
+            picking_method (str, optional): The name of the peak model to use. One of "quadratic", "gaussian", "lorentzian", or "apex" (see ms_peak_picker for details). Defaults to "quafratic".
         Returns:
             numpy.array, numpy.array: new array of spectra, corresponding masses
         """
@@ -1308,8 +1324,12 @@ class IMZMLExtract:
         Args:
             region (numpy.array): region/array of spectra
             masses (numpy.array): m/z values for region
-            resolution (int): Resolution to return
-            reduce_peaks (bool): if true, return only outarray of useful peaks
+            resolution (int, optional): Resolution to return. Defaults to None.
+            reduce_peaks (bool, optional): if true, return only outarray of useful peaks. Defaults to False.
+            min_peak_prominence (float, optional): Required prominence of peaks. Defaults to 0.5
+            min_peak_width (float, optional): Required width of peaks in samples. Defaults to 0.5
+            background_quantile (float, optional): Required height of peaks. Defalus to 0.5
+
         Returns:
             numpy.array, numpy.array: new array of spectra, corresponding masses
         """
@@ -1414,7 +1434,7 @@ class IMZMLExtract:
         Args:
             reg_array (numpy.array): array of spectra
             masses (numpy.array): m/z values for reg_array spectra
-            maxshift (int): maximal shift in each direction. Defaults to 20.
+            maxshift (int, optional): maximal shift in each direction. Defaults to 20.
             ref_coord (tuple, optional): Coordinates of the reference spectrum within reg_array. Defaults to (0,0).
 
         Returns:
