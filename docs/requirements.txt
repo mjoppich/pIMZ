@@ -1,1 +1,2 @@
 sphinxcontrib-apidoc
+docutils<0.18

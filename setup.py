@@ -100,7 +100,7 @@ setup(name="pIMZ",
         'seaborn',
         'llvmlite', 'pykeops',
         'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
-        'Pillow', 'adjustText'], #dabest, 'fuzzy-c-means'
+        'Pillow', 'adjustText', 'intervaltree'], #dabest, 'fuzzy-c-means'
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
         'console_scripts': 
