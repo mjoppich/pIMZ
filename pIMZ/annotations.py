@@ -163,7 +163,11 @@ class ProteinWeights():
 
         return mass2prot
 
-    def print_collisions(self, maxdist=2.0, print_proteins=False):
+    def get_ppm(self, mz, ppm):
+        return mz * (ppm / 1000000)
+
+
+    def print_collisions(self, maxdist=2.0, ppm=None, print_proteins=False):
         """Prints number of proteins with collision, as well as mean and median number of collisions.
 
         For each recorded mass it is checked how many other proteins are in the (mass-maxdist, mass+maxdist) range.
@@ -173,15 +177,41 @@ class ProteinWeights():
             print_proteins (bool, optional): If True, all collision proteins are printed. Defaults to False.
         """
 
-        allProts = [x for x in self.protein2mass]
+        if (maxdist is None and ppm is None) or (not maxdist is None and not ppm is None):
+            raise ValueError("either maxdist or ppm must be None")
+
+
+        self.logger.info("Ambiguity: there exists other protein with conflicting mass")
+        self.logger.info("Collision: there exists other protein with conflicting mass due to distance/error/ppm.")
+        self.logger.info("Frequency: for how many masses does this occur?")
+        self.logger.info("Count: with how many proteins does it happen?")
+
+        allProts = set([x for x in self.protein2mass])
+        allProtMasses = Counter([len(self.protein2mass[x]) for x in self.protein2mass])
         mass2prot = self.get_mass_to_protein()            
         
-        protsWithCollision = Counter()
+        collisionFrequency = Counter()
+        ambiguityFrequency = Counter()
+
+        collisionCount = Counter()
+        ambiguityCount = Counter()
+        
         sortedMasses = sorted([x for x in mass2prot])
+
+        massAmbiguities = [len(mass2prot[x]) for x in mass2prot]
+        plt.hist(massAmbiguities, density=False, cumulative=True, histtype="step")
+        plt.yscale("log")
+        plt.show()
+        plt.close()
 
         for mass in sortedMasses:
 
-            lmass, umass = mass-maxdist, mass+maxdist
+            if not maxdist is None:
+                lmass, umass = mass-maxdist, mass+maxdist
+            else:
+                ppmdist = self.get_ppm(mass, ppm)
+                lmass, umass = mass-ppmdist, mass+ppmdist
+            
             currentProts = mass2prot[mass]
 
             massProts = set()
@@ -193,26 +223,86 @@ class ProteinWeights():
                 if umass < tmass:
                     break
 
-            if len(currentProts) == 1:
+            #massprots contains all protein names, which match current mass
+            assert(currentProts.intersection(massProts) == currentProts)
+
+            #this is all ambiguities
+            if len(massProts) > 0:
+                for prot in massProts:
+                    ambiguityFrequency[prot] += 1
+                    ambiguityCount[prot] += len(massProts)
+
+            # there are proteins for this current, which we are not interested in for conflicts
+            if len(currentProts) >= 1:
                 for prot in currentProts:
                     if prot in massProts:
                         massProts.remove(prot)
 
+            #this is ambiguity due to size error
+            #massProts are other proteins!
             if len(massProts) > 0:
                 for prot in massProts:
-                    protsWithCollision[prot] += 1
+                    collisionFrequency[prot] += 1
+                    collisionCount[prot] += len(massProts)
 
-        self.logger.info("         Number of total protein/genes: {}".format(len(self.protein2mass)))
-        self.logger.info("           Number of total masses: {}".format(len(mass2prot)))
-        self.logger.info("Number of proteins/genes with collision: {}".format(len(protsWithCollision)))
-        self.logger.info("        Mean Number of collisions: {}".format(np.mean([protsWithCollision[x] for x in protsWithCollision])))
-        self.logger.info("      Median Number of collisions: {}".format(np.median([protsWithCollision[x] for x in protsWithCollision])))
+        ambiguityFreqCounter = Counter()
+        for x in ambiguityFrequency:
+            ambiguities = ambiguityFrequency[x]
+            ambiguityFreqCounter[ambiguities] += 1
+
+        collisionFreqCounter = Counter()
+        for x in collisionFrequency:
+            collisions = collisionFrequency[x]
+            collisionFreqCounter[collisions] += 1
+
+        if not maxdist is None:
+            self.logger.info("Using uncertainty of {}m/z".format(maxdist))
+        else:
+            self.logger.info("Using uncertainty of {}ppm".format(ppm))
+
+
+
+
+
+        self.logger.info("             Number of total protein/genes: {}".format(len(allProts)))
+        self.logger.info("                   Number of unique masses: {}".format(len(mass2prot)))
+        self.logger.info("")
+        self.logger.info("             Proteins/genes with ambiguity: {}".format(len(ambiguityFrequency)))
+        self.logger.info("             Mean Frequency of ambiguities: {}".format(np.mean([ambiguityFrequency[x] for x in ambiguityFrequency])))
+        self.logger.info("           Median Frequency of ambiguities: {}".format(np.median([ambiguityFrequency[x] for x in ambiguityFrequency])))
+        self.logger.info("")
+        self.logger.info("             Proteins/genes with collision: {}".format(len(collisionFrequency)))
+        self.logger.info("              Mean Frequency of collisions: {}".format(np.mean([collisionFrequency[x] for x in collisionFrequency])))
+        self.logger.info("            Median Frequency of collisions: {}".format(np.median([collisionFrequency[x] for x in collisionFrequency])))
+        self.logger.info("")
+        self.logger.info("             Proteins/genes with ambiguity: {}".format(len(ambiguityCount)))
+        self.logger.info("                Mean Number of ambiguities: {}".format(np.mean([ambiguityCount[x] for x in ambiguityCount])))
+        self.logger.info("              Median Number of ambiguities: {}".format(np.median([ambiguityCount[x] for x in ambiguityCount])))
+        self.logger.info("")
+        self.logger.info("             Proteins/genes with collision: {}".format(len(collisionCount)))
+        self.logger.info("                 Mean Number of collisions: {}".format(np.mean([collisionCount[x] for x in collisionCount])))
+        self.logger.info("               Median Number of collisions: {}".format(np.median([collisionCount[x] for x in collisionCount])))
+
+        self.logger.info("")
+        if print_proteins:
+            self.logger.info("Proteins/genes with ambiguity: {}".format([x for x in ambiguityCount]))
+        else:
+            self.logger.info("    Proteins/genes with ambiguity count: {}".format(ambiguityCount.most_common(10)))
 
         if print_proteins:
-            self.logger.info("Proteins/genes with collision: {}".format([x for x in protsWithCollision]))
+            self.logger.info("Proteins/genes with collision: {}".format([x for x in collisionCount]))
         else:
-            self.logger.info("Proteins/genes with collision: {}".format(protsWithCollision.most_common(10)))
+            self.logger.info("    Proteins/genes with collision count: {}".format(collisionCount.most_common(10)))
         
+        self.logger.info("")
+        for x in ambiguityFreqCounter:
+            self.logger.info("ambiguity count; proteins with {} other matching proteins: {}".format(x, ambiguityFreqCounter[x]))
+        self.logger.info("collision count; proteins with other matching proteins: {}".format(sum([ambiguityFreqCounter[x] for x in ambiguityFreqCounter])))
+        self.logger.info("")
+        for x in collisionFreqCounter:
+            self.logger.info("collision count; proteins with {} other matching proteins: {}".format(x, collisionFreqCounter[x]))
+        self.logger.info("collision count; proteins with other matching proteins: {}".format(sum([collisionFreqCounter[x] for x in collisionFreqCounter])))
+
 
     def get_protein_from_mass(self, mass, maxdist=2, ppm=None):
         """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.

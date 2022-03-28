@@ -205,7 +205,7 @@ class IMZMLExtract:
         """
         return self.__cos_similarity(spectra1, spectra2)
 
-    def get_mz_index(self, value, threshold=None):
+    def get_mz_index(self, value, mzValues, threshold=None):
         """Returns the closest existing m/z to the given value.
 
         Args:
@@ -218,7 +218,10 @@ class IMZMLExtract:
         curIdxDist = 1000000
         curIdx = None
 
-        for idx, x in enumerate(self.mzValues):
+        if mzValues is None:
+            mzValues = self.mzValues
+
+        for idx, x in enumerate(mzValues):
             dist = abs(x-value)
 
             if dist < curIdxDist and (threshold==None or dist < threshold):
@@ -834,7 +837,60 @@ class IMZMLExtract:
         plt.close()
 
 
-    def list_highest_peaks(self, region_array, counter=False):
+    def plot_ppp(self, region_array, file=None):
+        """Displays a matrix where each pixel shows the number of peaks at that location.
+
+        Args:
+            region_array (numpy.array): Array of spectra.
+        """
+        region_dims = region_array.shape
+        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
+        bar = makeProgressBar()
+        for i in bar(range(0, region_dims[0])):
+            for j in range(0, region_dims[1]):
+                peakplot[i,j] = len([x for x in region_array[i, j, :] if x > 0])
+
+        heatmap = plt.matshow(peakplot)
+        plt.title("Peaks Per Pixel", y=1.08)
+        plt.colorbar(heatmap)
+        if not file is None:
+            plt.savefig(file, bbox_inches="tight")
+        plt.show()
+        plt.close()
+
+    def plot_pixel_intensities(self, region_array, pixel):
+        """plot m/z intensity distribution for pixel in region_array
+
+        Args:
+            region_array ([type]): [description]
+            pixel ([type]): [description]
+        """
+
+        pixelSpec = region_array[pixel[0], pixel[1], :]
+
+        plt.hist(pixelSpec, cumulative=True, histtype="step")
+        plt.title("m/z intensity histogram for pixel at position {}".format(pixel))
+        plt.show()
+        plt.close()
+
+    def plot_mz_intensities(self, region_array, mz_array, mz):
+        """plot m/z intensity distribution for pixel in region_array
+
+        Args:
+            region_array ([type]): [description]
+            pixel ([type]): [description]
+        """
+        mzIndex = self.get_mz_index(mz, mz_array)
+        mzSpec = np.array(region_array[:,:,mzIndex], copy=True)
+        mzSpec = np.reshape(mzSpec, (region_array.shape[0]*region_array.shape[1], 1))
+        
+
+        plt.hist(mzSpec, cumulative=True, histtype="step")
+        plt.title("intensity histogram for m/z-value {}".format(mz_array[mzIndex]))
+        plt.show()
+        plt.close()
+
+    def list_highest_peaks(self, region_array, counter=False, verbose=False):
         """Plots the matrix where each pixel is m/z value that corresponds to the maximum  intensity value in the corresponding pixel in region_array.
 
         Args:
@@ -857,7 +913,7 @@ class IMZMLExtract:
                 peakplot[i,j] = mzVal
                 allPeakIntensities.append(mzInt)
 
-                if not counter:
+                if not counter and verbose:
                     print(i,j,mzVal)
                 else:
                     maxPeakCounter[mzVal] += 1
@@ -1281,7 +1337,7 @@ class IMZMLExtract:
 
         quantile_height = np.quantile(region, [background_quantile])[0]
         print("background intensity:", quantile_height, np.min(region), np.max(region))
-
+        allPixelPeaks = []
 
         for i in bar(range(0, region.shape[0])):
             for j in range(0, region.shape[1]):
@@ -1302,8 +1358,9 @@ class IMZMLExtract:
                     rpeak2peaks[resampledPeakMZ].append({"mz": resampledPeakMZ, "intensity": peak_intensity})
 
 
-                rpeak2peak = {}
+                pixelPeaks = 0
 
+                rpeak2peak = {}
                 for rmz in rpeak2peaks:
                     if len(rpeak2peaks[rmz]) > 1:
                         rpeak2peak[rmz] = sorted(rpeak2peaks[rmz], key=lambda x: x["intensity"], reverse=True)[0]
@@ -1321,6 +1378,12 @@ class IMZMLExtract:
 
                     peakIdx.add(idx)
                     outarray[i,j,idx] = selPeak["intensity"]
+                    pixelPeaks += 1
+
+                allPixelPeaks.append(pixelPeaks)
+
+        print("Pixel Peaks Summary", self._fivenumber(allPixelPeaks))
+                
 
         print("Identified peaks for", len(peakIdx), "of", outarray.shape[2], "fields")
 
@@ -1772,7 +1835,7 @@ class IMZMLExtract:
         return outspectra, outmzvalues
 
 
-    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None):
+    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None, makeNullLine=False):
 
         self.logger.info("Fetching region range")
         xr,yr,zr,sc = self.get_region_range(regionid)
@@ -1817,14 +1880,23 @@ class IMZMLExtract:
         self.logger.info("Forming region array from spectra")
 
 
+        allMinIntensities = []
         bar = makeProgressBar()
         for coord in bar(discr_coord2spec):
             xpos = coord[0]-xr[0]
             ypos = coord[1]-yr[0]
 
             spectra = np.array(discr_coord2spec[coord], copy=True)
+
+            if makeNullLine:
+                minIntensity = np.min(spectra)
+                spectra = spectra - minIntensity
+                allMinIntensities.append(minIntensity)
+
             sarray[xpos, ypos, :] = spectra
 
+        if makeNullLine:
+            self.logger.info("Stats on min Intensities: {}".format(self._fivenumber(allMinIntensities)))
         self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
 
 
