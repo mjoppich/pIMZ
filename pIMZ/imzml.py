@@ -53,6 +53,11 @@ def makeProgressBar():
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
 
+
+from .plotting import Plotter
+
+
+
 class IMZMLExtract:
     """IMZMLExtract class is required to access and retrieve data from an imzML file.
     """
@@ -882,9 +887,9 @@ class IMZMLExtract:
             for j in range(0, region_dims[1]):
                 peakplot[i,j] = np.sum(region_array[i, j, :])
 
-        heatmap = plt.matshow(peakplot)
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
         plt.title("TIC (total summed intensity per pixel)", y=1.08)
-        plt.colorbar(heatmap)
         plt.show()
         plt.close()
 
@@ -900,9 +905,9 @@ class IMZMLExtract:
             for j in range(0, region_dims[1]):
                 peakplot[i,j] = np.linalg.norm(region_array[i, j, :])
 
-        heatmap = plt.matshow(peakplot)
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
         plt.title("TNC (total normed intensity per pixel)", y=1.08)
-        plt.colorbar(heatmap)
         plt.show()
         plt.close()
 
@@ -920,9 +925,9 @@ class IMZMLExtract:
             for j in range(0, region_dims[1]):
                 peakplot[i,j] = len([x for x in region_array[i, j, :] if x > 0])
 
-        heatmap = plt.matshow(peakplot)
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
         plt.title("Peaks Per Pixel", y=1.08)
-        plt.colorbar(heatmap)
         if not file is None:
             plt.savefig(file, bbox_inches="tight")
         plt.show()
@@ -1113,7 +1118,7 @@ class IMZMLExtract:
 
 
     @classmethod
-    def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05):        
+    def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05):    
         """
         https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
         We calculated the mean and a dispersion measure (variance/mean) for each gene across all single cells,
@@ -1125,7 +1130,16 @@ class IMZMLExtract:
         We used a z-score cutoff of 2 to identify 160 significantly variable genes, after excluding genes with very low average expression
         
         As expected, our highly variable genes consisted primarily of developmental and spatially regulated factors whose expression levels are expected to vary across the dissociated cells.
-        """
+
+        Args:
+            region (np.array): input region array
+            topn (int, optional): highly variable masses to report. Defaults to 2000.
+            bins (int, optional): number of bins to use. Defaults to 50.
+            meanThreshold (float, optional): minimal average expression considered for HV-detection. Defaults to 0.05.
+
+        Returns:
+            list: vector of indices to keep
+        """           
 
         allMassMeanDisp = []  
         bar = makeProgressBar()
@@ -1206,6 +1220,26 @@ class IMZMLExtract:
 
         return retArray
 
+    def reduce_region_to_hv(self, region, region_mz, topn=2000, bins=50, meanThreshold=0.05):
+        """Detects HV (highly variable) masses and reduces the spectra array accordingly.
+
+        Args:
+            region (numpy.array): region/array of spectra
+            region (numpy.array): list/array of spectra mz
+            topn (int, optional): Top HV indices. Defaults to 2000.
+            bins (int, optional): Number of bins for sorting based on average expression. Defaults to 50.
+            meanThreshold (float, optional): minimal average expression considered for HV-detection. Defaults to 0.05.
+
+        Returns:
+            numpy.array: new array of spectra
+            numpy.array: new array of mz values
+        """
+        
+        hvIndices = IMZMLExtract.detect_hv_masses(region, topn=topn, bins=bins, meanThreshold=meanThreshold)
+
+        print("Identified", len(hvIndices), "HV indices")
+
+        return region[:,:,hvIndices], np.array(region_mz)[hvIndices]
 
 
     def interpolate_data(self, region, masses, resolution=0.1, method="akima"):
@@ -1702,7 +1736,7 @@ class IMZMLExtract:
         self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
 
 
-        return sarray
+        return sarray, self.mzValues
 
 
     def list_regions(self, plot=True):
@@ -1999,3 +2033,41 @@ class IMZMLExtract:
 
         return sarray, masses_new
 
+    def plot_spectra(self, region_array, coords, valRange, xvals=None, stems=False):
+        """plots selected spectra in a given range for region_array
+
+        Args:
+            region_array (np.array): region_array (3D spectra array)
+            coords (list): list of coordinate tuples [(x,y)]
+            valRange (list, tiple): range to plot the spectra. Defaults to full range.
+            xvals (np.array, list, optional): mz-Values for the entries in region_array 3rd dim. Defaults to None.
+            stems (bool, optional): Whether to plot lines or stems for all intensities. Defaults to False.
+        """
+        
+        stemMarkers = ["D", "o", "O"]
+        stemColors = ["r", "g", "b"]
+        stemFormats = []
+        for x in stemMarkers:
+            for y in stemColors:
+                stemFormats.append(y+x)
+
+        if xvals is None:
+            if region_array.shape[2] == len(self.mzValues):
+                xvals = self.mzValues
+
+        plt.figure()
+        
+        for xi, x in enumerate(coords):
+            if not stems:
+                plt.plot(xvals, region_array[x], label=str(x))
+            else:
+                markerline, stemlines, baseline = plt.stem(xvals, region_array[x], label=str(x), markerfmt=stemFormats[xi])
+                plt.setp(stemlines, 'color', plt.getp(markerline,'color'))
+                plt.setp(stemlines, 'linestyle', 'dotted')
+            
+        plt.xlim(valRange)
+        plt.gca().relim()
+        plt.gca().autoscale_view()
+        plt.legend()
+        plt.close()
+    

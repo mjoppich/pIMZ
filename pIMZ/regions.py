@@ -47,6 +47,7 @@ import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 
 from .imzml import IMZMLExtract
+from .plotting import Plotter
 
 #web/html
 import jinja2
@@ -61,6 +62,10 @@ def makeProgressBar():
 class SpectraRegion():
     pass
 
+
+
+
+
 class RegionClusterer(metaclass=abc.ABCMeta):
 
     def __init__(self, region:SpectraRegion) -> None:
@@ -72,7 +77,7 @@ class RegionClusterer(metaclass=abc.ABCMeta):
         self.logger = logging.getLogger(self.methodname())
         self.logger.setLevel(logging.INFO)
 
-        if not logging.getLogger().hasHandlers():
+        if not self.logger.hasHandlers():
 
             consoleHandler = logging.StreamHandler()
             consoleHandler.setLevel(logging.INFO)
@@ -157,6 +162,44 @@ class RegionClusterer(metaclass=abc.ABCMeta):
         self.fit(num_target_clusters=num_target_clusters, verbose=verbose)
         return self.transform(num_target_clusters=num_target_clusters, verbose=verbose)
 
+
+
+    def plot_segments(self, highlight=None, file=None):
+        """Plots the segmented array of the current SpectraRegion object.
+
+        Args:
+            highlight (list/tuple/set/int, optional): If the highlight clusters are specified, those will be assigned a cluster id 2. Otherwise 1. Background stays 0. Defaults to None.
+        """
+        showcopy = np.copy(self.segmentation())
+
+        if highlight != None:
+            if not isinstance(highlight, (list, tuple, set)):
+                highlight = [highlight]
+
+            for i in range(0, showcopy.shape[0]):
+                for j in range(0, showcopy.shape[1]):
+
+                    if showcopy[i,j] != 0:
+
+                        if showcopy[i,j] in highlight:
+                            showcopy[i,j] = 2
+                        elif showcopy[i,j] != 0:
+                            showcopy[i,j] = 1
+
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=True)
+        if not highlight is None and len(highlight) > 0:
+            plt.title("Highlighted (yellow) clusters: {}".format(", ".join([str(x) for x in highlight])), y=1.08)
+
+        if not file is None:
+            plt.savefig(file, bbox_inches="tight")
+        plt.show()
+        plt.close()
+
+
+
+
+
 class SpectraRegion():
     """
     SpectraRegion class for any analysis of imzML spectra regions
@@ -234,8 +277,6 @@ class SpectraRegion():
         - dimred_elem_matrix (array): Embedding of the elem_matrix in low-dimensional space. Shape (n_samples, n_components). Initialized with None.
         - dimred_labels (list): A list of HDBSCAN labels. Initialized with None.
         - segmented (numpy.array): Segmeted region_array which contains cluster ids.
-        - segmented_method (str): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN" or "UMAP_WARD". Initialized with None.
-        - cluster_filters (list): A list of filters used. Can include: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
@@ -272,14 +313,11 @@ class SpectraRegion():
         self.dimred_elem_matrix = None
         self.dimred_labels = None
 
-        self.segmented = None
-        self.segmented_method = None
-
-        self.cluster_filters = []
-
         self.consensus = None
         self.consensus_method = None
         self.consensus_similarity_matrix = None
+
+        self.meta = {}
 
         self.de_results_all = defaultdict(lambda: dict())
         self.df_results_all = defaultdict(lambda: dict())
@@ -327,14 +365,12 @@ class SpectraRegion():
             "elem_matrix": self.elem_matrix,
             "dimred_elem_matrix": self.dimred_elem_matrix,
             "dimred_labels": self.dimred_labels,
-            "segmented": self.segmented,
-            "segmented_method": self.segmented_method,
-            "cluster_filters": self.cluster_filters,
             "consensus": self.consensus,
             "consensus_method": self.consensus_method,
             "consensus_similarity_matrix": self.consensus_similarity_matrix,
             "de_results_all": self.de_results_all,
-            "df_results_all": self.df_results_all
+            "df_results_all": self.df_results_all,
+            "meta": self.meta
         }
 
     def __setstate__(self, state):
@@ -358,6 +394,19 @@ class SpectraRegion():
 
             self.idx2pixel[i] = (x,y)
             self.pixel2idx[(x,y)] = i
+
+
+    @property
+    def segmented(self):
+        return self.meta["segmented"]
+
+    @segmented.setter
+    def segmented(self, value):
+        assert type(value) == np.ndarray
+        assert value.shape == (self.region_array.shape[0], self.region_array.shape[1])
+        self.meta["segmented"] = value
+    
+
 
 
     def plot_array(self, fig, arr, discrete_legend=True):
@@ -663,6 +712,95 @@ class SpectraRegion():
         plt.hist(allMassIntensities, bins=len(allMassIntensities))
         plt.title("Mass intensity histogram (m/z = {})".format(round(bestExMassForMass, 3)))
         plt.show()
+
+
+    def mass_dotplot(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
+        """Filters the region_region to the given masses and returns the matrix with summed
+        representation of the gained spectra.
+
+        Args:
+            masses (array): List of masses or protein names (requires pw set).
+            log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
+            min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
+            max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
+            plot (bool, optional): Whether to plot the output matrix. Defaults to True.
+            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
+            pw (ProteinWeights, optional): Allows to translate masses names to actual masses in a given ProteinWeights object. Defaults assuming the elements in masses are numeric, hence None.
+
+        Returns:
+            numpy.array: Each element is a sum of intensities at given masses.
+        """
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+        useMasses = []
+        for x in masses:
+            if type(x) == str:
+                massprots = pw.get_masses_for_protein(x)
+                useMasses += list(massprots)
+            else:
+                useMasses.append(x)
+
+        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        for mass in useMasses:
+            
+            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
+
+            if verbose:
+                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+            for i in range(self.region_array.shape[0]):
+                for j in range(self.region_array.shape[1]):
+
+                    image[i,j] += self.region_array[i,j,bestExMassIdx]
+
+
+        if log:
+            image = np.log(image)
+
+        if min_cut_off != None:
+            image[image <= min_cut_off] = min_cut_off
+
+        if max_cut_off != None:
+            image[image >= max_cut_off] = max_cut_off
+
+        if plot:
+            heatmap = plt.matshow(image)
+            plt.colorbar(heatmap)
+            plt.gca().xaxis.set_ticks_position('bottom')
+            plt.title(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
+            plt.show()
+            plt.close()
+
+        return image
+
+
+
+
+    def __str__(self):
+
+        deres = ["{}: {}".format(x, ",\n       ".join([str(y) for y in self.de_results_all[x]])) for x in self.de_results_all]
+
+        return """SpectraRegion Object      
+        Grid size    : {}x{}
+        Features     : {}
+        Segmentation : {}
+
+        DE Results   :\n{}
+
+        Test
+        """.format(     self.region_array.shape[0],
+                        self.region_array.shape[1],
+                        len(self.idx2mass),
+                        self.segmented is not None,
+                        "\n".join(deres)
+                        )
+
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
     def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
         """Filters the region_region to the given masses and returns the matrix with summed
@@ -1118,7 +1256,6 @@ class SpectraRegion():
 
 
             self.segmented = image_UPGMA
-            self.segmented_method = "UMAP_DBSCAN"
 
 
 
@@ -1237,8 +1374,8 @@ class SpectraRegion():
         if plot_log:
             showcopy = np.log(showcopy)
 
-        fig = plt.figure()
-        self.plot_array(fig, showcopy, discrete_legend=False)
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=False)
         plt.show()
         plt.close()
 
@@ -1448,8 +1585,8 @@ class SpectraRegion():
                         elif showcopy[i,j] != 0:
                             showcopy[i,j] = 1
 
-        fig = plt.figure()
-        self.plot_array(fig, showcopy, discrete_legend=True)
+        fig, _ = plt.subplots()
+        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=True)
         if not highlight is None and len(highlight) > 0:
             plt.title("Highlighted (yellow) clusters: {}".format(", ".join([str(x) for x in highlight])), y=1.08)
 
@@ -1480,7 +1617,6 @@ class SpectraRegion():
         assert (segmentation.shape == (self.region_array.shape[0], self.region_array.shape[1]))
 
         self.segmented = segmentation
-        self.segmented_method = clusterer.methodname()
 
 
     def segment(self, method="UPGMA", dims=None, number_of_regions=10, n_neighbors=10, min_cluster_size=20, num_samples=1000):
@@ -1560,8 +1696,6 @@ class SpectraRegion():
 
 
         self.segmented = image_UPGMA
-        self.segmented_method = method
-        self.cluster_filters = []
 
         self.logger.info("Calculating clusters saved")
 
@@ -1739,9 +1873,6 @@ class SpectraRegion():
             for x in borderSegments:
                 self.segmented[self.segmented == x] = 0
                     
-        self.cluster_filters.append(method)
-        if self.segmented_method in ["UPGMA", "UMAP_DBSCAN", "UMAP_WARD", "DENSMAP_WARD", "DENSMAP_DBSCAN"]:
-            self.dimred_labels = self.segmented.flatten()
         return self.segmented
 
     def __cons_spectra__avg(self, cluster2coords, array):
@@ -1909,6 +2040,60 @@ class SpectraRegion():
         self.logger.info("Calculating consensus spectra done")
 
         return cons_spectra
+
+
+    def plot_boxplot(self, masses):
+        """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster.
+
+        Args:
+            masses (float/list/tuple/set): A desired mass or collection of masses.
+            background (int, optional): Cluster id of the background. Defaults to 0.
+        """
+        assert(not self.segmented is None)
+
+        if not isinstance(masses, (list, tuple, set)):
+            masses = [masses]
+
+
+        cluster2coords = self.getCoordsForSegmented()
+
+        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        for mass in masses:
+            
+            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
+            self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+
+            
+            clusterIntensities = defaultdict(list)
+
+            for clusterid in cluster2coords:
+                for coord in cluster2coords[clusterid]:
+                    intValue = self.region_array[coord[0], coord[1], bestExMassIdx]
+                    clusterIntensities[clusterid].append(intValue)
+
+
+            clusterVec = []
+            intensityVec = []
+            massVec = []
+            specIdxVec = []
+            for x in clusterIntensities:
+                
+                elems = clusterIntensities[x]
+                specIdxVec += [i for i in range(0, len(elems))]
+
+                clusterVec += ["Cluster " + str(x)] * len(elems)
+                intensityVec += elems
+                massVec += [mass] * len(elems)
+                    
+            dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
+            sns.boxplot(data=dfObj, x="cluster", y="intensity")
+            plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
+
+            plt.xticks(rotation=90)
+            plt.show()
+            plt.close()
+
 
     def mass_dabest(self, masses, background=0):
         """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster. Additionally, plots mean difference effect sizes with help of the DABEST package. The given cluster id is considered a control group.
@@ -2947,7 +3132,7 @@ document.addEventListener('readystatechange', event => {
 
             foundProt = []
             if protWeights != None:
-                foundProt = protWeights.get_protein_from_mass(massValue, maxdist=mz_dist)
+                foundProt = protWeights.get_protein_from_mass(massValue)
 
                 if mz_best and len(foundProt) > 0:
                     foundProt = [foundProt[0]]
@@ -3087,12 +3272,24 @@ document.addEventListener('readystatechange', event => {
                     inverseFC = True
 
                 resDF = self.deres_to_df(method, resKey, protWeights, keepOnlyProteins=keepOnlyProteins, inverse_fc=inverseFC, mz_dist=mz_dist, mz_best=mz_best)
-
                 dfbyMethod[method] = pd.concat([dfbyMethod[method], resDF], sort=False)
 
         return dfbyMethod
 
-                    
+    def _combined_de_df(self, test):
+        assert(test in self.df_results_all)
+
+        dfbyMethod = pd.DataFrame()
+
+        for comparison in self.de_results_all[test]:
+
+            useDF = self.de_results_all[test][comparison].copy(deep=True)
+            useDF.insert(0, "clusterID", [comparison[0]]*useDF.shape[0])
+            useDF.insert(1, "backgroundID", [comparison[1]]*useDF.shape[0])
+            
+            dfbyMethod = pd.concat([dfbyMethod, useDF], sort=False)
+
+        return dfbyMethod
 
     def __make_de_res_key(self, clusters0, clusters1):
         """Generates the storage key for two sets of clusters.
