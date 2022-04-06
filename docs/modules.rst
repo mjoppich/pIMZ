@@ -28,8 +28,55 @@ Clustering Module
 -----------------
 a Clustering
 
+.. autoclass:: pIMZ.clustering.RegionEmbedding
+    :members:
 
-.. automodule:: pIMZ.clustering
+.. autoclass:: pIMZ.clustering.PCAEmbedding
+    :members:
+
+.. autoclass:: pIMZ.clustering.UMAPEmbedding
+    :members:
+    
+.. autoclass:: pIMZ.clustering.UMAP_WARD_Clusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.DENSMAP_WARD_Clusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.UMAP_DBSCAN_Clusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.DENSMAP_DBSCAN_Clusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.KMeansClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.ModifiedKMeansClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.ShrunkenCentroidClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.SARegionClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.SASARegionClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.UPGMAClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.WPGMAClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.WARDClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.MedianClusterer
+    :members:
+
+.. autoclass:: pIMZ.clustering.CentroidClusterer
     :members:
 
 Comparative
