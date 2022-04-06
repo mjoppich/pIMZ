@@ -65,7 +65,7 @@ class HuBMAPDownloader:
             str: UTC timestamp in ISO8601 format
         """
         currentTime = datetime.datetime.utcnow()  # Store current datetime
-        timeThen = currentTime + datetime.timedelta(hours=2)
+        timeThen = currentTime + datetime.timedelta(hours=deltaH)
         then_str = timeThen.isoformat()  # Convert to ISO 8601 string
         return then_str
     
