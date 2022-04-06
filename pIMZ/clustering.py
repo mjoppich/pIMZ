@@ -13,6 +13,7 @@ from collections import OrderedDict
 from natsort import natsorted
 from numpy.lib.recfunctions import _repack_fields_dispatcher
 import pandas as pd
+import numpy
 import numpy as np
 import regex as re
 import h5py
@@ -181,7 +182,7 @@ class RegionEmbedding(metaclass=abc.ABCMeta):
         return self.__class__.__name__
 
     @abc.abstractmethod
-    def embedding(self) -> np.array:
+    def embedding(self) -> numpy.array:
         """Returns the final embedding for given region
 
         Raises:
@@ -194,7 +195,7 @@ class RegionEmbedding(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def fit_transform(self, verbose:bool=False) -> np.array:
+    def fit_transform(self, verbose:bool=False) -> numpy.array:
         """
         Returns the final embedding
 
@@ -220,7 +221,7 @@ class PCAEmbedding(RegionEmbedding):
         self.idx2coord = None
         self.embedding_object = None
 
-    def fit_transform(self, verbose: bool = False) -> np.array:
+    def fit_transform(self, verbose: bool = False) -> numpy.array:
         
         elem_matrix, self.idx2coord = self.region.prepare_elem_matrix()
         #np-array dims  (n_samples, n_features)
@@ -234,7 +235,7 @@ class PCAEmbedding(RegionEmbedding):
         self.logger.info("PCA fit+transform")
         self.embedded_matrix = self.embedding_object.fit_transform(elem_matrix)
 
-    def embedding(self) -> np.array:
+    def embedding(self) -> numpy.array:
         
         outArray = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1], self.dimensions))
 
@@ -287,7 +288,7 @@ class UMAPEmbedding(RegionEmbedding):
         self.idx2coord = None
         self.embedding_object = None
 
-    def fit_transform(self, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0) -> np.array:
+    def fit_transform(self, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0) -> numpy.array:
         
         elem_matrix, self.idx2coord = self.region.prepare_elem_matrix()
         #np-array dims  (n_samples, n_features)
@@ -303,7 +304,7 @@ class UMAPEmbedding(RegionEmbedding):
 
         self.embedded_matrix = self.embedding_object.fit_transform(elem_matrix)
 
-    def embedding(self) -> np.array:
+    def embedding(self) -> numpy.array:
         
         outArray = np.zeros((self.region.region_array.shape[0], self.region.region_array.shape[1], self.dimensions))
 
@@ -356,7 +357,7 @@ class UMAP_WARD_Clusterer(RegionClusterer):
 
         self.segmented = image
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         """Allows to redo the WARD's clustering using the reduced data during fit operation.
 
         Args:
@@ -371,7 +372,7 @@ class UMAP_WARD_Clusterer(RegionClusterer):
         self._update_segmented()
         return self.segmented
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 
 class DENSMAP_WARD_Clusterer(UMAP_WARD_Clusterer):
@@ -389,7 +390,7 @@ class DENSMAP_WARD_Clusterer(UMAP_WARD_Clusterer):
         """
         return super().fit(num_target_clusters=num_target_clusters, densmap=True, n_neighbours=n_neighbours, min_dist=min_dist, verbose=verbose)
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         """Allows to redo the WARD's clustering using the reduced data during fit operation.
 
         Args:
@@ -401,7 +402,7 @@ class DENSMAP_WARD_Clusterer(UMAP_WARD_Clusterer):
         """
         return super().transform(num_target_clusters, verbose)
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return super().segmentation()
 
 class UMAP_DBSCAN_Clusterer(RegionClusterer):
@@ -414,7 +415,7 @@ class UMAP_DBSCAN_Clusterer(RegionClusterer):
         self.dimred_elem_matrix = None
         self.segmented = None
 
-    def fit(self, num_target_clusters: int, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0, min_cluster_size: int=15, num_samples: int=10000) -> np.array:
+    def fit(self, num_target_clusters: int, verbose: bool = False, densmap: bool=False, n_neighbours: int=10, min_dist: float=0, min_cluster_size: int=15, num_samples: int=10000) -> numpy.array:
         """Performs UMAP dimension reduction on region array followed by the HDBSCAN clustering.
 
         Args:
@@ -431,7 +432,7 @@ class UMAP_DBSCAN_Clusterer(RegionClusterer):
 
         _ = self.transform(num_target_clusters=num_target_clusters, min_cluster_size=min_cluster_size, num_samples=num_samples)
 
-    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> numpy.array:
         """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) on the previously reduced data.
 
         Args:
@@ -508,7 +509,7 @@ class UMAP_DBSCAN_Clusterer(RegionClusterer):
 
         self.segmented = image
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 
 class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
@@ -516,7 +517,7 @@ class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-    def fit(self, num_target_clusters: int, verbose: bool = False, n_neighbours: int = 10, min_dist: float = 0, min_cluster_size: int = 20, num_samples: int = 10000) -> np.array:
+    def fit(self, num_target_clusters: int, verbose: bool = False, n_neighbours: int = 10, min_dist: float = 0, min_cluster_size: int = 20, num_samples: int = 10000) -> numpy.array:
         """Uses densMAP (density-preserving visualization tool based on UMAP) followed by the HDBSCAN clustering.
 
         Args:
@@ -529,7 +530,7 @@ class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
         """
         return super().fit(num_target_clusters, verbose=verbose, densmap=True, n_neighbours=n_neighbours, min_dist=min_dist, min_cluster_size=min_cluster_size, num_samples=num_samples)
 
-    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, min_cluster_size: int = 15, num_samples: int = 10000, verbose: bool = False) -> numpy.array:
         """Performs HDBSCAN clustering (Hierarchical Density-Based Spatial Clustering of Applications with Noise) on the previously reduced data.
 
         Args:
@@ -543,7 +544,7 @@ class DENSMAP_DBSCAN_Clusterer(UMAP_DBSCAN_Clusterer):
         """
         return super().transform(num_target_clusters, min_cluster_size, num_samples, verbose)
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return super().segmentation()
 '''
 class FuzzyCMeansClusterer(RegionClusterer):
@@ -569,10 +570,10 @@ class FuzzyCMeansClusterer(RegionClusterer):
 
         self.segmented = clusts
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         return self.segmented
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 '''       
 class KMeansClusterer(RegionClusterer):
@@ -600,10 +601,10 @@ class KMeansClusterer(RegionClusterer):
 
         self.segmented = clusts
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         return self.segmented
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 
 class ModifiedKMeansClusterer(RegionClusterer):
@@ -642,10 +643,10 @@ class ModifiedKMeansClusterer(RegionClusterer):
         return elem_matrix, init_centroids, init_centroids2ids, centroids, idx, centroids2ids
 
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         return self.segmented
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 
     def _kmeans_init_centroids(self, elem_matrix, num_target_clusters, mode='random_centroids'):
@@ -1346,11 +1347,11 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         resultDict = self.results[desiredKey]
         return resultDict
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         resDict = self._get_iteration_data(-1)
         return resDict["segmentation"]
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:      
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:      
         if verbose:
             print("Warning: num_target_clusters not applicable to this method")
         segResult = self.segmentation()
@@ -1513,10 +1514,10 @@ class HierarchicalClusterer(RegionClusterer, metaclass=abc.ABCMeta):
 
         self.segmented = image
 
-    def transform(self, num_target_clusters: int, verbose: bool = False) -> np.array:
+    def transform(self, num_target_clusters: int, verbose: bool = False) -> numpy.array:
         return self.segmented
 
-    def segmentation(self) -> np.array:
+    def segmentation(self) -> numpy.array:
         return self.segmented
 
 class UPGMAClusterer(HierarchicalClusterer):
