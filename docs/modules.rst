@@ -31,8 +31,6 @@ a Clustering
 
 .. automodule:: pIMZ.clustering
     :members:
-    :inherited-members:
-    :show-inheritance:
 
 Comparative
 -----------

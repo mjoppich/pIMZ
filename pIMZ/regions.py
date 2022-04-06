@@ -234,8 +234,8 @@ class SpectraRegion():
         - dimred_elem_matrix (array): Embedding of the elem_matrix in low-dimensional space. Shape (n_samples, n_components). Initialized with None.
         - dimred_labels (list): A list of HDBSCAN labels. Initialized with None.
         - segmented (numpy.array): Segmeted region_array which contains cluster ids.
-        - segmented_method (str): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN" or "UMAP_WARD". Initialized with None.
-        - cluster_filters (list): A list of filters used. Can include: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss".
+        - segmented_method (str): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "DENSMAP_DBSCAN", "DENSMAP_WARD" or "UMAP_WARD". Initialized with None.
+        - cluster_filters (list): A list of filters used. Can include: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss". Initialized with [].
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
@@ -623,9 +623,10 @@ class SpectraRegion():
 
         Args:
             valuelist (list/tuple/numpy.array (1D)): List of values to use for statistics.
+            addfuncs (list/tuple/numpy.array): A collection of functions that is applied to the valuelist. Defaults to None.
 
         Returns:
-            tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max
+            tuple: len, len>0, min, 25-quantile, 50-quantile, 75-quantile, max, (valuelist after application of given function(s) if given)
         """
 
         min_ = np.min(valuelist)
@@ -640,7 +641,17 @@ class SpectraRegion():
         return tuple([len(valuelist), len([x for x in valuelist if x > 0]), min_, quan25_, quan50_, quan75_, max_] + addRes)
 
     def detect_highly_variable_masses(self, topn=2000, bins=50, return_mz=False, meanThreshold=0.05):
-        
+        """Detects HV (highly variable) masses and reduces the spectra array accordingly.
+
+        Args:
+            topn (int, optional): Top HV indices. Defaults to 2000.
+            bins (int, optional): Number of bins for sorting based on average expression. Defaults to 50.
+            return_mz (bool, optional): Whether to return m/z values instead of ids. Defaults to False.
+            meanThreshold (float, optional): Threshold applied to every element in the bin. Defaults to 0.05.
+
+        Returns:
+            list: list of HV masses
+        """
         hvIndices = IMZMLExtract.detect_hv_masses(self.region, topn=topn, bins=bins, meanThreshold=meanThreshold)
 
         if return_mz:
@@ -650,6 +661,11 @@ class SpectraRegion():
         
 
     def plot_intensity_distribution(self, mass):
+        """Provides five number statistics, mean, variance and plots a histogram of mass intensity.
+
+        Args:
+            mass (float): mass to look up index for.
+        """
         bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
         
         allMassIntensities = []
@@ -926,7 +942,15 @@ class SpectraRegion():
         return c
 
     def prepare_elem_matrix(self, sparse=False, dims=None):
+        """Updates Embedding of the elem_matrix in low-dimensional space (.dimred_elem_matrix) and returns a list of spectra with positional id correspond to the pixel number (.elem_matrix) and a mapping of an id to respective coordinate in .elem_matrix
 
+        Args:
+            sparse (bool, optional): Whether to use compressed sparse row matrix by scipy.sparse.csr_matrix for matrices intialisation. Defaults to False.
+            dims (int/list, optional): The desired amount of intensity values that will be taken into account performing dimension reduction. Defaults to None, meaning all intensities are considered.
+
+        Returns:
+            array, dict: A list of spectra with positional id correspond to the pixel number. Shape (n_samples, n_features), mapping of an id to respective coordinate tuple
+        """
 
         ndims = self.region_array.shape[2]
 
