@@ -781,6 +781,14 @@ class CombinedSpectra():
         return spectraMatrix
 
     def get_masks(self, regions):
+        """For every region the given region id(s) will be marked as 1 in the resulting mask, overwise 0.
+
+        Args:
+            clusters (int/list/tuple/set): Region id or collection of cluster ids.
+
+        Returns:
+            dict: Dcitionary of region ids mapped to the resulting masks.
+        """
         if not isinstance(regions, (list, tuple, set)):
             regions = [regions]
 
@@ -1402,9 +1410,9 @@ document.addEventListener('readystatechange', event => {
 
 
     def get_internormed_regions(self, method="median", backgroundIDs = None):
+        # TODO: specify which clusters are used for normalization! (dict: region => clusterids)
         """
             Scales region arrays with either average or median of the fold changes. Updates region_array_scaled. Additionally plots the range of scaled fold changes with a boxplot.
-            # TODO: specify which clusters are used for normalization! (dict: region => clusterids)
 
         Args:
             method (str, optional): Method that is supposed to be used for consensus spectra calculation. Either "avg" (average) or "median". Defaults to "median".
