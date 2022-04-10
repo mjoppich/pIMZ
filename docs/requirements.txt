@@ -1,6 +1,4 @@
 sphinx==4.5.0
 sphinxcontrib-apidoc
 docutils<0.18
-ipython
-ipykernel
-nbsphinx
+myst_nb

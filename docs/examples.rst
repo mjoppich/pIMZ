@@ -8,4 +8,4 @@ pIMZ: Examples
 
 IMZMLprocess
 -------------
-.. include:: IMZMLprocess.ipynb
+.. include:: IMZMLprocess

@@ -31,20 +31,11 @@ master_doc = 'index'
 extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.autodoc',
-    'nbsphinx',
+    'myst_nb',
     'sphinx.ext.mathjax',
     'IPython.sphinxext.ipython_console_highlighting'
 ]
-
-nbsphinx_execute = 'never'
-nbsphinx_allow_errors = True
-highlight_language = 'python3'
-nbsphinx_kernel_name = 'python3'
-source_suffix = ['.rst', '.ipynb']
-nbsphinx_execute_arguments = [
-    "--InlineBackend.figure_formats={'svg', 'pdf'}",
-    "--InlineBackend.rc={'figure.dpi': 96}",
-]
+jupyter_execute_notebooks = "off"
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
