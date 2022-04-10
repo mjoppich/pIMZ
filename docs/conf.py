@@ -29,10 +29,21 @@ master_doc = 'index'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
     'sphinx.ext.napoleon',
+    'sphinx.ext.autodoc',
+    'nbsphinx',
     'sphinx.ext.mathjax',
-    'myst_nb',
+    'IPython.sphinxext.ipython_console_highlighting'
+]
+
+nbsphinx_execute = 'never'
+nbsphinx_allow_errors = True
+highlight_language = 'python3'
+nbsphinx_kernel_name = 'python3'
+source_suffix = ['.rst', '.ipynb']
+nbsphinx_execute_arguments = [
+    "--InlineBackend.figure_formats={'svg', 'pdf'}",
+    "--InlineBackend.rc={'figure.dpi': 96}",
 ]
 
 napoleon_google_docstring = True
@@ -70,7 +81,7 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store',  '**.ipynb_checkpoints']
 
 
 # -- Options for HTML output -------------------------------------------------
