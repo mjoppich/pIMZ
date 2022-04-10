@@ -20,3 +20,4 @@ pIMZ focuses on a differential setting, where masses, specific to certain areas 
    usage.rst
    modules.rst
    examples.rst
+   IMZMLprocess
