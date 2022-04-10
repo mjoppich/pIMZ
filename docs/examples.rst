@@ -1,11 +1,8 @@
-
-pIMZ: Examples
-===============
+Examples
+=========
 
 .. toctree::
-   :caption: Contents:
+   :caption: Examples
    :glob:
 
-IMZMLprocess
--------------
-.. include:: IMZMLprocess
+   IMZMLprocess
