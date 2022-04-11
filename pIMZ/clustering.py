@@ -154,7 +154,7 @@ class RegionEmbedding(metaclass=abc.ABCMeta):
         self.logger = logging.getLogger(self.methodname())
         self.logger.setLevel(logging.INFO)
 
-        if not logging.getLogger().hasHandlers():
+        if not self.logger.hasHandlers():
 
             consoleHandler = logging.StreamHandler()
             consoleHandler.setLevel(logging.INFO)

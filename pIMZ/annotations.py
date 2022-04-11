@@ -86,7 +86,7 @@ class ProteinWeights():
 
         Args:
             filename (str): File with at least the following columns: protein_id, gene_symbol, mol_weight_kd, mol_weight.
-            massMode (int): +1 if mz-Values were captured in M+H mode, -1 if mZ-Values were captured in M-H mode (protonated or deprotonated), https://www.uni-saarland.de/fileadmin/upload/lehrstuhl/jauch/An04_Massenspektroskopie_Skript_Volmer.pdf
+            massMode (int): +1 if mz-Values were captured in M+H mode, -1 if mZ-Values were captured in M-H mode (protonated or deprotonated), https://github.com/rformassspectrometry/CompoundDb/issues/38, https://www.uni-saarland.de/fileadmin/upload/lehrstuhl/jauch/An04_Massenspektroskopie_Skript_Volmer.pdf
             ppm (int, optional): ppm (parts per million) error. Default is 5.
             max_mass (float, optional): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1.
             max_mass (float, optional): Minimal mass to consider/include in object. -1 for no filtering. Masses below threshold will be discarded. Default is -1.
@@ -132,8 +132,8 @@ class ProteinWeights():
 
                 proteinIDs = line[col2idx["protein_id"]].split(";")
                 proteinNames = line[col2idx["gene_symbol"]].split(";")
-                mzWeight = float(line[col2idx["mol_weight"]])
-                massWeight = mzWeight + self.massMode
+                massWeight = float(line[col2idx["mol_weight"]])
+                mzWeight = massWeight + self.massMode
 
                 if self.max_mass >= 0 and massWeight > self.max_mass:
                     continue    
@@ -146,8 +146,8 @@ class ProteinWeights():
 
                 for proteinName in proteinNames:
                     #self.protein2mass[proteinName].add(mzWeight)
-                    ppmDist = massWeight * self.ppm / 1000000
-                    self.mass_tree.addi(massWeight - ppmDist, massWeight + ppmDist, {"name": proteinName, "mass": massWeight, "mzWeight": mzWeight})
+                    ppmDist = self.get_ppm(mzWeight, self.ppm)
+                    self.mass_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": massWeight, "mzWeight": mzWeight})
 
         allMasses = self.get_all_masses()
         self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mass_tree), len(allMasses)))
@@ -453,7 +453,6 @@ class MaxquantPeptides(ProteinWeights):
                 continue
 
             for proteinName in proteinNames:
-                #self.protein2mass[proteinName].add(mzWeight)
                 ppmDist = self.get_ppm(molWeight,self.ppm)
                 self.mass_tree.addi(molWeight - ppmDist, molWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight})
 

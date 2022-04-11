@@ -232,6 +232,57 @@ class SpectraRegion():
         with open(path, "wb") as fout:
             pickle.dump(self, fout)
 
+
+    def to_spatial_anndata(self, grouping="segmented") -> anndata.AnnData:
+
+        assert grouping in self.meta
+
+        availableGroups = np.unique(self.meta[grouping])
+
+        sampleVec = []
+        clusterVec = []
+        coordinates = []
+
+        exprData = pd.DataFrame()
+        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mass]
+
+        for clus in availableGroups:
+
+            positions = np.where(self.meta[grouping] == clus, )
+            self.logger.info("Collecting cluster: {}".format(clus))
+
+            bar = makeProgressBar()
+            for pxl in bar(positions):
+
+                pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
+
+                sampleVec.append(pxl_name)
+                clusterVec.append(clus)
+                coordinates.append( pxl )
+
+                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]
+
+
+        self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
+
+        #from squidpy:
+        # adata = AnnData(counts, obsm={"spatial": coordinates})
+        pData = pd.DataFrame()
+        pData["cluster"] = clusterVec
+
+        # columns: genes # var: featurenames
+        # rows   : cells/pixels # obs: rows = cell/pixel information       
+        deData = anndata.AnnData(
+            X=exprData.values.transpose(),
+            var=pd.DataFrame(index=masses),
+            obs=pData,
+            obsm={"spatial": coordinates}
+        )
+
+        return deData
+
+
+
     def ctypesCloseLibrary(self):
         """Unloads the C++ library
         """
@@ -277,11 +328,6 @@ class SpectraRegion():
         - dimred_elem_matrix (array): Embedding of the elem_matrix in low-dimensional space. Shape (n_samples, n_components). Initialized with None.
         - dimred_labels (list): A list of HDBSCAN labels. Initialized with None.
         - segmented (numpy.array): Segmeted region_array which contains cluster ids.
-<<<<<<< HEAD
-=======
-        - segmented_method (str): Clustering method: "UPGMA", "WPGMA", "WARD", "KMEANS", "UMAP_DBSCAN", "CENTROID", "MEDIAN", "DENSMAP_DBSCAN", "DENSMAP_WARD" or "UMAP_WARD". Initialized with None.
-        - cluster_filters (list): A list of filters used. Can include: "remove_singleton", "most_similar_singleton", "merge_background", "remove_islands", "gauss". Initialized with [].
->>>>>>> 1af07b5442b1b7764194296e29fd5378922f46bd
         - consensus (dict): A dictionary of cluster ids mapped to their respective consensus spectra. Initialized with None.
         - consensus_method (str): Name of consensus method: "avg" or "median". Initialized with None.
         - consensus_similarity_matrix (array): Pairwise similarity matrix between consensus spectra. Initialized with None.
@@ -651,6 +697,8 @@ class SpectraRegion():
     def _get_exmass_for_mass(self, mass, threshold=None):
         """Returns the closest mass and index in .imzML file for a specific mass.
 
+        TODO make this really performant!
+
         Args:
             mass (float): mass to look up index for.
             threshold (float, optional): Maximal distance from mass to contained m/z. Defaults to None.
@@ -735,23 +783,18 @@ class SpectraRegion():
         plt.show()
 
 
-    def mass_dotplot(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
+    def mass_dotplot(self, masses, scale=True, meta_group="segmented", pw=None, title="{mz}", exprThreshold=0.2, return_df=False):
         """Filters the region_region to the given masses and returns the matrix with summed
         representation of the gained spectra.
 
         Args:
             masses (array): List of masses or protein names (requires pw set).
-            log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
-            min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
-            max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
-            plot (bool, optional): Whether to plot the output matrix. Defaults to True.
-            verbose (bool, optional): Whether to add information to the logger. Defaults to True.
             pw (ProteinWeights, optional): Allows to translate masses names to actual masses in a given ProteinWeights object. Defaults assuming the elements in masses are numeric, hence None.
 
         Returns:
             numpy.array: Each element is a sum of intensities at given masses.
         """
-        if not isinstance(masses, (list, tuple, set)):
+        if not isinstance(masses, (list, tuple, set, np.ndarray)):
             masses = [masses]
 
         useMasses = []
@@ -760,41 +803,56 @@ class SpectraRegion():
                 massprots = pw.get_masses_for_protein(x)
                 useMasses += list(massprots)
             else:
-                useMasses.append(x)
-
-        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
-
-        for mass in useMasses:
-            
-            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
-
-            if verbose:
-                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
-
-            for i in range(self.region_array.shape[0]):
-                for j in range(self.region_array.shape[1]):
-
-                    image[i,j] += self.region_array[i,j,bestExMassIdx]
+                useMasses.append( self._get_exmass_for_mass(x) )
 
 
-        if log:
-            image = np.log(image)
+        useMasses = list(set(useMasses))
+        massIndices = np.array([x[1] for x in useMasses])
+        massValues = [x[0] for x in useMasses]
 
-        if min_cut_off != None:
-            image[image <= min_cut_off] = min_cut_off
+        # prepare data
+        subsetRA = self.region_array[:,:, massIndices]
 
-        if max_cut_off != None:
-            image[image >= max_cut_off] = max_cut_off
+        # get groups
+        grouping = self.meta[meta_group]
+        all_groups = np.unique(grouping)
+        
+        
+        plotValues = defaultdict(list)
 
-        if plot:
-            heatmap = plt.matshow(image)
-            plt.colorbar(heatmap)
-            plt.gca().xaxis.set_ticks_position('bottom')
-            plt.title(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
-            plt.show()
-            plt.close()
+        for mi, mass in enumerate(massValues):
+            for grp in all_groups:
 
-        return image
+                positions = np.where(grouping == grp, )
+                allValues = subsetRA[:,:,massIndices[mi]][positions]
+
+                massAvgExpr = np.mean(allValues)
+                massPercExpr = sum([1 for x in allValues if x > exprThreshold]) / len(allValues)
+
+                plotValues["mass"].append(mass)
+                plotValues["group"].append(grp)
+
+                plotValues["avg_expr"].append(massAvgExpr)
+                plotValues["perc_expr"].append(massPercExpr)
+
+        df = pd.DataFrame.from_dict(plotValues)
+        plotExpr = "avg_expr"
+        if scale:
+            df["avg_expr_orig"] = df["avg_expr"]
+            zscore = lambda x: (x - x.mean()) / x.std()
+            df["avg_expr_scaled"] = df.groupby(['group'])['avg_expr'].transform(zscore)
+            plotExpr = "avg_expr_scaled"
+        #print(df.sort_values("group"))
+
+        
+
+        fig,_ = plt.subplots()
+        Plotter.plot_df_dots(fig, df, "group", "mass", plotExpr, "perc_expr", title=title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
+        plt.show()
+        plt.close()
+
+        if return_df:
+            return df
 
 
 
@@ -1590,15 +1648,15 @@ class SpectraRegion():
                     self.region_array[i,j,:] = 0
 
 
-    def plot_segments(self, highlight=None, file=None):
+    def plot_segments(self, coloring="segmented", highlight=None, file=None):
         """Plots the segmented array of the current SpectraRegion object.
 
         Args:
             highlight (list/tuple/set/int, optional): If the highlight clusters are specified, those will be assigned a cluster id 2. Otherwise 1. Background stays 0. Defaults to None.
         """
-        assert(not self.segmented is None)
+        assert(coloring in self.meta and not self.meta[coloring] is None)
 
-        showcopy = np.copy(self.segmented)
+        showcopy = np.copy(self.meta[coloring])
 
         if highlight != None:
             if not isinstance(highlight, (list, tuple, set)):
