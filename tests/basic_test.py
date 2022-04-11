@@ -10,7 +10,8 @@ Licensed under MIT
 '''
 
 from pIMZ.imzml import IMZMLExtract
-from pIMZ.regions import SpectraRegion, ProteinWeights
+from pIMZ.regions import SpectraRegion
+from pIMZ.annotations import ProteinWeights
 
 
 def test_example():
