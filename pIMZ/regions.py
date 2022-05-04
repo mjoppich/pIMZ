@@ -458,6 +458,28 @@ class SpectraRegion():
         self.meta["segmented"] = value
     
 
+    def rotate_region(self):
+
+        self.region_array = np.rot90(self.region_array)
+
+        for x in self.meta:
+            self.meta[x] = np.rot90(self.meta[x])
+
+    def flip_region(self, dir="hor"):
+
+        assert dir in ["hor", "ver"]
+
+        flipCall = None
+        if dir == "hor":
+            flipCall = lambda x: np.flip(x, axis=1)
+        elif dir == "ver":
+            flipCall = lambda x: np.flip(x, axis=0)
+
+        self.region_array = flipCall(self.region_array)
+
+        for x in self.meta:
+            self.meta[x] = flipCall(self.meta[x])
+
 
 
     def plot_array(self, fig, arr, discrete_legend=True):
@@ -881,7 +903,7 @@ class SpectraRegion():
         return self.__str__()
 
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}"):
+    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}", file=None):
         """Filters the region_region to the given masses and returns the matrix with summed
         representation of the gained spectra.
 
@@ -937,6 +959,10 @@ class SpectraRegion():
             plt.colorbar(heatmap)
             plt.gca().xaxis.set_ticks_position('bottom')
             plt.title(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
+
+            if not file is None:
+                plt.savefig(file, bbox_inches="tight")
+
             plt.show()
             plt.close()
 

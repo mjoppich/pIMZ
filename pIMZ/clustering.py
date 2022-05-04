@@ -259,7 +259,7 @@ class PCAEmbedding(RegionEmbedding):
     def explained_variance_ratio(self):
         return self.embedding_object.explained_variance_ratio_
 
-    def plot_embedding(self):
+    def plot_embedding(self, colors=None):
 
         dimExplained = self.embedding_object.explained_variance_ratio_
 
@@ -267,8 +267,28 @@ class PCAEmbedding(RegionEmbedding):
 
         plt.figure(figsize=(12, 12))
 
+        dotlabels = None
+        labels=None
 
-        plt.scatter(self.embedded_matrix[:, 0], self.embedded_matrix[:, 1])
+        if not colors is None:
+            dotlabels = [0] * self.embedded_matrix.shape[0]
+
+            cmap = matplotlib.cm.get_cmap('viridis')
+            norm = matplotlib.colors.Normalize(vmin=np.min(colors), vmax=np.max(colors))
+
+            for idx in self.idx2coord:
+                (x,y) = self.idx2coord[idx]
+                dotlabels[idx] = colors[x,y]
+
+            dotlabels = np.array(dotlabels)
+
+            for g in np.unique(dotlabels):
+                grpIndices = np.where(dotlabels == g)
+                labelColor = cmap(norm(g))
+                plt.scatter(self.embedded_matrix[grpIndices, 0], self.embedded_matrix[grpIndices, 1], color=labelColor, label=g, s=10, cmap='viridis')
+                
+        else:
+            scatter=plt.scatter(self.embedded_matrix[:, 0], self.embedded_matrix[:, 1], s=10, cmap='viridis')
 
         plt.xlabel("{} dim1 ({:.2})".format(reductionName, dimExplained[0]))
         plt.ylabel("{} dim2 ({:.2})".format(reductionName, dimExplained[1]))

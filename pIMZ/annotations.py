@@ -6,6 +6,7 @@ import random
 import math
 from collections import defaultdict, Counter
 import glob
+from re import M
 import shutil, io, base64, abc
 
 # general package
@@ -100,7 +101,7 @@ class ProteinWeights():
         self.massMode = massMode
 
         #self.protein2mass = defaultdict(set)
-        self.mass_tree = IntervalTree()
+        self.mz_tree = IntervalTree()
         #self.category2id = defaultdict(set)
         #self.protein_name2id = {}
 
@@ -133,7 +134,7 @@ class ProteinWeights():
                 proteinIDs = line[col2idx["protein_id"]].split(";")
                 proteinNames = line[col2idx["gene_symbol"]].split(";")
                 massWeight = float(line[col2idx["mol_weight"]])
-                mzWeight = massWeight + self.massMode
+                mzWeight = self.get_mz_from_mass(massWeight)
 
                 if self.max_mass >= 0 and massWeight > self.max_mass:
                     continue    
@@ -147,12 +148,17 @@ class ProteinWeights():
                 for proteinName in proteinNames:
                     #self.protein2mass[proteinName].add(mzWeight)
                     ppmDist = self.get_ppm(mzWeight, self.ppm)
-                    self.mass_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": massWeight, "mzWeight": mzWeight})
+                    # this adds MZ values to the tree!
+                    self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": massWeight, "mzWeight": mzWeight})
 
         allMasses = self.get_all_masses()
-        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mass_tree), len(allMasses)))
+        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mz_tree), len(allMasses)))
 
+    def get_mz_from_mass(self, mass):
+        return mass + self.massMode
 
+    def get_mass_from_mz(self, mz):
+        return mz - self.massMode
 
     def get_all_masses(self):
         """Returns all masses contained in the lookup-intervaltree
@@ -161,7 +167,7 @@ class ProteinWeights():
             set: set of all masses used by this object
         """
         allMasses = set()
-        for interval in self.mass_tree:
+        for interval in self.mz_tree:
             allMasses.add( interval.data["mass"] )
 
         return allMasses
@@ -174,7 +180,7 @@ class ProteinWeights():
         """
 
         mass2prot = defaultdict(set)
-        for interval in self.mass_tree:
+        for interval in self.mz_tree:
             mass2prot[ interval.data["mass"] ].add(interval.data["name"])
 
         return mass2prot
@@ -205,7 +211,7 @@ class ProteinWeights():
         return df
 
 
-    def get_protein_from_mass(self, mass, ppm=5):
+    def get_protein_from_mz(self, mz, ppm=5):
         """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
 
         Args:
@@ -218,17 +224,24 @@ class ProteinWeights():
 
         possibleMatches = []
 
-        ppmDist = self.get_ppm(mass, ppm)
-        overlaps = self.mass_tree.overlap(mass-ppmDist, mass+ppmDist)
+        ppmDist = self.get_ppm(mz, ppm)
+        overlaps = self.mz_tree.overlap(mz-ppmDist, mz+ppmDist)
         for overlap in overlaps:
-            protMass = (1 + ppm / 1000000) / overlap[1]
-            protDist = abs(mass-protMass)
+            
+            protMass = overlap[2]["mzWeight"]
+            protDist = abs(mz-protMass)
             possibleMatches.append((overlap[2]["name"], protMass, protDist))
 
         possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
         possibleMatches = [(x[0], x[1]) for x in possibleMatches]
 
         return possibleMatches
+
+    def get_protein_from_mass(self, mass, ppm=5):
+        mz = self.get_mz_from_mass(mass)
+        return self.get_protein_from_mz(mz, ppm=ppm)
+
+    
 
 
     def get_mass_for_protein(self, protein):
@@ -250,7 +263,7 @@ class ProteinWeights():
 
         if type(protein) == str:
             retData = set()
-            for interval in self.mass_tree:
+            for interval in self.mz_tree:
                 if interval.data["name"] == protein:
                     retData.add(interval.data[data_slot])
             return retData        
@@ -261,6 +274,19 @@ class ProteinWeights():
             allData = allData.union(protData)
 
         return allData
+
+
+    def get_data_for_proteins(self, proteins, data_slot="mass"):
+
+        dataCounter = Counter()
+
+        for x in proteins:
+            datas = self.get_data_for_protein(x[0], data_slot=data_slot)
+            
+            for y in datas:
+                dataCounter[y] += 1
+
+        return dataCounter
 
 
     def print_collisions(self, maxdist=2.0, ppm=None, print_proteins=False):
@@ -429,7 +455,7 @@ class MaxquantPeptides(ProteinWeights):
             try:
                 aaSequence = row["Sequence"]
                 molWeight = float(row["Mass"])
-                mzWeight = molWeight + self.massMode
+                mzWeight = self.get_mz_from_mass(molWeight)
             except ValueError:
                 self.logger.error("Unable to process line {}: {}".format(ri, row))
                 continue
@@ -439,13 +465,13 @@ class MaxquantPeptides(ProteinWeights):
             if not pd.isna(row[name_column]):
                 proteinNames = name_function(row[name_column])
             else:
-                proteinNames = ["{}_{}".format(aaSequence, molWeight)]
+                proteinNames = ["{}_{}".format(aaSequence, mzWeight)]
 
 
-            if self.max_mass >= 0 and molWeight > self.max_mass:
+            if self.max_mass >= 0 and mzWeight > self.max_mass:
                 continue    
 
-            if self.min_mass >= 0 and molWeight < self.min_mass:
+            if self.min_mass >= 0 and mzWeight < self.min_mass:
                 continue
 
             if len(proteinNames) == 0:
@@ -453,11 +479,11 @@ class MaxquantPeptides(ProteinWeights):
                 continue
 
             for proteinName in proteinNames:
-                ppmDist = self.get_ppm(molWeight,self.ppm)
-                self.mass_tree.addi(molWeight - ppmDist, molWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight})
+                ppmDist = self.get_ppm(mzWeight,self.ppm)
+                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight})
 
         allMasses = self.get_all_masses()
-        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mass_tree), len(allMasses)))
+        self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mz_tree), len(allMasses)))
 
 class AnnotatedProteinWeights(ProteinWeights):
 
@@ -486,21 +512,21 @@ class SDFProteinWeights(AnnotatedProteinWeights):
 
 
             molWeight = float(self.sdf_dic[lm_id]["EXACT_MASS"])
-            mzWeight = molWeight + self.massMode
+            mzWeight = self.get_mz_from_mass(molWeight)
 
             if "NAME" in self.sdf_dic[lm_id]:
                 proteinName = self.sdf_dic[lm_id]["NAME"]
             elif "SYSTEMATIC_NAME" in self.sdf_dic[lm_id]:
                 proteinName = self.sdf_dic[lm_id]["SYSTEMATIC_NAME"]
 
-            if self.max_mass >= 0 and molWeight > self.max_mass:
+            if self.max_mass >= 0 and mzWeight > self.max_mass:
                 continue    
 
-            if self.min_mass >= 0 and molWeight < self.min_mass:
+            if self.min_mass >= 0 and mzWeight < self.min_mass:
                 continue
 
-            ppmDist = self.get_ppm(molWeight,self.ppm)
-            self.mass_tree.addi(molWeight - ppmDist, molWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight, "category": self.sdf_dic[lm_id]["MAIN_CLASS"]})
+            ppmDist = self.get_ppm(mzWeight,self.ppm)
+            self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight, "category": self.sdf_dic[lm_id]["MAIN_CLASS"]})
 
 
     @classmethod
