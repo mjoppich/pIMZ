@@ -17,6 +17,7 @@ from numpy.ctypeslib import ndpointer
 
 from pyimzml.ImzMLParser import ImzMLParser, browse, getionimage
 import ms_peak_picker
+import pybaselines
 import regex as re
 
 
@@ -27,6 +28,9 @@ from skimage import measure as sk_measure
 # processing
 import dill as pickle
 
+#JIT
+from numba import jit, njit, prange
+from typing import Tuple
 
 #vis
 import dabest
@@ -37,6 +41,7 @@ from scipy import ndimage, misc, sparse, signal, stats, interpolate
 from scipy.sparse.linalg import spsolve
 from scipy.stats import kurtosis
 from scipy.interpolate import interp1d
+from scipy.spatial import ConvexHull
 
 from pykeops.numpy import LazyTensor
 
@@ -48,7 +53,7 @@ import jinja2
 # applications
 import progressbar
 
-def makeProgressBar():
+def makeProgressBar() -> progressbar.ProgressBar:
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
@@ -56,7 +61,50 @@ def makeProgressBar():
 
 from .plotting import Plotter
 
+@njit(parallel=True)
+def normalize_tic(region_array):
 
+    outarray = np.zeros(region_array.shape, dtype=np.float32)
+
+    for i in prange(region_array.shape[0]):
+        for j in range(0, region_array.shape[1]):
+            specSum = np.sum(region_array[i,j,:])
+            if specSum > 0:
+                retSpectrum = (region_array[i,j,:] / specSum) * region_array.shape[2]
+                outarray[i,j,:] = retSpectrum
+    
+    return outarray
+
+@njit(parallel=True)
+def _prepare_ppp_array(region_array, threshold):
+    region_dims = (region_array.shape[0], region_array.shape[1])
+
+    peakplot = np.zeros(region_dims, dtype=np.int32)
+    for i in prange(region_dims[0]):
+        for j in range(0, region_dims[1]):
+            peakplot[i,j] = len([x for x in region_array[i, j, :] if x > threshold])
+    return peakplot
+
+@njit(parallel=True)
+def _prepare_tic_array(region_array):
+    region_dims = (region_array.shape[0], region_array.shape[1])
+    peakplot = np.zeros(region_dims, dtype=np.float32)
+    for i in prange(region_dims[0]):
+        for j in range(0, region_dims[1]):
+            peakplot[i,j] = np.sum(region_array[i, j, :])
+    return peakplot
+
+@njit(parallel=True)
+def _prepare_tnc_array(region_array):
+
+    region_dims = (region_array.shape[0], region_array.shape[1])
+    peakplot = np.zeros(region_dims, dtype=np.float32)
+
+    for i in range(0, region_dims[0]):
+        for j in range(0, region_dims[1]):
+            peakplot[i,j] = np.linalg.norm(region_array[i, j, :])
+
+    return peakplot
 
 class IMZMLExtract:
     """IMZMLExtract class is required to access and retrieve data from an imzML file.
@@ -458,6 +506,7 @@ class IMZMLExtract:
 
 
 
+
     def normalize_spectrum(self, spectrum, normalize=None, max_region_value=None):
         """Normalizes a single spectrum.
 
@@ -476,7 +525,7 @@ class IMZMLExtract:
 
         assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector"])
 
-        retSpectrum = np.array(spectrum, copy=True)
+        retSpectrum = spectrum #np.array(spectrum, copy=True)
 
         if normalize in ["max_intensity_region", "max_intensity_all_regions"]:
             assert(max_region_value != None)
@@ -524,10 +573,34 @@ class IMZMLExtract:
 
             return retSpectrum
 
+    def baselines_pybaseline(self, y):
+
+        bkg_3 = pybaselines.morphological.mor(y, half_window=30)[0]
+        return y - bkg_3
+
+    def baseline_rubberband(self, y, mzValues):
+        def rubberband(x, y):
+            # Find the convex hull
+            v = ConvexHull(np.array([x for x in zip(x, y)])).vertices
+            # Rotate convex hull vertices until they start from the lowest one
+            v = np.roll(v, -v.argmin())
+            # Leave only the ascending part
+            v = v[:v.argmax()]
+            #print(x[v])
+            #print(y[v])
+            print(v)
+
+            # Create baseline using linear interpolation between vertices
+            return np.interp(x, x[v], y[v])
+        
+        if sum(y) == 0:
+            return y
+
+        return y - rubberband(mzValues, y)
 
     def baseline_als(self, y, lam, p, niter=10):
         """Performs Baseline Correction with Asymmetric Least Squares Smoothing by P. Eilers and H. Boelens.
-
+            See: https://stackoverflow.com/questions/29156532/python-baseline-correction-library
         Args:
             y (numpy.array): Spectrum to correct.
             lam (int): 2nd derivative constraint.
@@ -539,10 +612,12 @@ class IMZMLExtract:
         """
         L = len(y)
         D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
+        D = lam * D.dot(D.transpose()) # Precompute this term since it does not depend on `w`
         w = np.ones(L)
+        W = sparse.spdiags(w, 0, L, L)
         for i in range(niter):
-            W = sparse.spdiags(w, 0, L, L)
-            Z = W + lam * D.dot(D.transpose())
+            W.setdiag(w) # Do not create a new matrix, just update diagonal values
+            Z = W + D
             z = spsolve(Z, w*y)
             w = p * (y > z) + (1-p) * (y < z)
         return z
@@ -612,7 +687,7 @@ class IMZMLExtract:
 
 
     @classmethod
-    def _fivenumber(cls, valuelist):
+    def _fivenumber(cls, valuelist) -> Tuple[int, int,float, float, float, float, float]:
         """Creates five number statistics for values in valuelist.
 
         Args:
@@ -745,18 +820,54 @@ class IMZMLExtract:
             numpy.array: Normalized region_array.
         """
         
-        assert (normalize in [None, "zscore", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor", "baseline_cor_local"])
+        assert (normalize in [None, "zscore", "baselines_pybaseline", "baseline_rubberband", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor", "baseline_cor_local"])
+
 
         if normalize in ["vector"]:
             outarray = np.zeros(region_array.shape)
 
 
+        if normalize in ["baseline_rubberband"]:
+
+            outarray = np.zeros(region_array.shape)
+            bar = makeProgressBar()
+            xvalues = np.array([x for x in range(region_array.shape[2])])
+            for i in bar(range(region_array.shape[0])):
+                for j in range(region_array.shape[1]):
+                    outarray[i,j,:] = self.baseline_rubberband(region_array[i,j,:], xvalues)
+
+            return outarray
+
+        if normalize in ["baselines_pybaseline"]:
+
+            outarray = np.zeros(region_array.shape)
+            bar = makeProgressBar()
+            xvalues = np.array([x for x in range(region_array.shape[2])])
+            for i in bar(range(region_array.shape[0])):
+                for j in range(region_array.shape[1]):
+                    outarray[i,j,:] = self.baselines_pybaseline(region_array[i,j,:])
+
+            return outarray
+            
+
         if normalize in ["baseline_cor"]:
-            outarray = np.array([[self.baseline_als(y, lam, p, iters) for y in x] for x in region_array])
+
+            outarray = np.zeros(region_array.shape)
+            bar = makeProgressBar()
+            for i in bar(range(region_array.shape[0])):
+                for j in range(region_array.shape[1]):
+                    outarray[i,j,:] = self.baseline_als(region_array[i,j,:], lam, p, iters)
+
             return outarray
 
         if normalize in ["baseline_cor_local"]:
-            outarray = np.array([[self.baseline_cor(spectrum=y, division=division, simple=simple) for y in x] for x in region_array])
+
+            outarray = np.zeros(region_array.shape)
+            bar = makeProgressBar()
+            for i in bar(range(region_array.shape[0])):
+                for j in range(region_array.shape[1]):
+                    outarray[i,j,:] = self.baseline_cor(spectrum=region_array[i,j,:], division=division, simple=simple)
+
             return outarray
 
         if normalize in ["inter_median", "intra_median"]:
@@ -881,11 +992,7 @@ class IMZMLExtract:
         Args:
             region_array (numpy.array): Array of spectra.
         """
-        region_dims = region_array.shape
-        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
-        for i in range(0, region_dims[0]):
-            for j in range(0, region_dims[1]):
-                peakplot[i,j] = np.sum(region_array[i, j, :])
+        peakplot = _prepare_tic_array(region_array)
 
         fig, _ = plt.subplots()
         Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
@@ -899,11 +1006,7 @@ class IMZMLExtract:
         Args:
             region_array (numpy.array): Array of spectra.
         """
-        region_dims = region_array.shape
-        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
-        for i in range(0, region_dims[0]):
-            for j in range(0, region_dims[1]):
-                peakplot[i,j] = np.linalg.norm(region_array[i, j, :])
+        peakplot = _prepare_tnc_array(region_array)
 
         fig, _ = plt.subplots()
         Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
@@ -912,18 +1015,13 @@ class IMZMLExtract:
         plt.close()
 
 
-    def plot_ppp(self, region_array, file=None):
+    def plot_ppp(self, region_array, file=None, threshold=0):
         """Displays a matrix where each pixel shows the number of peaks at that location.
 
         Args:
             region_array (numpy.array): Array of spectra.
         """
-        region_dims = region_array.shape
-        peakplot = np.zeros((region_array.shape[0],region_array.shape[1]))
-        bar = makeProgressBar()
-        for i in bar(range(0, region_dims[0])):
-            for j in range(0, region_dims[1]):
-                peakplot[i,j] = len([x for x in region_array[i, j, :] if x > 0])
+        peakplot = _prepare_ppp_array(region_array, threshold)
 
         fig, _ = plt.subplots()
         Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
@@ -1117,6 +1215,7 @@ class IMZMLExtract:
         return np.dot(vA, vB) / (np.sqrt( vAL ) * np.sqrt( vBL ))
 
 
+    
     @classmethod
     def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05):    
         """
@@ -1130,6 +1229,9 @@ class IMZMLExtract:
         We used a z-score cutoff of 2 to identify 160 significantly variable genes, after excluding genes with very low average expression
         
         As expected, our highly variable genes consisted primarily of developmental and spatially regulated factors whose expression levels are expected to vary across the dissociated cells.
+
+        The more bins, the longer in takes. The more bins, the less likely are larger z-scores.
+
 
         Args:
             region (np.array): input region array
@@ -1146,10 +1248,11 @@ class IMZMLExtract:
 
         for k in bar(range(0, region.shape[2])):
 
-            allMassIntensities = []
-            for i in range(region.shape[0]):
-                for j in range(region.shape[1]):
-                    allMassIntensities.append(region[i,j,k])
+            #allMassIntensities = []
+            #for i in range(region.shape[0]):
+            #    for j in range(region.shape[1]):
+            #        allMassIntensities.append(region[i,j,k])
+            allMassIntensities = np.ravel(region[:,:,k])
 
             massMean = np.mean(allMassIntensities)
             massVar = np.var(allMassIntensities)
@@ -1172,7 +1275,7 @@ class IMZMLExtract:
 
             binElems = []
             for disp, z in zip(bin2elem[binID], binZs):
-                binElems.append((disp[0], disp[1], z))
+                binElems.append((disp[0], disp[1], z)) #massIndex, mass mean, zvalue
 
             allZElems += binElems
 
@@ -1210,13 +1313,12 @@ class IMZMLExtract:
 
         print("Identified", len(hvIndices), "HV indices")
 
+        if return_indices:
+            return hvIndices
+
         retArray = np.copy(region)
         retArray[:,:,:] = 0
-
         retArray[:,:,hvIndices] = region[:,:,hvIndices]
-
-        if return_indices:
-            return retArray, hvIndices
 
         return retArray
 
@@ -1309,7 +1411,6 @@ class IMZMLExtract:
 
         return specNew
 
-
     def to_called_peaks(self, region, masses, resolution=0.1, reduce_peaks=False, picking_method="quadratic"):
         """Transforms an array of spectra into an array of called peaks. The spectra resolution is changed to 1/resolution (0.25-steps for resolution == 4). Peaks are found using ms_peak_picker. If there are multiple peaks for one m/z value, the highest one is chosen.
 
@@ -1318,7 +1419,7 @@ class IMZMLExtract:
             masses (numpy.array): m/z values for region
             resolution (int, optional): Resolution to return. Defaults to 0.1
             reduce_peaks (bool, optional): if true, return only outarray of useful peaks. Defaults to False.
-            picking_method (str, optional): The name of the peak model to use. One of "quadratic", "gaussian", "lorentzian", or "apex" (see ms_peak_picker for details). Defaults to "quafratic".
+            picking_method (str, optional): The name of the peak model to use. One of "quadratic", "gaussian", "lorentzian", or "apex" (see ms_peak_picker for details). Defaults to "quadratic".
         Returns:
             numpy.array, numpy.array: new array of spectra, corresponding masses
         """
@@ -1362,7 +1463,7 @@ class IMZMLExtract:
 
                 peak_list = ms_peak_picker.pick_peaks(region[i,j,:], masses, fit_type=picking_method)
                 #retlist.append(peak_list)
-                allPeaksMZ = set([x.mz for x in peak_list])
+                #allPeaksMZ = set([x.mz for x in peak_list])
                 #print((i,j), min(allPeaksMZ), max(allPeaksMZ))
 
                 rpeak2peaks = defaultdict(list)
@@ -1965,6 +2066,23 @@ class IMZMLExtract:
 
         return outspectra, outmzvalues
 
+    def check_avg_mz_distance(self, regionid):
+        _, c2mz = self.get_continuous_region_spectra(regionid)
+
+        alldiffs = []
+        #bar = makeProgressBar()
+
+        for x in c2mz:
+            mzVec = c2mz[x]
+            if len(mzVec) == 0:
+                continue
+            diffs = list(np.abs(mzVec[:-1]-mzVec[1:]))
+            alldiffs += diffs
+
+        diffMean = np.mean(alldiffs)
+
+        return diffMean
+
 
     def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None, makeNullLine=False):
 
@@ -2033,7 +2151,7 @@ class IMZMLExtract:
 
         return sarray, masses_new
 
-    def plot_spectra(self, region_array, coords, valRange, xvals=None, stems=False):
+    def plot_spectra(self, region_array, coords, valRange, xvals=None, stems=False, label="", start_plot=True, end_plot=True):
         """plots selected spectra in a given range for region_array
 
         Args:
@@ -2055,19 +2173,23 @@ class IMZMLExtract:
             if region_array.shape[2] == len(self.mzValues):
                 xvals = self.mzValues
 
-        plt.figure()
+        if start_plot:
+            plt.figure()
         
         for xi, x in enumerate(coords):
+            labelstr = "{} {}".format(label, str(x))
             if not stems:
-                plt.plot(xvals, region_array[x], label=str(x))
+                plt.plot(xvals, region_array[x], label=labelstr)
             else:
-                markerline, stemlines, baseline = plt.stem(xvals, region_array[x], label=str(x), markerfmt=stemFormats[xi])
+                markerline, stemlines, baseline = plt.stem(xvals, region_array[x], label=labelstr, markerfmt=stemFormats[xi])
                 plt.setp(stemlines, 'color', plt.getp(markerline,'color'))
                 plt.setp(stemlines, 'linestyle', 'dotted')
             
-        plt.xlim(valRange)
-        plt.gca().relim()
-        plt.gca().autoscale_view()
-        plt.legend()
-        plt.close()
+        if end_plot:
+            plt.xlim(valRange)
+            #plt.gca().relim()
+            #plt.gca().autoscale_view()
+            plt.legend()
+            plt.show()
+            plt.close()
     

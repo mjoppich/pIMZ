@@ -17,7 +17,7 @@ from scipy.sparse import csr_matrix
 
 import regex as re
 import h5py
-
+from intervaltree import Interval, IntervalTree
 
 # image
 import skimage
@@ -47,23 +47,22 @@ from scipy.spatial.distance import squareform, pdist
 import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from statsmodels.distributions.empirical_distribution import ECDF
+from statsmodels.stats.multitest import multipletests
 from statistics import NormalDist
 
 
 from .imzml import IMZMLExtract
 from .plotting import Plotter
+from .regions import SpectraRegion
 
 import abc
 
 # applications
 import progressbar
-def makeProgressBar():
+def makeProgressBar() -> progressbar.ProgressBar:
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
-
-class SpectraRegion():
-    pass
 
 
 class DifferentialTest(metaclass=abc.ABCMeta):
@@ -84,7 +83,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion]], testname="Differential") -> None:
+    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion]], corr_method="benjamini_hochberg", testname="Differential") -> None:
 
         
         if isinstance(specs, SpectraRegion):
@@ -95,6 +94,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         self.testname = testname
         self.pseudo_count = 1e-9
         self.threshold = 0.2
+        self.corr_method = corr_method
         #logger
         self.__set_logger()
 
@@ -134,7 +134,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
             for xclus in group2[xname]:
                 assert xclus in np.unique(self.specs[xname].meta[grouping])
 
-        return self.do_de_analysis(group1, group2,grouping)
+        return self.do_de_analysis(group1, group2, grouping)
 
 
 
@@ -163,27 +163,31 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         self.logger.info("Preparing input masks")
 
         for spec_name in self.specs:
-            input_masks_group1[spec_name] = np.zeros( (self.specs[spec_name].region_array.shape[0], self.specs[spec_name].region_array.shape[1]) )
-            input_masks_group2[spec_name] = np.zeros( (self.specs[spec_name].region_array.shape[0], self.specs[spec_name].region_array.shape[1]) )
+            input_masks_group1[spec_name] = np.zeros( (self.specs[spec_name].region_array.shape[0], self.specs[spec_name].region_array.shape[1]), dtype=np.uint8 )
+            input_masks_group2[spec_name] = np.zeros( (self.specs[spec_name].region_array.shape[0], self.specs[spec_name].region_array.shape[1]), dtype=np.uint8 )
 
             spec_groups1 = group1.get(spec_name, [])
             for spec_group in spec_groups1:
-                input_masks_group1[spec_name][np.where(self.specs[spec_name].meta[self.grouping] == spec_group)] = 1
+                input_masks_group1[spec_name][np.where(self.specs[spec_name].meta[grouping] == spec_group)] = 1
 
             pixels_group1 += np.sum(input_masks_group1[spec_name].flatten())
 
-            spec_groups2 = group1.get(spec_name, [])
+            spec_groups2 = group2.get(spec_name, [])
             for spec_group in spec_groups2:
-                input_masks_group2[spec_name][np.where(self.specs[spec_name].meta[self.grouping] == spec_group)] = 1
+                input_masks_group2[spec_name][np.where(self.specs[spec_name].meta[grouping] == spec_group)] = 1
             
             pixels_group2 += np.sum(input_masks_group2[spec_name].flatten())
 
 
         for x in input_masks_group1:
-            self.logger.info("For region {} identified {} of {} pixels for group1".format(x, np.sum(input_masks_group1[x].flatten())), np.mul(input_masks_group1[x].shape))
+            self.logger.info("For region {rid} identified {pxi} of {pxa} pixels for group1".format(rid=x, pxi=np.sum(np.ravel(input_masks_group1[x])), pxa=np.multiply(*input_masks_group1[x].shape)))
+
+            input_masks_group1[x] = input_masks_group1[x] == 1
 
         for x in input_masks_group2:
-            self.logger.info("For region {} identified {} of {} pixels for group2".format(x, np.sum(input_masks_group2[x].flatten())), np.mul(input_masks_group2[x].shape))
+            self.logger.info("For region {} identified {} of {} pixels for group2".format(x, np.sum(np.ravel(input_masks_group2[x])), np.multiply(*input_masks_group2[x].shape)))
+
+            input_masks_group2[x] = input_masks_group2[x] == 1
 
         self.logger.info("Got all input masks")
 
@@ -194,9 +198,9 @@ class DifferentialTest(metaclass=abc.ABCMeta):
     def create_common_features(self):
         self.logger.info("Preparing common features")
         all_spec_names = [x for x in self.specs]
-        common_features = list(self.specs[all_spec_names[0]].idx2mass)
+        common_features = set(self.specs[all_spec_names[0]].idx2mass)
         for x in all_spec_names:
-            common_features = set.intersection(common_features, list(self.specs[all_spec_names[0]].idx2mass))
+            common_features = set.intersection(common_features, set(self.specs[all_spec_names[0]].idx2mass))
 
         self.logger.info("Identified {} common features".format(len(common_features)))
         
@@ -210,51 +214,57 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         input_masks_group1, input_masks_group2, pixels_group1, pixels_group2 = self.create_input_masks(group1, group2, grouping) 
 
 
-        dfDict = defaultdict(list)
-
-        bar = makeProgressBar()
-        for feature in bar(common_features):
-
-            group1_values = []
-            group2_values = []
+        
+        def process_feature(feature):
+            group1_values = np.empty(0)
+            group2_values = np.empty(0)
 
             for spec_name in self.specs:
 
                 if not spec_name in input_masks_group1 and not spec_name in input_masks_group2:
                     continue
                 
-                fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)
-                if spec_name in input_masks_group1:
+                fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)[1]
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]].flatten()
-                    group1_values += spec_values
+                if spec_name in input_masks_group1:
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]])
+                    spec_values = spec_values[spec_values > self.threshold]
+                    group1_values = np.concatenate((group1_values, spec_values))
 
                 if spec_name in input_masks_group2:
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]].flatten()
-                    group2_values += spec_values
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]])
+                    spec_values = spec_values[spec_values > self.threshold]
+                    group2_values = np.concatenate((group2_values, spec_values))
 
 
-            aboveThreshold_group1 = np.array([x for x in group1_values if x > self.threshold])
-            aboveThreshold_group2 = np.array([x for x in group2_values if x > self.threshold])
+            mean_group1 = np.mean(group1_values)
+            mean_group2 = np.mean(group2_values)
 
-            mean_group1 = np.mean(aboveThreshold_group1)
-            mean_group2 = np.mean(aboveThreshold_group2)
+            #print(len(group1_values), len(group2_values), pixels_group1, pixels_group2)
 
-            dfDict["feature"].append(feature)
-            dfDict["pct.1"].append(len(aboveThreshold_group1) / pixels_group1)
-            dfDict["pct.2"].append(len(aboveThreshold_group2) / pixels_group2)
-            dfDict["mean.1"].append(mean_group1)
-            dfDict["mean.2"].append(mean_group2)
+            returnDict = {}
+            returnDict["feature"] =feature
+            returnDict["pct.1"] = len(group1_values) / pixels_group1
+            returnDict["pct.2"] = len(group2_values) / pixels_group2
+            returnDict["mean.1"] = mean_group1
+            returnDict["mean.2"] = mean_group2
+            returnDict["log2FC"] = self.logFC(mean_group1, mean_group2)
+            returnDict["p_value"] = self.compare_groups(group1_values, group2_values)
 
-            dfDict["log2FC"].append(self.logFC(mean_group1, mean_group2))
-            dfDict["p_value"].append(self.compare_groups(group1_values, group2_values))
+            return returnDict
 
+        print("Starting analysis")
+        #results = list(map(process_feature, common_features))
+        bar = makeProgressBar()
+        results = [process_feature(x) for x in bar(common_features)]
+  
+        print("Finishing analysis")
 
-        de_df = pd.DataFrame.from_dict(dfDict)
+        de_df = pd.DataFrame.from_records(results)
         pvals = de_df["p_value"]
 
-        if self.corr_method == 'benjamini-hochberg':
+        if self.corr_method == 'benjamini_hochberg':
             from statsmodels.stats.multitest import multipletests
             
             pvals[np.isnan(pvals)] = 1
@@ -287,7 +297,7 @@ class DifferentialTTest(DifferentialTest):
             scores, pvals = stats.ttest_ind(
                 group1_values, group2_values,
                 equal_var=False,  # Welch's
-            )
+            )          
 
             return pvals
             
@@ -318,44 +328,134 @@ class DifferentialEmpireTest(DifferentialTest):
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-        binDF1, cBins1, bin2ecdf1 = self.makeBins(deDF, group1)
-        binDF2, cBins2, bin2ecdf2 = self.makeBins(deDF, group2)
+    def perform_de_analysis(self, group1: Union[Iterable, Dict[Any, Iterable]], group2: Union[Iterable, Dict[Any, Iterable]], grouping:str) -> pd.DataFrame:
+        
+        for xname in self.specs:
+            assert grouping in self.specs[xname].meta
 
-    def makeBins(self, deDF, replicates):
+        if isinstance(group1, Iterable):
+            assert( len(self.specs) == 1 )
+            specname = [x for x in self.specs][0]
+            group1 = {specname: group1}
 
-        repDF = deDF[replicates].copy()
-        repDF["mean"] = repDF.mean(axis=1)
-        repDF["std"] = repDF.std(axis=1)
+        if isinstance(group2, Iterable):
+            assert( len(self.specs) == 1 )
+            specname = [x for x in self.specs][0]
+            group2 = {specname: group2}
 
-        repDF["bins"], createdBins = pd.cut(repDF["mean"], 100, retbins=True)
-        l2i = {}
-        for i,x in enumerate(repDF["bins"].cat.categories):
-            l2i[x.left] = i
+        
+        for xname in group1:
+            assert(xname in self.specs)
 
-        repDF["ibin"] = [l2i[x.left] for x in repDF["bins"]]
+            for xclus in group1[xname]:
+                assert xclus in np.unique(self.specs[xname].meta[grouping])
 
-        allBinIDs = sorted(set(repDF["ibin"]))
+        for xname in group2:
+            assert(xname in self.specs)
+
+            for xclus in group2[xname]:
+                assert xclus in np.unique(self.specs[xname].meta[grouping])
+
+
+        input_masks_group1, input_masks_group2, pixels_group1, pixels_group2 = self.create_input_masks(group1, group2, grouping) 
+
+
+    def create_ecdf(self, input_masks, bins):
+
+        selCoords = defaultdict(list)
+
+        for spec_name in self.specs:
+            if not spec_name in input_masks:
+                continue
+
+            inMask = input_masks.get(spec_name, None)
+
+            for i in range(inMask.shape[0]):
+                for j in range(inMask.shape[1]):
+                    if inMask[i,j] == 1:
+                        selCoords[spec_name].append((i,j))
+
         binID2ECDF = {}
-        for binID in allBinIDs:
-            selBinDF = repDF[repDF["ibin"] == binID]
-            allFCs = []
-            
-            for r1 in replicates:
-                for r2 in replicates:
-                    if r1==r2:
-                        continue
-                    allFCs += [np.log2(x) for x in (selBinDF[r1] / selBinDF[r2]) if ~np.isnan(x) and ~np.isinf(x) and not x==0]
+        for binID in bins:
 
+            binMatrix = self.specs.region_array[:,:, bins == binID]
+
+            allFCs = []
+            for coord1 in selCoords:
+                for coord2 in selCoords:
+
+                    if coord1 == coord2:
+                        continue
+
+                    coord1Vec = binMatrix[coord1]
+                    coord2Vec = binMatrix[coord2]
+
+                    useIndices = coord1Vec > self.threshold & coord2Vec > self.threshold
+
+                    allFCs += [np.log2(x) for x in (coord1Vec[useIndices] / coord2Vec[useIndices]) if ~np.isnan(x) and ~np.isinf(x) and not x==0]
+        
             binECDF = ECDF(allFCs)
             binID2ECDF[binID] = binECDF
 
-        return repDF, createdBins, binID2ECDF
+        return binID2ECDF
 
 
-    def prepare_bins(self, group1: Dict[Any, Iterable], group2: Dict[Any, Iterable], grouping:str):
+    def makeBins(self, input_mask, binCount=100):
+
+        
+        maskMin = np.min(np.ravel(self.specs.region_array[input_mask]))
+        maskMax = np.max(np.ravel(self.specs.region_array[input_mask]))
+
+        bins = np.linspace(maskMin, maskMax, binCount+1)
+        allIntervals = []
+        allBinIDs = []
+        for i in range(len(bins)-1):
+            binInt = Interval(bins[i], bins[i+1], data=i)
+            allIntervals.append(binInt)
+            allBinIDs.append(i)
+
+        t = IntervalTree(allIntervals)
+
+        featureBins = np.array([-1] * self.specs.region_array.shape[2])
+
+        for i in range(self.specs.region_array.shape[2]):
+
+            featureValues = np.mean(np.ravel(self.specs.region_array[:,:,i][input_mask]))
+            binID = list(t[featureValues])[0].data
+            featureBins[i] = binID
+
+        selCoords = []
+        for i in range(input_mask.shape[0]):
+            for j in range(input_mask.shape[1]):
+                if input_mask[i,j] == 1:
+                    selCoords.append((i,j))
+        
+        
+        binID2ECDF = {}
+        for binID in allBinIDs:
+
+            binMatrix = self.specs.region_array[:,:, featureBins == binID]
+
+            allFCs = []
+            for coord1 in selCoords:
+                for coord2 in selCoords:
+
+                    if coord1 == coord2:
+                        continue
+
+                    allFCs += [np.log2(x) for x in (binMatrix[coord1] / binMatrix[coord2]) if ~np.isnan(x) and ~np.isinf(x) and not x==0]
+        
+            binECDF = ECDF(allFCs)
+            binID2ECDF[binID] = binECDF
+        
+
+        return binID2ECDF, featureBins
+
+
+    def prepare_bins(self, group1: Dict[Any, Iterable], group2: Dict[Any, Iterable], grouping:str, binCount:int=100):
         common_features = self.create_common_features()
 
-        input_masks_group1, input_masks_group2, _, _ = self.create_input_masks(group1, group2, grouping)
+        input_masks_group1, input_masks_group2, pixels_group1, pixels_group2 = self.create_input_masks(group1, group2, grouping)
 
         all_means_grp1 = []
         all_means_grp2 = []
@@ -366,6 +466,8 @@ class DifferentialEmpireTest(DifferentialTest):
         ### First pass - identify maximal means
         ##
         #
+
+        self.logger.info("First pass - identify maximal means")
 
         bar = makeProgressBar()
         for feature in bar(common_features):
@@ -382,16 +484,13 @@ class DifferentialEmpireTest(DifferentialTest):
                 if spec_name in input_masks_group1:
 
                     spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]].flatten()
-                    group1_values += spec_values
+                    group1_values += list(spec_values[spec_values > self.threshold])
 
                 if spec_name in input_masks_group2:
 
                     spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]].flatten()
-                    group2_values += spec_values
+                    group2_values += list(spec_values[spec_values > self.threshold])
 
-
-            aboveThreshold_group1 = np.array([x for x in group1_values if x > self.threshold])
-            aboveThreshold_group2 = np.array([x for x in group2_values if x > self.threshold])
 
             mean_grp1 = np.mean(group1_values)
             mean_grp2 = np.mean(group2_values)
@@ -399,10 +498,13 @@ class DifferentialEmpireTest(DifferentialTest):
             all_means_grp1.append(mean_grp1)
             all_means_grp2.append(mean_grp2)
 
-        createdBins_grp1 = np.linspace(np.min(all_means_grp1), np.max(all_means_grp2), 100)
+        all_means_grp1 = np.array(all_means_grp1)
+        all_means_grp2 = np.array(all_means_grp2)
+
+        createdBins_grp1 = np.linspace(np.min(all_means_grp1), np.max(all_means_grp2), binCount)
         bins_grp1 = np.digitize(all_means_grp1, bins=createdBins_grp1)
 
-        createdBins_grp2 = np.linspace(np.min(all_means_grp2), np.max(all_means_grp2), 100)
+        createdBins_grp2 = np.linspace(np.min(all_means_grp2), np.max(all_means_grp2), binCount)
         bins_grp2 = np.digitize(all_means_grp2, bins=createdBins_grp2)
 
 
@@ -411,50 +513,11 @@ class DifferentialEmpireTest(DifferentialTest):
         ### Second pass: create ECDFs for each bin
         ##
         #
+        self.logger.info("Second pass - create ECDF for each bin")
 
-        bin2logfcs1 = defaultdict(list)
-        bin2logfcs2 = defaultdict(list)
-
-        bar = makeProgressBar()
-        for fi, feature in bar(enumerate(common_features)):
-
-            group1_values = []
-            group2_values = []
-
-            for spec_name in self.specs:
-
-                if not spec_name in input_masks_group1 and not spec_name in input_masks_group2:
-                    continue
-                
-                fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)
-                if spec_name in input_masks_group1:
-
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]].flatten()
-                    group1_values += spec_values
-
-                if spec_name in input_masks_group2:
-
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]].flatten()
-                    group2_values += spec_values
-
-
-            aboveThreshold_group1 = np.array([x for x in group1_values if x > self.threshold])
-            aboveThreshold_group2 = np.array([x for x in group2_values if x > self.threshold])
-
-            binID1 = bins_grp1[fi]
-            binID2 = bins_grp2[fi]
-
-            bin2logfcs1[binID1] += create_pairwise_foldchanges(aboveThreshold_group1)
-            bin2logfcs2[binID2] += create_pairwise_foldchanges(aboveThreshold_group2)
-
-        bin2ecdf1 = {}
-        bin2ecdf2 = {}
-
-        for x in bin2logfcs1:
-            bin2ecdf1[x] = ECDF(bin2logfcs1[x])
-        for x in bin2logfcs2:
-            bin2ecdf2[x] = ECDF(bin2logfcs2[x])
-
+        
+        bin2ecdf1 = self.create_ecdf(input_masks_group1, bins_grp1)
+        bin2ecdf2 = self.create_ecdf(input_masks_group2, bins_grp2)
 
 
         #
@@ -462,6 +525,10 @@ class DifferentialEmpireTest(DifferentialTest):
         ### Third pass: gene zscore
         ##
         #
+        self.logger.info("Third pass - calculate gene z-scores and p-values")
+
+        featureResults = defaultdict(lambda: dict())
+
         allZVals = []
         bar = makeProgressBar()
         for fi, feature in bar(enumerate(common_features)):
@@ -477,25 +544,19 @@ class DifferentialEmpireTest(DifferentialTest):
                 fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)
                 if spec_name in input_masks_group1:
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]].flatten()
-                    group1_values += spec_values
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]])
+                    group1_values += list(spec_values[spec_values > self.threshold])
 
                 if spec_name in input_masks_group2:
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]].flatten()
-                    group2_values += spec_values
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]])
+                    group2_values += list(spec_values[spec_values > self.threshold])
 
 
-            aboveThreshold_group1 = np.array([x for x in group1_values if x > self.threshold])
-            aboveThreshold_group2 = np.array([x for x in group2_values if x > self.threshold])
+            Zsum, medianFC = self.calculateZ(group1_values, group2_values, bin2ecdf1, bin2ecdf2)
 
-            Zsum, fcValues = self.calculateZ(aboveThreshold_group1, aboveThreshold_group2, bin2ecdf1, bin2ecdf2)
-
-            medianFC = np.median(fcValues)
-
-            if len(fcValues) > 0 and medianFC != 0:
-                Znormed, _ = self.calculateZ(aboveThreshold_group1, aboveThreshold_group2, bin2ecdf1, bin2ecdf2, median=medianFC)
-
+            if medianFC != 0:
+                Znormed, _ = self.calculateZ(group1_values, group2_values, bin2ecdf1, bin2ecdf2, median=medianFC)
             else:
                 Znormed = 0
                 Zsum = 0
@@ -507,6 +568,20 @@ class DifferentialEmpireTest(DifferentialTest):
 
             allZVals.append(geneZ)
 
+            featureResults[feature]["feature"] = feature
+            featureResults[feature]["pct.1"] = len(group1_values) / pixels_group1
+            featureResults[feature]["pct.2"] = len(group2_values) / pixels_group2
+            featureResults[feature]["mean.1"] = np.mean(group1_values)
+            featureResults[feature]["mean.2"] = np.mean(group2_values)
+            featureResults[feature]["logFC"] = medianFC
+
+
+            featureResults[feature]["Zsum"] = Zsum
+            featureResults[feature]["Znormed"] = Znormed
+            featureResults[feature]["geneZ"] = geneZ
+            featureResults[feature]["considered"] = geneZ != 0
+
+
         xECDF = ECDF(allZVals)
 
         #
@@ -514,6 +589,8 @@ class DifferentialEmpireTest(DifferentialTest):
         ### Fourth pass: gene pvalue
         ##
         #
+        self.logger.info("Fourth pass - calculate adjusted gene p-value")
+
         allZVals = []
         nd=NormalDist()
 
@@ -531,17 +608,13 @@ class DifferentialEmpireTest(DifferentialTest):
                 fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)
                 if spec_name in input_masks_group1:
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]].flatten()
-                    group1_values += spec_values
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group1[spec_name]])
+                    group1_values += list(spec_values[spec_values > self.threshold])
 
                 if spec_name in input_masks_group2:
 
-                    spec_values = self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]].flatten()
-                    group2_values += spec_values
-
-
-            aboveThreshold_group1 = np.array([x for x in group1_values if x > self.threshold])
-            aboveThreshold_group2 = np.array([x for x in group2_values if x > self.threshold])
+                    spec_values = np.ravel(self.specs[spec_name].region_array[:,:,fIdx][input_masks_group2[spec_name]])
+                    group2_values += list(spec_values[spec_values > self.threshold])
 
 
             genePzdist = xECDF(geneZ)
@@ -554,29 +627,31 @@ class DifferentialEmpireTest(DifferentialTest):
             geneZzdist = nd.inv_cdf(genePzdist)
             geneP = 2*(1-nd.cdf(abs(geneZzdist)))
 
+            featureResults[feature]["p_value"] = geneP
 
+        
+        resultDF = pd.DataFrame.from_dict(featureResults, orient='index')
 
+        _, usedAdjPvals, _, _ = multipletests(list(resultDF["p_value"]), alpha=0.05, method='fdr_bh', is_sorted=False, returnsorted=False)
+        resultDF["p_value_adj"] = usedAdjPvals
+
+        return resultDF
 
     def compare_groups(self, group1_values: Iterable, group2_values: Iterable) -> float:
-
-        mean_grp1 = np.mean(group1_values)
-        mean_grp2 = np.mean(group2_values)
-
-        std_grp1 = np.std(group1_values)
-        std_grp2 = np.std(group2_values)
+        return 0
 
 
-    def calculateZ(row, group1, group2, bin2ecdf1, bin2ecdf2, median=None):
+    def calculateZ(group1, group2, group1Bin, group2Bin, bin2ecdf1, bin2ecdf2, median=None, samples=100):
         nd=NormalDist()
         geneFCs = []
         geneZ = 0
 
-        zeroValues = set()
+        if not samples is None:
+            group1 = random.choices(group1, k=min(samples, len(group2)))
+            group2 = random.choices(group2, k=min(samples, len(group2)))
 
-        for c1r in group1:
-            for c2r in group2:
-                expr1 = row[c1r]
-                expr2 = row[c2r]
+        for expr1 in group1:
+            for expr2 in group2:
 
                 if not median is None:
                     expr2 *= median
@@ -598,9 +673,6 @@ class DifferentialEmpireTest(DifferentialTest):
                 lFC = np.log2(fc)
 
                 if ~np.isinf(lFC):
-                    
-                    group1Bin = row["bin1"]
-                    group2Bin = row["bin2"]
                     
                     group1P = bin2ecdf1[group1Bin](lFC)
                     group2P = bin2ecdf2[group2Bin](lFC)
@@ -624,4 +696,8 @@ class DifferentialEmpireTest(DifferentialTest):
                     print(fc, lFC)
 
         #print("Observed 0-Values", zeroValues)
-        return geneZ, geneFCs
+        medianFC = 0
+        if len(geneFCs) > 0:
+            medianFC = np.median(geneFCs)
+
+        return geneZ, medianFC

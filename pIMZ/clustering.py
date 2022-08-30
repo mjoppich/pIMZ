@@ -18,6 +18,8 @@ import numpy as np
 import regex as re
 import h5py
 
+#JIT
+from numba import jit
 
 # image
 import skimage
@@ -57,11 +59,10 @@ import jinja2
 
 # applications
 import progressbar
-def makeProgressBar():
+def makeProgressBar() -> progressbar.ProgressBar:
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
-
 import abc
 
 import networkx as nx
@@ -259,7 +260,7 @@ class PCAEmbedding(RegionEmbedding):
     def explained_variance_ratio(self):
         return self.embedding_object.explained_variance_ratio_
 
-    def plot_embedding(self, colors=None):
+    def plot_embedding(self, colors=None, file=None):
 
         dimExplained = self.embedding_object.explained_variance_ratio_
 
@@ -295,6 +296,9 @@ class PCAEmbedding(RegionEmbedding):
 
         plt.gca().set_aspect('equal', adjustable='box')
         plt.legend(bbox_to_anchor=(0, -0.2, 1, 0), loc="upper left", mode="expand", ncol=2)
+
+        if not file is None:
+            plt.savefig(file, bbox_inches="tight")
 
         plt.show()
         plt.close()
@@ -634,7 +638,7 @@ class ModifiedKMeansClusterer(RegionClusterer):
 
         self.segmented = None
 
-    def fit(self, num_target_clusters: int, max_iterations: int = 100, smoothing_iter: int = 2, verbose: bool = False, init_mode='random_centroids', distance='tibshiran', radius=2):
+    def fit(self, num_target_clusters: int, max_iterations: int = 100, smoothing_iter: int = 2, verbose: bool = False, init_mode='random_centroids', distance='tibshirani', radius=2):
         """[summary]
 
         Args:
@@ -1021,6 +1025,7 @@ class ShrunkenCentroidClusterer(RegionClusterer):
                 cluster2coords[clusterID].append((i,j))
 
         return cluster2coords
+
 
     def _get_seg_centroids(self, segments, spectra_orig):
         #Calculate the segment centroids

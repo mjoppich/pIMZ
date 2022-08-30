@@ -54,7 +54,7 @@ import jinja2
 
 # applications
 import progressbar
-def makeProgressBar():
+def makeProgressBar() -> progressbar.ProgressBar:
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])

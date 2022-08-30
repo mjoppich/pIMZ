@@ -55,7 +55,7 @@ import jinja2
 
 # applications
 import progressbar
-def makeProgressBar():
+def makeProgressBar() -> progressbar.ProgressBar:
     return progressbar.ProgressBar(widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
@@ -199,8 +199,8 @@ class ProteinWeights():
             curmass = float(row[mass_column])
             allHitMasses = self.get_protein_from_mz(curmass, ppm=ppm)
 
-            if row["gene_ident"] == "mass_553_6274052499639":
-                print(ri, curmass, allHitMasses)
+            #if row["gene_ident"] == "mass_553_6274052499639":
+            #    print(ri, curmass, allHitMasses)
 
             uniqmasses[ri] = len(allHitMasses)
             hitProteins[ri] = [x[0] for x in allHitMasses]
@@ -428,12 +428,18 @@ class ProteinWeights():
 
 class MaxquantPeptides(ProteinWeights):
 
-    def __init__(self, filename, massMode=+1, ppm=5, min_mass=-1, max_mass=-1, name_column="Gene names", name_function=lambda x: x.strip().split(";"), encoding='Windows-1252', error_bad_lines=False):
+    def __init__(self, filename, massMode=+1, ppm=5, min_mass=-1, max_mass=-1, name_column="Gene names", name_function=lambda x: x.strip().split(";"), encoding='Windows-1252', error_bad_lines=False, warn_bad_lines=False):
         super().__init__(None, massMode=massMode, ppm=ppm, min_mass=min_mass, max_mass=max_mass)
 
-        self.__load_file(filename, name_column=name_column, name_function=name_function, encoding=encoding, error_bad_lines=error_bad_lines)
+        self.__load_file(filename, name_column=name_column, name_function=name_function, encoding=encoding, error_bad_lines=error_bad_lines, warn_bad_lines=warn_bad_lines)
 
-    def __load_file(self, filename, name_column="Gene names", name_function=lambda x: x.strip().split(";"), encoding='Windows-1252', error_bad_lines=False):
+    @classmethod
+    def split(string, delimiters):
+        import re
+        regex_pattern = '|'.join(map(re.escape, delimiters))
+        return re.split(regex_pattern, string, 0)
+
+    def __load_file(self, filename, name_column="Gene names", name_function=lambda x: x.strip().replace("_HUMAN", "").split(";"), encoding='Windows-1252', warn_bad_lines=False, error_bad_lines=False):
 
         inputfile = io.StringIO()
         with open(filename, encoding=encoding, errors="replace") as fin:
@@ -448,7 +454,7 @@ class MaxquantPeptides(ProteinWeights):
                 inputfile.write(fixedLine)
         inputfile.seek(0)
 
-        indf = pd.read_csv(inputfile, sep="\t", encoding=encoding, error_bad_lines=error_bad_lines, dtype="O")
+        indf = pd.read_csv(inputfile, sep="\t", encoding=encoding, error_bad_lines=error_bad_lines, warn_bad_lines=warn_bad_lines, dtype="O")
 
         for ri, row in indf.iterrows():
 

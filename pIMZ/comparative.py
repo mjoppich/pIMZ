@@ -60,7 +60,10 @@ import jinja2
 
 # applications
 import progressbar
-
+def makeProgressBar() -> progressbar.ProgressBar:
+    return progressbar.ProgressBar(widgets=[
+        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
+        ])
 
 class CombinedSpectra():
     """CombinedSpectra class for a combined analysis of several spectra regions.
