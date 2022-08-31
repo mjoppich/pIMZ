@@ -67,6 +67,11 @@ import abc
 
 import networkx as nx
 
+from numba import jit, njit, prange
+from numba.typed import Dict
+
+
+
 class RegionModel:
 
     def __init__(self, no_relation_weight=0, bi_directional=True) -> None:
@@ -253,7 +258,8 @@ class PCAEmbedding(RegionEmbedding):
 
         # according to https://scentellegher.github.io/machine-learning/2020/01/27/pca-loadings-sklearn.html
         computedPCs = ["PC{}".format(x) for x in range(1, self.dimensions+1)] # 1-based
-        loadings = pd.DataFrame(self.embedding_object.components_.T, columns=computedPCs, index=self.region.idx2mass)
+        loadings = pd.DataFrame(self.embedding_object.components_.T, columns=computedPCs)
+        loadings.insert(loc=0, column="mass", value=self.region.idx2mass)
 
         return loadings
 
@@ -1001,6 +1007,63 @@ class ModifiedKMeansClusterer(RegionClusterer):
         return idx
 
 
+@njit(parallel=True)
+def _jit_sc_calc_centroid(seg_centroid, overall_centroid, s_list, m, s_0, delta):
+
+    shr_centroid = np.zeros(seg_centroid.shape)
+    tstat_centroid = np.zeros(seg_centroid.shape)
+
+    for mz in prange(len(seg_centroid)):
+
+        d_ik   = (seg_centroid[mz] - overall_centroid[mz])/(m*(s_list[mz]+s_0))
+        dp_ik  = np.sign(d_ik)*max(0, (abs(d_ik)-delta)) #where + means positive part (t+ = t if t  0 and zero otherwise)
+        #only d_ik > delta will result in change!
+
+        tstat_centroid[mz] = dp_ik
+        shr_centroid[mz] = overall_centroid[mz] + m*(s_list[mz]+s_0)*dp_ik
+
+    return tstat_centroid, shr_centroid
+
+@njit
+def _jit_sc_distance_tibschirani(matrix, pxCoord, centroid, sqSStats, centroidProbability):
+    specDiff = matrix[pxCoord]-centroid
+    sigma = np.divide(np.multiply(specDiff, specDiff), sqSStats)
+    sigma[np.isnan(sigma)] = 0
+    sigma[np.isinf(sigma)] = 0
+    #sigma = np.nan_to_num(sigma, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    sigmaSum = np.sum(sigma)
+    sigmaSum = sigmaSum - 2*np.log(centroidProbability)
+    return sigmaSum
+
+@njit(parallel=True)
+def _jit_sc_determine_cluster_tib(spectra_orig, segments, shr_seg_centroids, sSumSq, n):
+
+    new_matrix = np.zeros( (spectra_orig.shape[0], spectra_orig.shape[1]), dtype=np.int32)
+
+    segNames = [x for x in segments]
+
+    for i in prange(spectra_orig.shape[0]):
+        for j in range(spectra_orig.shape[1]):
+
+            sigmas = np.zeros((len(segments),))
+            for si, seg in enumerate(segNames):
+                shr_seg_centroid = shr_seg_centroids[seg]
+                #                     matrix,       pxCoord, centroid,       sqSStats, centroidProbability                
+                sigma = _jit_sc_distance_tibschirani(spectra_orig, (i,j), shr_seg_centroid, sSumSq, len(segments[seg])/n)
+                sigmas[si] = sigma
+
+            bestS = 0
+            bestSigma = sigmas[0]
+            for s in range(len(segNames)):
+                if sigmas[s] < bestSigma:
+                    bestSigma = sigmas[s]
+                    bestS = s
+
+            new_matrix[i,j] = segNames[bestS]
+
+    return new_matrix
+
+
 class ShrunkenCentroidClusterer(RegionClusterer):
 
     def __init__(self, region: SpectraRegion, delta=0.2) -> None:
@@ -1017,26 +1080,24 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         return np.sum(spectra, axis=(0,1))/n
 
     def _get_segments(self, image):
-        cluster2coords = defaultdict(list)
-        for i in range(0, image.shape[0]):
-            for j in range(0, image.shape[1]):
 
-                clusterID = int(image[i, j])
-                cluster2coords[clusterID].append((i,j))
+        c2c = Dict()
+        for clusterID in np.unique(image):
+            clusterID = int(clusterID)
+            elems = np.transpose(np.nonzero(image == clusterID))
+            c2c[clusterID] = elems
 
-        return cluster2coords
-
+        return c2c
 
     def _get_seg_centroids(self, segments, spectra_orig):
         #Calculate the segment centroids
-        seg_cent = defaultdict(lambda : np.zeros( (spectra_orig.shape[2],)))
+        seg_cent = Dict()
         for s in sorted(segments):
-
-            allCoordIntensities = []
-            
+            #allCoordIntensities = []
+            seg_cent[s] = np.zeros( (spectra_orig.shape[2],))
             for coord in segments[s]:
                 #allCoordIntensities.append(spectra_orig[coord])
-                seg_cent[s] += spectra_orig[coord]
+                seg_cent[s] += spectra_orig[tuple(coord)]
 
             n = len(segments[s])
             seg_cent[s] = seg_cent[s] / n
@@ -1055,7 +1116,8 @@ class ShrunkenCentroidClusterer(RegionClusterer):
             coordinates = segments[seg]
             for coord in coordinates:
                 seenCoords += 1
-                curS += np.multiply(spectra_orig[coord]-seg_centroid, spectra_orig[coord]-seg_centroid)
+                cvec = spectra_orig[tuple(coord)]-seg_centroid
+                curS += np.multiply(cvec, cvec)
                     
         curS = (1.0/(n-K)) * curS
         curS = np.sqrt(curS)
@@ -1071,17 +1133,14 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         seg_shr_cent = dict()
         seg_tstat_cent = dict()
         n = spectra_orig.shape[0]*spectra_orig.shape[1]
-        K = np.max(list(segments.keys()))
+        #K = np.max(list(segments.keys()))
         s_list = self._get_all_s_vec(segments, spectra_orig, seg_centroids, verbose=verbose)
         s_0 = np.median(s_list)
-
-
 
         if verbose:
             ovrAllCentroid = np.copy(overall_centroid)
             ovrAllCentroid[ovrAllCentroid<=0] = 0
             ovrAllCentroid[ovrAllCentroid>0] = 1
-
             print("Selected fields OvrAll Centroid:", sum(ovrAllCentroid), "of", len(ovrAllCentroid))
 
             
@@ -1091,38 +1150,33 @@ class ShrunkenCentroidClusterer(RegionClusterer):
 
             if verbose:
                 print("seg centroid", seg_centroid)
-
-            m = math.sqrt((1/len(coordinates)) + (1/n))
-            shr_centroid = np.zeros(seg_centroid.shape)
-            tstat_centroid = np.zeros(seg_centroid.shape)
-
-
-
-            if verbose:
                 segCentroid = np.copy(seg_centroids[seg])
                 segCentroid[segCentroid <= 0] = 0
                 segCentroid[segCentroid > 0] = 1
                 print("Selected fields Seg Centroids", seg, ":", sum(segCentroid), "of", len(segCentroid), "with s0=", s_0, "and m=", m)
 
+            m = math.sqrt((1/len(coordinates)) + (1/n))
+            shr_centroid = np.zeros(seg_centroid.shape)
+            tstat_centroid = np.zeros(seg_centroid.shape)
 
-            for mz in range(spectra_orig.shape[2]):
+            tstat_centroid, shr_centroid = _jit_sc_calc_centroid(seg_centroid, overall_centroid, s_list, m, s_0, self.delta)
 
-                d_ik   = (seg_centroid[mz] - overall_centroid[mz])/(m*(s_list[mz]+s_0))
-                dp_ik  = np.sign(d_ik)*max(0, (abs(d_ik)-self.delta)) #where + means positive part (t+ = t if t  0 and zero otherwise)
-                #only d_ik > delta will result in change!
-
-                tstat_centroid[mz] = dp_ik
-                #shr_centroid[mz] = seg_centroid[mz] + m*(s_list[mz]+s_0)*dp_ik  was used, but checking literature it should be
-                shr_centroid[mz] = overall_centroid[mz] + m*(s_list[mz]+s_0)*dp_ik 
-                
-
-                if shr_centroid[mz] < 0:
-                    pass
-                    # it's a centroid and therefore a possible element of class spectrum!
-                    #shr_centroid[mz] = 0
-
-                #if shr_centroid[mz] < 0 and seg_centroid[mz] > 0:
-                #    print(seg, mz, seg_centroid[mz], d_ik, dp_ik, shr_centroid[mz])
+            #for mz in range(spectra_orig.shape[2]):
+            #
+            #    d_ik   = (seg_centroid[mz] - overall_centroid[mz])/(m*(s_list[mz]+s_0))
+            #    dp_ik  = np.sign(d_ik)*max(0, (abs(d_ik)-self.delta)) #where + means positive part (t+ = t if t  0 and zero otherwise)
+            #    #only d_ik > delta will result in change!
+            #
+            #    tstat_centroid[mz] = dp_ik
+            #    shr_centroid[mz] = overall_centroid[mz] + m*(s_list[mz]+s_0)*dp_ik               
+            #
+            #    if shr_centroid[mz] < 0:
+            #        pass
+            #        # it's a centroid and therefore a possible element of class spectrum!
+            #        #shr_centroid[mz] = 0
+            #
+            #    #if shr_centroid[mz] < 0 and seg_centroid[mz] > 0:
+            #    #    print(seg, mz, seg_centroid[mz], d_ik, dp_ik, shr_centroid[mz])
                 
             shr_centroid = np.nan_to_num(shr_centroid, copy=True, nan=0.0, posinf=0.0, neginf=0.0)
             seg_shr_cent[seg] = shr_centroid
@@ -1157,7 +1211,11 @@ class ShrunkenCentroidClusterer(RegionClusterer):
             allShrCentroid[allShrCentroid > 0] = 1
             print("Selected fields over all Shr Centroids", sum(allShrCentroid), "of", len(allShrCentroid))
 
-        return seg_shr_cent, seg_tstat_cent
+        seg_shr_centDict = Dict()
+        for x in seg_shr_cent:
+            seg_shr_centDict[x] = seg_shr_cent[x]
+
+        return seg_shr_centDict, seg_tstat_cent
 
 
     def _plot_segment_centroids(matrix_shr_centroids, matrix_global_centroid, matrix_segments, matrix, matrix_mz, ylim, addSpecs=[], xlim=(-500, 1000)):
@@ -1226,16 +1284,15 @@ class ShrunkenCentroidClusterer(RegionClusterer):
     def _distance_tibschirani(self, matrix, pxCoord, centroid, sqSStats, centroidProbability):
         specDiff = matrix[pxCoord]-centroid
         sigma = np.divide(np.multiply(specDiff, specDiff), sqSStats)
-        sigma = np.nan_to_num(sigma, copy=True, nan=0.0, posinf=0.0, neginf=0.0)
-
-        sigma = sum(sigma)
-        sigma = sigma - 2*math.log(centroidProbability)
-
+        sigma = np.nan_to_num(sigma, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        sigma = np.sum(sigma)
+        sigma = sigma - 2*np.log(centroidProbability)
         return sigma
 
-    def _get_new_clusters_func(self, orig_segments, segments, spectra_orig, seg_centroids, shr_seg_centroids, print_area=5, distance_func=None, verbose=False):   
+    def _determine_clusters(self, spectra_orig, segments, shr_seg_centroids, sSumSq, n):
+        return _jit_sc_determine_cluster_tib(spectra_orig, segments, shr_seg_centroids, sSumSq, n)
 
-        assert(not distance_func is None)
+    def _get_new_clusters_func(self, orig_segments, segments, spectra_orig, seg_centroids, shr_seg_centroids, print_area=5, verbose=False):   
 
         #Calculate the segment membership probability
         new_matrix = np.zeros((spectra_orig.shape[0], spectra_orig.shape[1]))
@@ -1268,47 +1325,50 @@ class ShrunkenCentroidClusterer(RegionClusterer):
             print("Total field considered", sum(allShrCentroid), "of", len(allShrCentroid))
             for seg in sorted(segments):
                 print("Segment", seg, "elements", len(segments[seg]), "of all", n, len(segments[seg])/n)
-                    
-        for i in range(spectra_orig.shape[0]):
-            for j in range(spectra_orig.shape[1]):
-                spectrum = spectra_orig[(i,j)]
-                sigmas = dict()
 
-                for seg in sorted(segments):
-                    shr_seg_centroid = shr_seg_centroids[seg]
-                    coordinates = segments[seg]
-                    
-                    sigma = distance_func(spectra_orig, (i,j), shr_seg_centroid, sSumSq, len(coordinates)/n)
-                    
-                    sigmas[seg] = sigma
 
-                allMaxSigmas += [sigmas[seg] for seg in segments]
+        new_matrix = self._determine_clusters(spectra_orig, segments, shr_seg_centroids, sSumSq, n)
     
-                #this very likely becomes 0 and SHOULD NOT be used for class assignment!
-                #summed_probabilities = sum([math.exp(-0.5*sigmas[cluster]) for cluster in sorted(sigmas)])
+        if False:
+            for i in range(spectra_orig.shape[0]):
+                for j in range(spectra_orig.shape[1]):
+                    #spectrum = spectra_orig[(i,j)]
+                    sigmas = dict()
 
-                if verbose:
-                    if (printXlow<=i<=printXhi and printYlow<=j<=printYhi) or (i,j) in [(22,26)]:# or lower_probability == 0:
-                        for seg in sorted(sigmas):
-                            print("[PS]", i,j, seg, sigmas[seg], math.exp(-0.5*sigmas[seg]),2*math.log(len(segments[seg])/n))
-                        #print([(cluster,math.exp(-0.5*sigmas[cluster])/summed_probabilities) for cluster in sorted(sigmas)], lower_probability)
+                    for seg in sorted(segments):
+                        shr_seg_centroid = shr_seg_centroids[seg]
+                        #                     matrix,       pxCoord, centroid,       sqSStats, centroidProbability                
+                        sigma = distance_func(spectra_orig, (i,j), shr_seg_centroid, sSumSq, len(segments[seg])/n)
+                        
+                        sigmas[seg] = sigma
 
-                minSigma = min(sigmas.values())
-                if len(sigmas) == 0:
-                    print("sigmas is empty!", sigmas, (i,j))
+                    allMaxSigmas += [sigmas[seg] for seg in segments]
+        
+                    #this very likely becomes 0 and SHOULD NOT be used for class assignment!
+                    #summed_probabilities = sum([math.exp(-0.5*sigmas[cluster]) for cluster in sorted(sigmas)])
+
+                    if verbose:
+                        if (printXlow<=i<=printXhi and printYlow<=j<=printYhi) or (i,j) in [(22,26)]:# or lower_probability == 0:
+                            for seg in sorted(sigmas):
+                                print("[PS]", i,j, seg, sigmas[seg], math.exp(-0.5*sigmas[seg]),2*math.log(len(segments[seg])/n))
+                            #print([(cluster,math.exp(-0.5*sigmas[cluster])/summed_probabilities) for cluster in sorted(sigmas)], lower_probability)
+
+                    minSigma = min(sigmas.values())
+                    if len(sigmas) == 0:
+                        print("sigmas is empty!", sigmas, (i,j))
 
 
-                minSigmaClass = [x for x in sigmas if sigmas[x] == minSigma]
+                    minSigmaClass = [x for x in sigmas if sigmas[x] == minSigma]
 
-                if len(minSigmaClass) == 0:
-                    print("minSigmaClass Empty", i, j)
-                    print(sigmas)
-                    print(minSigma)
+                    if len(minSigmaClass) == 0:
+                        print("minSigmaClass Empty", i, j)
+                        print(sigmas)
+                        print(minSigma)
 
-                minSigmaClass = minSigmaClass[0]
+                    minSigmaClass = minSigmaClass[0]
 
-                new_matrix[i][j] = minSigmaClass
-                takenClusters.append(minSigmaClass)
+                    new_matrix[i][j] = minSigmaClass
+                    takenClusters.append(minSigmaClass)
 
         if verbose:
             plt.hist(takenClusters, bins=len(set(takenClusters)))
@@ -1320,11 +1380,14 @@ class ShrunkenCentroidClusterer(RegionClusterer):
 
         return new_matrix, allMaxSigmas
 
-    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+    def fit(self, num_target_clusters: int = 20, max_iterations: int = 100, verbose: bool = False, initialSegments=None):
         
         matrix = np.copy(self.region.region_array)
     
-        shr_segmented = KMeansClusterer(self.region).fit_transform(num_target_clusters=num_target_clusters, verbose=verbose)
+        if initialSegments is None:
+            shr_segmented = KMeansClusterer(self.region).fit_transform(num_target_clusters=num_target_clusters, verbose=verbose)
+        else:
+            shr_segmented = initialSegments
 
         iteration = 0
         self.results = OrderedDict()
@@ -1344,7 +1407,7 @@ class ShrunkenCentroidClusterer(RegionClusterer):
             
             matrix_shr_centroids, matrix_tstat_centroids = self._get_shr_centroids(matrix_segments, matrix, matrix_seg_centroids, matrix_global_centroid)
 
-            shr_segmented, ams = self._call_new_clusters(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids)
+            shr_segmented, _ = self._call_new_clusters(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids)
 
             if verbose:
                 for x in sorted(matrix_segments):
@@ -1356,8 +1419,9 @@ class ShrunkenCentroidClusterer(RegionClusterer):
                 print("Finishing iterations due to same result after", iteration, "iterations")
                 break
 
+
     def _call_new_clusters(self, shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids):
-        shr_segmented, ams = self._get_new_clusters_func(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids, print_area=0, distance_func=self._distance_tibschirani)
+        shr_segmented, ams = self._get_new_clusters_func(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids, print_area=0)
         return shr_segmented, ams
 
 
@@ -1382,6 +1446,70 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         segResult = self.segmentation()
         return segResult
         
+
+
+
+
+
+
+@njit
+def _jit_sc_distance_sa(matrix, pxCoord, centroid, sqSStats, centroidProbability, radius):
+
+    distance = 0
+    sigma = (2*radius+1)/4
+
+    for i in range(-radius, radius+1):
+        for j in range(-radius, radius+1):
+            neighbor = (pxCoord[0]+i, pxCoord[1]+j)
+
+            if neighbor[0] < 0 or neighbor[1] < 0:
+                #invalid coord
+                # TODO implement some working padding!
+                continue
+            if neighbor[0] >= matrix.shape[0] or neighbor[1] >= matrix.shape[1]:
+                #invalid coord
+                # TODO implement some working padding!
+                continue
+
+            weight = np.exp(-i**2-j**2)/(2*sigma**2)
+            specDiff = np.linalg.norm(matrix[neighbor]-centroid) ** 2
+
+            distance += weight * specDiff    
+
+    return np.sqrt(distance)
+
+
+@njit(parallel=True)
+def _jit_sc_determine_cluster_sa(spectra_orig, segments, shr_seg_centroids, sSumSq, n, radius):
+
+    new_matrix = np.zeros( (spectra_orig.shape[0], spectra_orig.shape[1]), dtype=np.int32)
+
+    segNames = [x for x in segments]
+
+    for i in prange(spectra_orig.shape[0]):
+        for j in range(spectra_orig.shape[1]):
+
+            sigmas = np.zeros((len(segments),))
+            for si, seg in enumerate(segNames):
+                shr_seg_centroid = shr_seg_centroids[seg]
+                #                     matrix,       pxCoord, centroid,       sqSStats, centroidProbability                
+                sigma = _jit_sc_distance_sa(spectra_orig, (i,j), shr_seg_centroid, sSumSq, len(segments[seg])/n, radius)
+                sigmas[si] = sigma
+
+            bestS = 0
+            bestSigma = sigmas[0]
+            for s in range(len(segNames)):
+                if sigmas[s] < bestSigma:
+                    bestSigma = sigmas[s]
+                    bestS = s
+
+            new_matrix[i,j] = segNames[bestS]
+
+    return new_matrix
+
+
+
+
 class SARegionClusterer(ShrunkenCentroidClusterer):
 
     def __init__(self, region: SpectraRegion, delta=0.2, radius=2) -> None:
@@ -1409,17 +1537,14 @@ class SARegionClusterer(ShrunkenCentroidClusterer):
 
                 weight = math.exp(-i**2-j**2)/(2*sigma**2)
                 specDiff = np.linalg.norm(matrix[neighbor]-centroid) ** 2
-
                 distance += weight * specDiff    
 
         return np.sqrt(distance)
 
 
-    def _call_new_clusters(self, shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids):
-        shr_segmented, ams = self._get_new_clusters_func(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids, print_area=0, distance_func=lambda matrix, pxCoord, centroid, sqSStats, centroidProbability: self._distance_sa(matrix, pxCoord, 
-                centroid, sqSStats, centroidProbability, radius=self.radius))
+    def _determine_clusters(self, spectra_orig, segments, shr_seg_centroids, sSumSq, n):
+        return _jit_sc_determine_cluster_sa(spectra_orig, segments, shr_seg_centroids, sSumSq, n, self.radius)
 
-        return shr_segmented, ams
 
 
 class SASARegionClusterer(ShrunkenCentroidClusterer):
@@ -1516,6 +1641,8 @@ class SASARegionClusterer(ShrunkenCentroidClusterer):
                 centroid, sqSStats, centroidProbability, radius=self.radius))
 
         return shr_segmented, ams
+
+
 
 class HierarchicalClusterer(RegionClusterer, metaclass=abc.ABCMeta):
     def __init__(self, region: SpectraRegion) -> None:

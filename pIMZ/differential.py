@@ -83,7 +83,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion]], corr_method="benjamini_hochberg", testname="Differential") -> None:
+    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion]], corr_method="benjamini_hochberg", testname="Differential", threshold=0.2, pseudo_count=1e-9) -> None:
 
         
         if isinstance(specs, SpectraRegion):
@@ -92,8 +92,8 @@ class DifferentialTest(metaclass=abc.ABCMeta):
             self.specs = specs
         
         self.testname = testname
-        self.pseudo_count = 1e-9
-        self.threshold = 0.2
+        self.pseudo_count = pseudo_count
+        self.threshold = threshold
         self.corr_method = corr_method
         #logger
         self.__set_logger()
@@ -207,13 +207,41 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         return common_features
 
 
+    def find_markers(self, samples=None, grouping:str="segmented") -> Dict[Any, pd.DataFrame]:
+
+        if samples is None:
+            samples = [s for s in self.specs]
+
+        allClusters = {}
+        for s in self.specs:
+            allClusters[s] = list(np.unique(self.specs[s].meta[grouping]))
+
+        allSingleClusters = []
+        for s in allClusters:
+            for clusterID in allClusters[s]:
+                allSingleClusters.append( (s, clusterID) )
+            
+        markerDFs = {}
+        for elem in allSingleClusters:
+            self.logger.info("Running markers for sample {} and cluster {}".format(elem[0], elem[1]))
+
+            backgroundDict = {}
+            for s in allClusters:
+                backgroundDict[s] = [x for x in allClusters[s] if not (s==elem[0] and x==elem[1])]
+
+            print(elem)
+            print(backgroundDict)
+
+            clusterDF = self.do_de_analysis({elem[0]: [elem[1]]}, backgroundDict, grouping)
+            markerDFs[elem] = clusterDF
+
+        return markerDFs
+
     def do_de_analysis(self, group1: Dict[Any, Iterable], group2: Dict[Any, Iterable], grouping:str) -> pd.DataFrame:
 
         common_features = self.create_common_features()
 
         input_masks_group1, input_masks_group2, pixels_group1, pixels_group2 = self.create_input_masks(group1, group2, grouping) 
-
-
         
         def process_feature(feature):
             group1_values = np.empty(0)
@@ -247,6 +275,12 @@ class DifferentialTest(metaclass=abc.ABCMeta):
             returnDict["feature"] =feature
             returnDict["pct.1"] = len(group1_values) / pixels_group1
             returnDict["pct.2"] = len(group2_values) / pixels_group2
+            
+            returnDict["anum.1"] = len(group1_values)
+            returnDict["num.1"] = int(pixels_group1)
+            returnDict["anum.2"] = len(group2_values)
+            returnDict["num.2"] = int(pixels_group2)
+
             returnDict["mean.1"] = mean_group1
             returnDict["mean.2"] = mean_group2
             returnDict["log2FC"] = self.logFC(mean_group1, mean_group2)
@@ -254,12 +288,12 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
             return returnDict
 
-        print("Starting analysis")
+        #print("Starting analysis")
         #results = list(map(process_feature, common_features))
         bar = makeProgressBar()
         results = [process_feature(x) for x in bar(common_features)]
   
-        print("Finishing analysis")
+        #print("Finishing analysis")
 
         de_df = pd.DataFrame.from_records(results)
         pvals = de_df["p_value"]
@@ -277,6 +311,29 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         de_df["p_value_adj"] = pvals_adj
 
         return de_df
+
+    @classmethod
+    def combine_dfs(cls, dfs):
+
+        alldfs = []
+        for x in dfs:
+            df = dfs[x].copy()
+            df.insert(loc=0, column="cluster", value=[x]*df.shape[0])
+            
+
+            alldfs.append(df)
+
+        return pd.concat(alldfs)
+
+
+    @classmethod
+    def find_with_annotation(cls, indf, annot):
+
+        if not isinstance(annot, (list, tuple, set)):
+            annot = [annot]
+
+        return indf[pd.DataFrame(indf.matches.tolist()).isin(annot).any(1).values]
+
 
     def logFC(self, mean_group1, mean_group2):
         return np.log2( (mean_group1+ self.pseudo_count)/(mean_group2+self.pseudo_count)  )
@@ -297,7 +354,9 @@ class DifferentialTTest(DifferentialTest):
             scores, pvals = stats.ttest_ind(
                 group1_values, group2_values,
                 equal_var=False,  # Welch's
-            )          
+            )
+
+            #print(len(group1_values), len(group2_values), np.mean(group1_values), np.mean(group2_values), np.std(group1_values), np.std(group2_values))       
 
             return pvals
             

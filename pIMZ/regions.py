@@ -9,7 +9,7 @@ import glob
 import shutil, io, base64, abc
 
 # general package
-from natsort import natsorted
+from natsort import natsorted, natsort_keygen
 import pandas as pd
 import numpy as np
 from scipy.sparse import csr_matrix
@@ -164,7 +164,7 @@ class RegionClusterer(metaclass=abc.ABCMeta):
 
 
 
-    def plot_segments(self, highlight=None, file=None):
+    def plot_segments(self, highlight=None, file=None, background=0):
         """Plots the segmented array of the current SpectraRegion object.
 
         Args:
@@ -183,8 +183,13 @@ class RegionClusterer(metaclass=abc.ABCMeta):
 
                         if showcopy[i,j] in highlight:
                             showcopy[i,j] = 2
-                        elif showcopy[i,j] != 0:
-                            showcopy[i,j] = 1
+                        else:
+                            if not background is None:
+                                if showcopy[i,j] != background:
+                                    showcopy[i,j] = 1
+                                
+                            else:
+                                showcopy[i,j] = 1
 
         fig, _ = plt.subplots()
         Plotter.plot_array_scatter(fig, showcopy, discrete_legend=True)
@@ -954,11 +959,26 @@ class SpectraRegion():
         if max_cut_off != None:
             image[image >= max_cut_off] = max_cut_off
 
+
+        def mass_formatter(masses):
+            stepsize=6
+            if len(masses) <= stepsize:
+                return "; ".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])
+            
+            else:
+                allmasses = [str(round(x, 3)) if not type(x) in [str] else x for x in masses]
+                
+                linestr = []
+                for i in range(0, len(allmasses), stepsize):
+                    linestr.append( "; ".join(allmasses[i:i+stepsize]) )
+                return "\n".join(linestr)
+
+
         if plot:
             heatmap = plt.matshow(image)
             plt.colorbar(heatmap)
             plt.gca().xaxis.set_ticks_position('bottom')
-            plt.title(title.format(mz=";".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])))
+            plt.title(title.format(mz=mass_formatter(masses)))
 
             if not file is None:
                 plt.savefig(file, bbox_inches="tight")
@@ -1674,7 +1694,7 @@ class SpectraRegion():
                     self.region_array[i,j,:] = 0
 
 
-    def plot_segments(self, coloring="segmented", highlight=None, file=None):
+    def plot_segments(self, coloring="segmented", highlight=None, file=None, background=0):
         """Plots the segmented array of the current SpectraRegion object.
 
         Args:
@@ -1691,11 +1711,13 @@ class SpectraRegion():
             for i in range(0, showcopy.shape[0]):
                 for j in range(0, showcopy.shape[1]):
 
-                    if showcopy[i,j] != 0:
-
-                        if showcopy[i,j] in highlight:
-                            showcopy[i,j] = 2
-                        elif showcopy[i,j] != 0:
+                    if showcopy[i,j] in highlight:
+                        showcopy[i,j] = 2
+                    else:
+                        if not background is None:
+                            if showcopy[i,j] != background:
+                                showcopy[i,j] = 1
+                        else:
                             showcopy[i,j] = 1
 
         fig, _ = plt.subplots()
@@ -1711,16 +1733,18 @@ class SpectraRegion():
     def list_segment_counts(self):
         """Prints the size of each cluster in segmenetd array.
         """
-        regionCounts = Counter()
+        return dict(zip(*np.unique(self.segmented, return_counts=True)))
 
-        for i in range(0, self.segmented.shape[0]):
-            for j in range(0, self.segmented.shape[1]):
-
-                regionCounts[ self.segmented[i,j] ] += 1
-
-        for region in natsorted([x for x in regionCounts]):
-            print(region, ": ", regionCounts[region])
-
+    def plot_segment_counts(self):
+        """Prints the size of each cluster in segmenetd array.
+        """
+        scs = self.list_segment_counts()
+        records = list(zip(scs.keys(), scs.values()))
+        data = pd.DataFrame.from_records(records, columns=["cluster", "count"])
+        
+        ax = sns.barplot(x="cluster", y="count", data=data)
+        plt.show()
+        plt.close()
 
     def segment_clusterer(self, clusterer:RegionClusterer, verbose=False):
 
@@ -2199,13 +2223,16 @@ class SpectraRegion():
                 intensityVec += elems
                 massVec += [mass] * len(elems)
                     
-            dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
-            sns.boxplot(data=dfObj, x="cluster", y="intensity")
-            plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
+        dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
+        dfObj = dfObj.sort_values("cluster", key=natsort_keygen())
+        sns.boxplot(data=dfObj, x="cluster", y="intensity")
+        plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
 
-            plt.xticks(rotation=90)
-            plt.show()
-            plt.close()
+        plt.xticks(rotation=90)
+        plt.show()
+        plt.close()
+
+        return dfObj
 
 
     def mass_dabest(self, masses, background=0):
@@ -3787,3 +3814,19 @@ document.addEventListener('readystatechange', event => {
 
 
 
+
+    def get_mean_expression(self, grouping="segmented"):
+
+        groupArr = self.meta[grouping]
+        groupValues = sorted(np.unique(groupArr))
+
+        df = pd.DataFrame()
+        df["mass"] = self.idx2mass
+
+        bar = makeProgressBar()
+        for x in bar(groupValues):
+            selArr = self.region_array[ groupArr == x, :]
+            meanVec = np.mean(selArr, axis=0)
+            df["mean.{}".format(x)] = meanVec
+
+        return df

@@ -1,4 +1,5 @@
 # general
+from email.policy import default
 import logging
 import json
 import os
@@ -49,9 +50,13 @@ import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 
 from .imzml import IMZMLExtract
+from .plotting import Plotter
 
 #web/html
 import jinja2
+
+from matplotlib.cm import ScalarMappable
+
 
 # applications
 import progressbar
@@ -188,8 +193,13 @@ class ProteinWeights():
     def get_ppm(self, mz, ppm):
         return mz * (ppm / 1000000)
 
+    def annotate_dfs(self, dfs, ppm=5, mass_column="gene_mass", add_matches=True):
 
-    def annotate_df(self, df, ppm=5, mass_column="gene_mass"):
+        for x in dfs:
+            dfs[x] = self.annotate_df(dfs[x], ppm=ppm, mass_column=mass_column, add_matches=add_matches)
+
+
+    def annotate_df(self, df, ppm=5, mass_column="gene_mass", add_matches=True):
         
         uniqmasses = [0] * df.shape[0]
         hitProteins = [[]] * df.shape[0]
@@ -205,10 +215,52 @@ class ProteinWeights():
             uniqmasses[ri] = len(allHitMasses)
             hitProteins[ri] = [x[0] for x in allHitMasses]
 
-        df["#matches"] = uniqmasses
+        if add_matches:
+            df["#matches"] = uniqmasses
+
         df["matches"] = hitProteins
 
         return df
+
+    def to_single_match_df(self, df):
+        return df.explode('matches')
+
+
+    def get_potential_celltypes(self, df, organs=["Smooth muscle", "Vasculature", "Connective tissue", "Immune system", "Heart", "Epithelium"], script_url="https://raw.githubusercontent.com/mjoppich/scrnaseq_celltype_prediction/master/analyseMarkers.py", threshold=0.5, force_update=False):
+
+        #download script
+
+        if not os.path.exists("analyseMarkers.py") or force_update:
+            self.logger.info("Downloading analyseMarkers.py")
+            import requests
+            r = requests.get(script_url, allow_redirects=True)
+            open("analyseMarkers.py", 'wb').write(r.content)
+
+        
+        df.explode("matches").to_csv("allmarkers.tsv", sep="\t", index=None)
+        
+        callArgs = ["python3", "analyseMarkers.py", "-i", "allmarkers.tsv", "--cluster", "cluster", "--gene", "matches", "--expr-mean", "mean.1", "--expressing-cell-count", "anum.1", "--cluster-cell-count", "num.1", "--logfc", "log2FC", "--pvaladj", "p_value_adj", "-n", "10", "--organs"] + ["'{}'".format(x) for x in organs]
+        
+
+        self.logger.info("Calling analyseMarkers.py")
+        output = subprocess.check_output(" ".join(callArgs), shell=True).decode()
+
+        self.logger.info("Processing output")
+        from io import StringIO
+        infile = StringIO(output)
+
+        cluster2celltype = list()
+        for line in infile:
+
+            line = line.strip().split("\t")
+            clusterID = eval(line[0])
+            cellType = line[1]
+            cellTypeScore = float(line[2])
+
+            if cellTypeScore > threshold:
+                cluster2celltype.append((clusterID, cellType, cellTypeScore))
+
+        return pd.DataFrame.from_records(cluster2celltype, columns=["Cluster", "CellType", "Score"])
 
 
     def get_protein_from_mz(self, mz, ppm=5):
@@ -270,7 +322,7 @@ class ProteinWeights():
 
         allData = set()
         for x in protein:
-            protData = self.get_masses_for_protein(x)
+            protData = self.get_data_for_protein(x)
             allData = allData.union(protData)
 
         return allData
@@ -565,4 +617,504 @@ class SDFProteinWeights(AnnotatedProteinWeights):
 
         fp.close()
         return res_dict
+
+
+
+
+class PPIAnalysis:
+
+    def __init__(self, load_shao=False, load_omnipath=False, load_jin=False, geneInfo="uniprot_human_go_kegg_pro_pfam.tab"):
+
+        print("Loading gene information")
+        geneInfo, protInfo = self.loadGeneInfo(geneInfo, to_upper=True)
+
+        loadedPPIs = []
+
+        if load_omnipath:
+            print("Loading PPI (human)")
+            ppiInfo_omnipath = self.load_OmnipathPPI(prot_info=protInfo)
+            loadedPPIs.append(ppiInfo_omnipath)
+
+        if load_jin:
+            print("Loading LR (mouse)")
+            ppiInfo_jin = self.load_RL_mouse_jin()
+            loadedPPIs.append(ppiInfo_jin)
+
+
+        if load_shao:
+            print("Loading LR (human)")
+            ppiInfo_shao = self.load_LR_human_Shao()
+            loadedPPIs.append(ppiInfo_shao)
+
+        print("Combining PPI")
+        self.ppiInfo = self.combinePPI(loadedPPIs)
+
+
+
+    def analyse(self, meanExprDF, outputName, outputFolder, index_col="mass", clusters=None, title="", sel_source=None, sel_target=None, min_comm=0):
+
+        if not os.path.exists(outputFolder):
+            os.makedirs(outputFolder, exist_ok=True)
+
+
+        clusterNames = [x for x in meanExprDF.columns if x.startswith("mean")]
+        clusterNames = natsorted(clusterNames)
+
+        if not clusters is None and len(clusters) > 0:
+
+            useClusterNames = []
+            for x in clusters:
+
+                if x in meanExprDF.columns:
+                    useClusterNames.append(x)
+                elif "mean."+x in meanExprDF.columns:
+                    useClusterNames.append("mean."+x)
+                elif not x in meanExprDF.columns:
+                    print(x, "is not a valid column of", meanExprDF.columns)
+                    exit(-1)
+        else:
+            useClusterNames = clusterNames
+
+        scExpr = meanExprDF[ [index_col] + useClusterNames] 
+
+
+        titleDescr = title
+        cluster2color = Plotter.getClusterColors(clusterNames)
+
+        srcHighlights = None
+        tgtHighlights = None
+
+
+        if not sel_source is None:
+            allCols = clusterNames
+            srcHighlights = set()
+            for x in allCols:
+                for y in sel_source:
+                    if y in x:
+                        srcHighlights.add(x)
+
+        if not sel_target is None:
+            allCols = clusterNames
+            tgtHighlights = set()
+            for x in allCols:
+                for y in sel_target:
+                    if y in x:
+                        tgtHighlights.add(x)
+
+        print("Selected sources:", srcHighlights)
+        print("Selected targets:", tgtHighlights)
+
+        sdf = self.plot_interactome_chord_matrix(scExpr.copy(), outputFolder, outputName, titleDescr, srcHighlights, tgtHighlights, None, cluster2color, index_col, min_comm)
+
+        return sdf        
+
+
+
+    def communication_score(self, expr1, expr2):
+        return expr1*expr2
+
+    def make_space_above(self, ax, topmargin=1):
+        """ increase figure size to make topmargin (in inches) space for 
+            titles, without changing the axes sizes"""
+        fig = ax.figure
+        s = fig.subplotpars
+        w, h = fig.get_size_inches()
+
+        figh = h - (1-s.top)*h  + topmargin
+        fig.subplots_adjust(bottom=s.bottom*h/figh, top=1-topmargin/figh)
+        fig.set_figheight(figh)
+
+
+
+    def plot_interactome_chord_matrix(self, scExpr, outputFolder, outputName, titleDescr, sourceElems, targetElems, highlightTuple, cluster2color, index_col, min_comm):
+
+        scExpr = scExpr.set_index(index_col)
+        scExpr = scExpr.apply(pd.to_numeric, errors='ignore')
+
+        clusterNames = natsorted([x for x in scExpr.columns])
+
+        allLigands = list(self.ppiInfo.src_gene)
+        allReceptors = list(self.ppiInfo.tgt_gene)
+
+        containedLigs = natsorted([ x for x in scExpr.index if x.upper() in allLigands ])
+        containedRecs = natsorted([ x for x in scExpr.index if x.upper() in allReceptors ])
+
+        print("Contained Ligs", len(containedLigs))
+        print("Contained Recs", len(containedRecs))
+
+        csScores = defaultdict(lambda : Counter())
+        csScoresij = defaultdict(list)
+
+        allCsScores = []
+
+        lr_interactions = []
+        for rownum, row in self.ppiInfo.iterrows():
+            lr_interactions.append( (row["src_gene"], row["tgt_gene"], row["direction"]) )
+
+        cslrijCount = 0
+        cslrij_mean_sum = 0
+        cslrij_taken_mean_sum = 0
+        for ligand, receptor, inttype in set(lr_interactions):
+
+            if not ligand in containedLigs:
+                continue
+            if not receptor in containedRecs:
+                continue
+
+            for clusterI in clusterNames:
+                for clusterJ in clusterNames:
+
+                    if clusterI == clusterJ:
+                        continue
+
+                    exprLigand = scExpr.loc[ligand, clusterI]
+                    exprRecept = scExpr.loc[receptor, clusterJ]
+
+                    cslrijCount += 1
+
+                    if not isinstance(exprLigand, pd.Series):
+                        exprLigand = [exprLigand]
+                    if not isinstance(exprRecept, pd.Series):
+                        exprRecept = [exprRecept]
+
+                    for eL in exprLigand:
+                        for eR in exprRecept:
+                            cslrij = self.communication_score(eL, eR)
+
+                            cslrij_mean_sum += cslrij
+
+                            if cslrij < min_comm:
+                                continue
+
+                            cslrij_taken_mean_sum += cslrij
+
+                            csScores[(ligand, receptor)][(clusterI, clusterJ)] += cslrij
+                            csScoresij[(clusterI, clusterJ)].append((ligand, receptor, cslrij))
+                            allCsScores.append((ligand, receptor, clusterI, clusterJ, cslrij))
+
+        print("total com scores", len(allCsScores))
+        print("mean score calculated", cslrij_mean_sum/cslrijCount)
+        print("mean score taken", cslrij_taken_mean_sum/len(allCsScores))
+
+        df = pd.DataFrame(allCsScores, columns=["ligand", "receptor", "clusterI", "clusterJ", "score"])
+
+        df.to_excel(os.path.join(outputFolder, "scores.{}.xlsx".format( outputName )))
+
+        sumDF = df.groupby(["clusterI", "clusterJ"]).agg(score=("score", "sum"), count=("score", "count"))
+        sumDF.to_excel(os.path.join(outputFolder, "agg.{}.xlsx".format( outputName )))
+        selDF = sumDF
+
+        allElems = set()
+        for idx, row in selDF.iterrows():
+
+            allElems.add(idx[0])
+            allElems.add(idx[1])
+
+        allElems = natsorted(allElems)
+
+        predefinedElems = []
+        if not sourceElems is None:
+            predefinedElems += [x for x in sourceElems]
+        if not targetElems is None:
+            predefinedElems += [x for x in targetElems]
+
+        allElems = predefinedElems + [x for x in allElems if not x in predefinedElems]
+
+        flux = np.zeros((len(allElems), len(allElems)))
+
+        for idx, row in selDF.iterrows():
+            iElem = idx[0]
+            jElem = idx[1]
+
+            flux[allElems.index(iElem), allElems.index(jElem)] += row["score"]
+            #flux[allElems.index(jElem), allElems.index(iElem)] += row["score"]
+
+        clusterIDs = [x.split(".")[1] for x in allElems]
+        allNames = ["Cluster " + x for x in clusterIDs]
+        cmap = matplotlib.cm.get_cmap('viridis')
+        norm = matplotlib.colors.Normalize(vmin=0.0, vmax=len(allNames))
+
+        redsMap =  matplotlib.cm.get_cmap('Reds')
+
+        allColors = []
+        redI = 0
+        for i, clusterID in enumerate(clusterIDs):
+            clusterColor = cluster2color[clusterID]
+            allColors.append(clusterColor)
+
+        normReds = matplotlib.colors.Normalize(vmin=0, vmax=1)
+
+        grpDF = sumDF.groupby("clusterI").agg("sum")
+        print(grpDF)
+
+        def getArcColor(i, j, n):
+
+            if sourceElems is None:
+                return allColors[i]
+
+            print(allElems[i], "-->", allElems[j], allElems[i] in sourceElems)
+
+            if allElems[i] in sourceElems:
+                return allColors[i]
+
+            elif allElems[j] in sourceElems:
+                return allColors[j]
+
+            else:
+                return "#e6e6e6"
+
+
+        fig, ax = plt.subplots(figsize=(10,10))
+
+        plt.rcParams["image.composite_image"] = False
+
+        targetScore = 0
+        for x in predefinedElems:
+            targetScore += grpDF.loc[x].score
+        print("TargetScore for", len(predefinedElems), "Elements:", targetScore)
+
+        startDegree = 90 - (((targetScore / grpDF.score.sum()) * 360) / 2)
+        delayedArcs = [i for i,_ in enumerate(predefinedElems)]
+        Plotter.chord_diagram(flux, allNames, delayedArcs=delayedArcs, startdegree=startDegree, ax=ax, gap=0.03, use_gradient=True, colors=allColors, sort="size", rotate_names=True, fontcolor="grey", arccolors=getArcColor)
+
+        if not sourceElems is None or not targetElems is None:
+            cmappable = ScalarMappable(norm=normReds, cmap=redsMap)
+            cbar = fig.colorbar(cmappable, ax=ax, location = 'right', pad = 0.4)
+
+            cbar.ax.set_ylabel("Cluster->Cluster Communication Score")
+        
+        self.make_space_above(ax, topmargin=2)   
+
+        plt.suptitle("Interaction Map ({})".format(titleDescr), fontsize =20)
+        plt.margins(1)
+        plt.savefig(os.path.join(outputFolder, "chord_plot.{}.png".format( outputName )), bbox_inches='tight', dpi=500)
+        plt.savefig(os.path.join(outputFolder, "chord_plot.{}.svg".format( outputName )), bbox_inches='tight')
+        plt.savefig(os.path.join(outputFolder, "chord_plot.{}.pdf".format( outputName )), bbox_inches='tight')
+
+        print(os.path.join(outputFolder, "chord_plot.{}.png".format( outputName )))
+        sumDF["experiment"] = outputName
+
+        return sumDF
+
+
+    def to_list(self, input, delim=" "):
+        if input == None or pd.isna(input) or input == "nan" or input == "None":
+            return []
+
+        if not type(input) == str:
+            print(input)
+
+        return [x for x in input.split(delim) if len(x) > 0]
+
+    def loadGeneInfo(self, path, to_upper=True):
+        uniprotDF = pd.read_csv(path, sep="\t", header=0)
+        protInfo = {}
+        geneInfo = {}
+
+        for entry in uniprotDF.iterrows():
+
+            entryInfo = entry[1].to_dict()
+
+            if entryInfo["Entry"] in protInfo:
+                print("doublet", entryInfo["Entry"])
+                exit()
+
+
+            entryInfo["Gene names"] = self.to_list(entryInfo["Gene names"])
+            if to_upper:
+                entryInfo["Gene names"] = [x.upper() for x in entryInfo["Gene names"]]
+
+            entryInfo["GO"] = self.to_list(entryInfo["Gene ontology IDs"], "; ")
+            entryInfo["InterPro"] = self.to_list(entryInfo["Cross-reference (InterPro)"], ";")
+            entryInfo["PRO"] = self.to_list(entryInfo["Cross-reference (PRO)"], ";")
+            entryInfo["KEGG"] = self.to_list(entryInfo["Cross-reference (KEGG)"], ";")
+            entryInfo["PFAM"] = self.to_list(entryInfo["Cross-reference (Pfam)"], ";")
+            entryInfo["SUBLOCATION"] = self.to_list(entryInfo["Subcellular location [CC]"], ";")
+
+            del entryInfo["Gene ontology IDs"]
+            del entryInfo["Cross-reference (InterPro)"]
+            del entryInfo["Cross-reference (PRO)"]
+            del entryInfo["Cross-reference (KEGG)"]
+            del entryInfo["Cross-reference (Pfam)"]
+            del entryInfo["Subcellular location [CC]"]
+
+            if len(entryInfo["Gene names"]) == 0:
+                continue
+            geneName = entryInfo["Gene names"][0]
+
+            if to_upper:
+                geneName = geneName.upper()
+
+
+            geneInfo[geneName] = entryInfo
+            protInfo[entryInfo["Entry"]] = entryInfo
+
+        return geneInfo, protInfo
+
+    def load_OmnipathPPI(self, prot_info, path="OmniPathPPIs.tsv"):
+
+        #TODO if file not there => download!
+        ppiDF = pd.read_csv(path, sep="\t", header=0)
+
+        ppiInfo = {}
+        noConsensusInfo = 0
+        noProtInfo = 0
+
+        #interpro2ppi = defaultdict(list)
+        #go2ppi = defaultdict(list)
+
+        for entry in ppiDF.iterrows():
+
+            entryInfo = entry[1].to_dict()
+
+            consensusEntryInfo = {}
+            
+            for x in ["source","target"]:#,"consensus_direction","consensus_stimulation","consensus_inhibition"]:
+                consensusEntryInfo[x] = entryInfo[x]
+
+            if entryInfo["consensus_direction"] != 1:
+                noConsensusInfo += 1
+                consensusEntryInfo["direction"] = 1
+            else:
+                consensusEntryInfo["direction"] = entryInfo["consensus_direction"]
+
+            (src, tgt) = consensusEntryInfo["source"], consensusEntryInfo["target"]
+
+            if "COMPLEX" in src or "COMPLEX" in tgt:
+                continue
+
+            if (src, tgt) in ppiInfo:
+                print("doublet", (src, tgt))
+                exit()
+
+            if not src in prot_info:
+                print("no src info", src)
+                noProtInfo += 1
+                continue
+
+            if not tgt in prot_info:
+                print("no src info", tgt)
+                noProtInfo += 1
+                continue
+
+            srcInfo = prot_info[src]
+            tgtInfo = prot_info[tgt]
+
+            try:
+                consensusEntryInfo["src_gene"] = srcInfo["Gene names"][0]
+                consensusEntryInfo["tgt_gene"] = tgtInfo["Gene names"][0]
+            except:
+                print(srcInfo)
+                print(tgtInfo)
+
+                break
+
+            ppiInfo[(consensusEntryInfo["src_gene"], consensusEntryInfo["tgt_gene"])] = consensusEntryInfo
+
+        print("sorted out", noConsensusInfo, "of", len(ppiDF), "PPIs for no consensus direction")
+        print("sorted out", noProtInfo, "of", len(ppiDF), "PPIs for no protein info")
+
+        return ppiInfo
+
+    def load_RL_mouse_jin(self, path="Mouse-2020-Jin-LR-pairs.csv"):
+
+        #TODO if file not there => download!
+
+        ppiDF = pd.read_csv(path, header=0)
+
+        ppiInfo = {}
+        noConsensusInfo = 0
+        noProtInfo = 0
+
+
+        for entry in ppiDF.iterrows():
+
+            entryInfo = entry[1].to_dict()
+            consensusEntryInfo = {}
+            consensusEntryInfo["direction"] = 1
+
+            (src, tgt) = entryInfo["ligand_symbol"], entryInfo["receptor_symbol"]
+            src = src.upper()
+            tgt = tgt.upper()
+
+            consensusEntryInfo["source"] = src
+            consensusEntryInfo["target"] = tgt
+
+            srcGenes = src.split("&")
+            tgtGenes = tgt.split("&")
+
+            for srcGene in srcGenes:
+                for tgtGene in tgtGenes:
+
+                    consensusEntryInfo["src_gene"] = srcGene
+                    consensusEntryInfo["tgt_gene"] = tgtGene
+
+                    ppiInfo[(srcGene, tgtGene)] = dict(consensusEntryInfo)
+
+        print("sorted out", noConsensusInfo, "of", len(ppiDF), "PPIs for no consensus direction")
+        print("sorted out", noProtInfo, "of", len(ppiDF), "PPIs for no protein info")
+        print("Total Interactions", len(ppiInfo))
+        return ppiInfo
+
+
+    def load_LR_human_Shao(self, path="Human-2020-Shao-LR-pairs.txt"):
+
+        #TODO if file not there => download!
+
+        ppiDF = pd.read_csv(path, sep="\t", header=0)
+
+        ppiInfo = {}
+        noConsensusInfo = 0
+        noProtInfo = 0
+
+
+        for entry in ppiDF.iterrows():
+
+            entryInfo = entry[1].to_dict()
+            consensusEntryInfo = {}
+            consensusEntryInfo["direction"] = 1
+
+            (src, tgt) = entryInfo["ligand_gene_symbol"], entryInfo["receptor_gene_symbol"]
+            src = src.upper()
+            tgt = tgt.upper()
+
+            consensusEntryInfo["source"] = src
+            consensusEntryInfo["target"] = tgt
+            consensusEntryInfo["src_gene"] = src
+            consensusEntryInfo["tgt_gene"] = tgt
+
+            ppiInfo[(src, tgt)] = dict(consensusEntryInfo)
+
+        print("sorted out", noConsensusInfo, "of", len(ppiDF), "PPIs for no consensus direction")
+        print("sorted out", noProtInfo, "of", len(ppiDF), "PPIs for no protein info")
+        print("Total Interactions", len(ppiInfo))
+        return ppiInfo
+
+
+    def combinePPI( self, ppis ):
+
+        ppiInfo = {}
+
+        for ppiInput in ppis:
+            
+            inputNewEntries = 0
+            incompatiblePPIs = 0
+            for x in ppiInput:
+
+                if not x in ppiInfo:
+                    ppiInfo[x] = ppiInput[x]
+                    inputNewEntries += 1
+                else:
+
+                    if ppiInfo[x]["direction"] != ppiInput[x]["direction"]:
+                        incompatiblePPIs += 1
+                    
+                    continue
+
+            print("Inserted new entries {} of {} (incompatible entries not inserted {})".format(inputNewEntries, len(ppiInput), incompatiblePPIs))
+
+        ggiDF = pd.DataFrame.from_dict(ppiInfo).T
+        ggiDF = ggiDF.reset_index(drop=True)
+
+        return ggiDF
 
