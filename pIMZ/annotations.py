@@ -56,7 +56,8 @@ from .plotting import Plotter
 import jinja2
 
 from matplotlib.cm import ScalarMappable
-
+from statsmodels.stats.multitest import multipletests
+from scipy.stats import hypergeom
 
 # applications
 import progressbar
@@ -1118,3 +1119,287 @@ class PPIAnalysis:
 
         return ggiDF
 
+
+class FlowAnalysis:
+
+    def __init__(self):
+        pass
+
+    
+    def create_flows(self, meanExprDF, symbol_column, seriesOrder):
+
+        clusterNames = [x for x in meanExprDF.columns if x.startswith("mean")]
+
+        takeClusterNames = []
+        for x in clusterNames:
+            if not x.split(".")[1] in seriesOrder:
+                continue
+            takeClusterNames.append(x)
+
+        clusterNames = natsorted(takeClusterNames)
+
+
+        maxValue = max(meanExprDF[takeClusterNames].max())
+        minValue = min(meanExprDF[takeClusterNames].min())
+        binSpace = np.linspace(minValue, maxValue, 5, True)
+
+        exprDF = pd.DataFrame()
+        for cname in takeClusterNames:
+            
+            cnum = cname.split(".")[1]
+
+            bins = np.digitize(np.array(meanExprDF[cname]), binSpace)
+            binName = "bins.{}".format(cnum)
+
+            print(min(bins), max(bins))
+
+            exprDF[cname] = meanExprDF[cname]
+            exprDF[binName] = bins
+
+        exprDF[symbol_column] = meanExprDF[symbol_column]
+        print(exprDF.head())
+
+        return exprDF
+
+
+    def analyse_flows(self, exprDF, seriesOrder, series2name, levelOrder, symbol_column="matches"):
+
+
+        #seriesOrder = ["WT", "KO"]
+        #series2name = OrderedDict([("WT", "Wildtype"), ("KO", "Knockout")])
+        #levelOrder = OrderedDict([(-2, 'LOW'), (-1, 'low'), (0, 'UnReg'), (1, 'high'), (2, 'HIGH')])
+
+        flows = self.create_flows(exprDF, symbol_column, seriesOrder)
+
+        for x in seriesOrder:
+            assert( "bins.{}".format(x) in flows.columns)
+
+        binColumns = [x for x in flows.columns if x.startswith("bins.")]
+
+        flows['flowgroups'] = flows.apply( lambda row: tuple( [row[x] for x in binColumns] ), axis=1)
+        allgroups = list(set(flows["flowgroups"]))
+        flows['flowgroupid'] = flows.apply( lambda row: allgroups.index(row["flowgroups"]), axis=1)
+
+        flowgroup_flow = defaultdict(lambda: 0)
+        flowgroup_route = {}
+        flowgroup_genes = defaultdict(set)
+
+        for ri, row in flows.iterrows():
+            fgid = row["flowgroupid"]
+            fgflow = 1
+            fgroute = row["flowgroups"]
+            fggene = row[symbol_column]
+
+            flowgroup_route[fgid] = [(x,y) for x,y in zip(seriesOrder, fgroute)]
+            flowgroup_flow[fgid] += fgflow
+            flowgroup_genes[fgid].add(fggene)
+
+        weightSequence = []
+
+        for fgid in flowgroup_route:
+            weightSequence.append( tuple(flowgroup_route[fgid] + [flowgroup_flow.get(fgid, 0)]) )
+
+
+        self._make_plot(weightSequence, series2name, levelOrder, transformCounts=lambda x: np.sqrt(x))
+
+
+        rp = self.read_gmt_file("ReactomePathways.gmt")
+        allDFs = []
+
+        for fgid in flowgroup_genes:
+
+            fg_genes = [str(x) for x in flowgroup_genes[fgid]]
+
+            df = self.analyse_genes_for_genesets(rp, fg_genes)
+            df["fgid"] = fgid
+
+            print(fgid)
+            print(flowgroup_route[fgid], len(fg_genes))
+            #print(df[df["pwsize"] > 1].sort_values(["pval"], ascending=True).head(3))
+
+            allDFs.append(df)
+
+        allFGDFs = pd.concat(allDFs, axis=0)
+
+        _ , elemAdjPvals, _, _ = multipletests(allFGDFs["pval"], alpha=0.05, method='fdr_bh', is_sorted=False, returnsorted=False)
+        allFGDFs["adj_pval"] =elemAdjPvals
+
+        return flows, allFGDFs
+
+
+    def _make_plot( self, nodeWeigthSequence, s2n, lo, transformCounts = lambda x: x):
+
+        series2index = [x for x in s2n]
+        nodePositions = {}
+
+        for nodeName in s2n:
+            for nodeLevel in lo:
+
+                nodePositions[ (nodeName, nodeLevel) ] = (series2index.index(nodeName), 2*nodeLevel)
+
+        minNodeLevel = min([nodePositions[x][1] for x in nodePositions])
+        maxNodeLevel = max([nodePositions[x][1] for x in nodePositions])
+
+        #nodeWeigthSequence = [ (("WT", 2), ("KO", 0), 1), (("WT", 2), ("KO", -2), 1), (("WT", -1), ("KO", -2), 1) ]
+
+
+        nodeOffsets = defaultdict(lambda: 0)
+
+        colours = Plotter.generate_colormap(len(nodeWeigthSequence))
+
+        maxFlowPerNode = defaultdict(lambda: 0)
+
+        for si, nws in enumerate(nodeWeigthSequence):
+            weight = transformCounts(nws[-1])
+            nodes = nws[0:-1]
+
+            for node in nodes:
+                maxFlowPerNode[node] += weight
+
+        maxFlowInAllNodes = max([x for x in maxFlowPerNode.values()])
+
+        print(maxFlowInAllNodes)
+
+        fig, ax = plt.subplots(figsize=(20,10))
+        ax.axis('off')
+        plt.title("")
+
+        for si, nws in enumerate(nodeWeigthSequence):
+
+            weight = transformCounts(nws[-1]) / maxFlowInAllNodes
+            nodes = nws[0:-1]
+
+            for i in range(1, len(nodes)):
+
+                src = nodes[i-1]
+                tgt = nodes[i]
+
+                p1 = nodePositions[src]
+                p2 = nodePositions[tgt]
+
+                p1 = p1[0], p1[1] - nodeOffsets[src] + maxFlowPerNode[src]/maxFlowInAllNodes/2.0
+                p2 = p2[0], p2[1] - nodeOffsets[tgt] + maxFlowPerNode[tgt]/maxFlowInAllNodes/2.0
+
+                if tgt == ("KO", 0):
+                    print(p2)
+
+                xs, ys1, ys2 = Plotter.sigmoid_arc(p1, weight, p2, resolution=0.1, smooth=0, ax=ax)
+
+                nodeOffsets[src] += weight
+                #nodeOffsets[tgt] += weight
+
+                c = colours[si % len(colours)]
+                plt.fill_between(x=xs, y1=ys1, y2=ys2, alpha=0.5, color=c, axes=ax)
+
+
+
+        props = dict(boxstyle='round', facecolor='grey', alpha=1.0, pad=1)
+
+        for nn in nodePositions:
+
+            nodeStr = "{lvl}".format(cond=s2n[nn[0]], lvl=lo[nn[1]])
+            nodePosition = nodePositions[nn]
+
+            ax.text(nodePosition[0], nodePosition[1], nodeStr, transform=ax.transData, fontsize=14,rotation=90,
+                verticalalignment='center', ha='center', va='center', bbox=props)
+
+        # place a text box in upper left in axes coords
+
+        for si, series in enumerate(s2n):
+
+            ax.text(si, minNodeLevel-1, s2n[series], transform=ax.transData, fontsize=14,rotation=0,
+                verticalalignment='center', ha='center', va='center', bbox=props)
+
+
+        plt.ylim((minNodeLevel-1.5, maxNodeLevel+0.5))
+
+        plt.tight_layout()
+        plt.show()
+
+    def read_gmt_file(self, filepath):
+
+        geneset2genes = {}
+
+        with open(filepath) as fin:
+
+            for line in fin:
+
+                line = line.strip().split("\t")
+
+                #print(line)
+                pwName = line[0]
+                pwID = line[1]
+                pwGenes = line[2:]
+
+                #print(pwName)
+                #print(pwID)
+                #print(pwGenes)
+
+                geneset2genes[pwID] = (pwName, pwGenes)
+
+        return geneset2genes
+
+
+    def analyse_genes_for_genesets(self, pathways, genes, populationSize=None):
+        """
+        
+        pathways: pathway object
+        genes: genes of interest
+
+        populationSize: size of universe. if None, all genes in pathways will be chosen
+        
+        """
+
+        allGenes = list()
+        for x in pathways:
+            allGenes += pathways[x][1]
+
+        allGenes = set(allGenes)
+
+        if populationSize is None:
+            populationSize = len(allGenes)
+
+        geneSet = set([x.upper() for x in genes])
+        numSuccInPopulation = len(geneSet.intersection(allGenes))
+
+        
+        outData = defaultdict(list)
+
+        for pwID in pathways:
+
+            pwName, pwGenes = pathways[pwID]
+
+            sampleSize = len(pwGenes)
+            successIntersection = geneSet.intersection(pwGenes)
+            drawnSuccesses = len(successIntersection)
+
+            pval = hypergeom.sf(max([0, drawnSuccesses - 1]), populationSize, numSuccInPopulation, sampleSize)
+
+            if drawnSuccesses == 0:
+                pval = 1.0
+
+            # population: all genes
+            # condition: genes
+            # subset: pathway
+
+            #print 'total number in population: ' + sys.argv[1] -> populationSize
+            #print 'total number with condition in population: ' + sys.argv[2] -> numSuccInPopulation
+            #print 'number in subset: ' + sys.argv[3] -> len(pwGenes)
+            #print 'number with condition in subset: ' + sys.argv[4] -> drawnSuccesses
+            #print 'p-value >= ' + sys.argv[4] + ': ' + str(stats.hypergeom.sf(drawnSuccesses - 1,populationSize,numSuccInPopulation,sampleSize))
+
+            genes_coverage = drawnSuccesses / len(geneSet) if len(geneSet) > 0 else 0
+            pathway_coverage = drawnSuccesses / sampleSize if sampleSize > 0 else 0
+
+            outData["pwid"].append(pwID)
+            outData["pwname"].append(pwName)
+            outData["pwsize"].append(sampleSize)
+            outData["genesize"].append(len(genes))
+            outData["pw_gene_intersection"].append(drawnSuccesses)
+            outData["pw_coverage"].append(pathway_coverage)
+            outData["genes_coverage"].append(genes_coverage)
+            outData["succes_genes"].append(successIntersection)
+            outData["pval"].append(pval)
+            outData["mean_coverage"].append(pathway_coverage*genes_coverage)
+
+        return pd.DataFrame.from_dict(outData)

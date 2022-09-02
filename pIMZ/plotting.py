@@ -7,7 +7,7 @@ import numpy as np
 
 from matplotlib.colors import ColorConverter, to_hex
 from matplotlib.path import Path
-from matplotlib.cm import ScalarMappable
+from matplotlib.cm import ScalarMappable, hsv
 import matplotlib.patches as patches
 
 from matplotlib.colors import ColorConverter, LinearSegmentedColormap
@@ -15,6 +15,7 @@ from scipy.ndimage import gaussian_filter
 from collections.abc import Sequence
 from textwrap import wrap
 import scipy.sparse as ssp
+from scipy.special import expit
 
 import math
 
@@ -941,3 +942,85 @@ class Plotter():
             cluster2color[clusterNames[x].split(".")[1]] = useColors[x]
 
         return cluster2color
+
+
+    @classmethod
+    def sigmoid_curve(cls, p1, p2, resolution=0.1, smooth=0):
+        x1, y1 = p1
+        x2, y2 = p2
+        
+        xbound = 6 + smooth
+
+        fxs = np.arange(-xbound,xbound+resolution, resolution)
+        fys = expit(fxs)
+        
+        x_range = x2 - x1
+        y_range = y2 - y1
+        
+        xs = x1 + x_range * ((fxs / (2*xbound)) + 0.5)
+        ys = y1 + y_range * fys
+        
+        return xs, ys
+
+
+    @classmethod 
+    def sigmoid_arc(cls, p1, w1, p2, w2=None, resolution=0.1, smooth=0, ax=None):
+        
+        xs, ys1 = cls.sigmoid_curve(p1, p2, resolution, smooth)
+        
+        if w2 is None:
+            w2 = w1
+        
+        p1b = p1[0], p1[1] - w1
+        p2b = p2[0], p2[1] - w2
+
+        xs, ys2 = cls.sigmoid_curve(p1b, p2b, resolution, smooth)
+        
+        return xs, ys1, ys2
+
+    @classmethod
+    def sankey(cls, flow_matrix=None, node_positions=None, link_alpha=0.5, colours=None, 
+            colour_selection="source", resolution=0.1, smooth=0, **kwargs):
+        #node_widths = [np.max([i, o]) for i, o in zip(in_totals, out_totals)]
+        n = np.max(flow_matrix.shape)
+        in_offsets = [0] * n
+        out_offsets = [0] * n
+
+        ax = kwargs.get("ax", plt.gca())
+        
+        for i, b1 in enumerate(node_positions):
+            outputs = flow_matrix[i,:]
+            for j, (w, b2) in enumerate(zip(outputs, node_positions)):
+                if w:
+                    p1 = b1[0], b1[1] - out_offsets[i]
+                    p2 = b2[0], b2[1] - in_offsets[j]
+                    xs, ys1, ys2 = cls.sigmoid_arc(p1, w, p2, resolution=resolution, smooth=smooth, ax=ax)
+                    out_offsets[i] += w
+                    in_offsets[j] += w
+                
+                    c = 'grey'
+
+                    if type(colours) == str:
+                        c = colours
+                    elif type(colours) == list:
+                        if colour_selection == "sink":
+                            c = colours[j]
+                        elif colour_selection == "source":
+                            c = colours[i]
+                    plt.fill_between(x=xs, y1=ys1, y2=ys2, alpha=link_alpha, color=c, axes=ax)
+
+    @classmethod
+    def generate_colormap(cls, N):
+        arr = np.arange(N)/N
+        N_up = int(np.ceil(N/7)*7)
+        arr.resize(N_up)
+        arr = arr.reshape(7,N_up//7).T.reshape(-1)
+        ret = hsv(arr)
+        n = ret[:,3].size
+        a = n//2
+        b = n-a
+        for i in range(3):
+            ret[0:n//2,i] *= np.arange(0.2,1,0.8/a)
+        ret[n//2:,3] *= np.arange(1,0.1,-0.9/b)
+    #     print(ret)
+        return ret
