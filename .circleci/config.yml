@@ -27,7 +27,7 @@ jobs:
           command: sudo pip3 install ms_peak_picker wheezy.template
       - run:
           name: "pip install dependencies (3)"
-          command: sudo pip3 install numba llvmlite Cython --upgrade
+          command: sudo pip3 install pybaselines numba llvmlite Cython --upgrade
       - run:
           name: "Setup Project"
           command: sudo python3 setup.py develop test
