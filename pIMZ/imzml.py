@@ -43,8 +43,6 @@ from scipy.stats import kurtosis
 from scipy.interpolate import interp1d
 from scipy.spatial import ConvexHull
 
-from pykeops.numpy import LazyTensor
-
 
 #web/html
 import jinja2

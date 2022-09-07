@@ -651,8 +651,29 @@ class PPIAnalysis:
         self.ppiInfo = self.combinePPI(loadedPPIs)
 
 
+    def get_neighbouring_clusters(self, spec, grouping):
 
-    def analyse(self, meanExprDF, outputName, outputFolder, index_col="mass", clusters=None, title="", sel_source=None, sel_target=None, min_comm=0):
+        metaArray = spec.meta[grouping]
+
+        allNeighbours = set()
+
+        for i in range(1, metaArray.shape[0]-1):
+            for j in range(1, metaArray.shape[1]-1):
+
+                for k in range(-1, 2):
+                    for l in range(-1, 2):
+
+                        if metaArray[i,j] == metaArray[i+k, j+l]:
+                            continue
+
+                        allNeighbours.add( (metaArray[i,j], metaArray[i+k, j+l]) )
+                        allNeighbours.add( (metaArray[i+k, j+l], metaArray[i,j]) )
+
+        
+        return [("mean.{}".format(x), "mean.{}".format(y)) for x,y in allNeighbours]
+
+
+    def analyse(self, meanExprDF, outputName, outputFolder, index_col="mass", clusters=None, title="", sel_source=None, sel_target=None, min_comm=0, selfCommunication=False, neighbours=None):
 
         if not os.path.exists(outputFolder):
             os.makedirs(outputFolder, exist_ok=True)
@@ -705,7 +726,7 @@ class PPIAnalysis:
         print("Selected sources:", srcHighlights)
         print("Selected targets:", tgtHighlights)
 
-        sdf = self.plot_interactome_chord_matrix(scExpr.copy(), outputFolder, outputName, titleDescr, srcHighlights, tgtHighlights, None, cluster2color, index_col, min_comm)
+        sdf = self.plot_interactome_chord_matrix(scExpr.copy(), outputFolder, outputName, titleDescr, srcHighlights, tgtHighlights, None, cluster2color, index_col, min_comm, selfCommunication=selfCommunication, neighbours=neighbours)
 
         return sdf        
 
@@ -727,7 +748,7 @@ class PPIAnalysis:
 
 
 
-    def plot_interactome_chord_matrix(self, scExpr, outputFolder, outputName, titleDescr, sourceElems, targetElems, highlightTuple, cluster2color, index_col, min_comm):
+    def plot_interactome_chord_matrix(self, scExpr, outputFolder, outputName, titleDescr, sourceElems, targetElems, highlightTuple, cluster2color, index_col, min_comm, selfCommunication, neighbours):
 
         scExpr = scExpr.set_index(index_col)
         scExpr = scExpr.apply(pd.to_numeric, errors='ignore')
@@ -752,6 +773,7 @@ class PPIAnalysis:
         for rownum, row in self.ppiInfo.iterrows():
             lr_interactions.append( (row["src_gene"], row["tgt_gene"], row["direction"]) )
 
+
         cslrijCount = 0
         cslrij_mean_sum = 0
         cslrij_taken_mean_sum = 0
@@ -765,8 +787,14 @@ class PPIAnalysis:
             for clusterI in clusterNames:
                 for clusterJ in clusterNames:
 
-                    if clusterI == clusterJ:
-                        continue
+                    if not selfCommunication:
+                        if clusterI == clusterJ:
+                            continue
+                    
+                    if not clusterI == clusterJ:
+                        if not neighbours is None:
+                            if not (clusterI, clusterJ) in neighbours:
+                                continue
 
                     exprLigand = scExpr.loc[ligand, clusterI]
                     exprRecept = scExpr.loc[receptor, clusterJ]
@@ -792,6 +820,11 @@ class PPIAnalysis:
                             csScores[(ligand, receptor)][(clusterI, clusterJ)] += cslrij
                             csScoresij[(clusterI, clusterJ)].append((ligand, receptor, cslrij))
                             allCsScores.append((ligand, receptor, clusterI, clusterJ, cslrij))
+
+
+        if len(allCsScores) == 0:
+            print("total com scores", len(allCsScores))
+            return
 
         print("total com scores", len(allCsScores))
         print("mean score calculated", cslrij_mean_sum/cslrijCount)
@@ -1160,6 +1193,7 @@ class FlowAnalysis:
         print(exprDF.head())
 
         return exprDF
+
 
 
     def analyse_flows(self, exprDF, seriesOrder, series2name, levelOrder, symbol_column="matches"):
