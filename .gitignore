@@ -21,3 +21,6 @@ pIMZ.egg-info
 
 docs/_build
 __pycache__
+
+*.o
+*.so

@@ -242,49 +242,58 @@ class SpectraRegion():
 
         assert grouping in self.meta
 
-        availableGroups = np.unique(self.meta[grouping])
+        
+        numPixels = self.region_array.shape[0]*self.region_array.shape[1]
 
-        sampleVec = []
-        clusterVec = []
-        coordinates = []
+        sampleVec = [None] * numPixels
+        clusterVec = [None] * numPixels
+        coordinates = [None] * numPixels
 
-        exprData = pd.DataFrame()
+        exprData = np.zeros((numPixels, self.region_array.shape[2]))
         masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mass]
+        
+        
+        bar = makeProgressBar()
+        for i in bar(range(0, self.region_array.shape[0])):
+            for j in range(0, self.region_array.shape[1]):
+                
+                colPos = i*self.region_array.shape[1]+j
+                pxl = (i,j)
+                                
+                exprData[colPos,:] = self.region_array[pxl[0], pxl[1], :]
+                
+                pxl_name = "{}__{}".format(colPos, "_".join([str(x) for x in pxl]))
+                
+                sampleVec[colPos] = pxl_name
+                clusterVec[colPos] = self.meta[grouping][pxl]
+                coordinates[colPos] =  np.array(pxl)
+        
 
-        for clus in availableGroups:
-
-            positions = np.where(self.meta[grouping] == clus, )
-            self.logger.info("Collecting cluster: {}".format(clus))
-
-            bar = makeProgressBar()
-            for pxl in bar(positions):
-
-                pxl_name = "{}__{}".format(str(len(sampleVec)), "_".join([str(x) for x in pxl]))
-
-                sampleVec.append(pxl_name)
-                clusterVec.append(clus)
-                coordinates.append( pxl )
-
-                exprData[pxl_name] = self.region_array[pxl[0], pxl[1], :]
-
+                
+        #exprDF = pd.DataFrame(exprData, columns = sampleVec)
 
         self.logger.info("DE DataFrame ready. Shape {}".format(exprData.shape))
 
         #from squidpy:
         # adata = AnnData(counts, obsm={"spatial": coordinates})
-        pData = pd.DataFrame()
-        pData["cluster"] = clusterVec
+
 
         # columns: genes # var: featurenames
         # rows   : cells/pixels # obs: rows = cell/pixel information       
-        deData = anndata.AnnData(
-            X=exprData.values.transpose(),
-            var=pd.DataFrame(index=masses),
-            obs=pData,
-            obsm={"spatial": coordinates}
-        )
+        adata = anndata.AnnData(exprData)
+        
+        self.logger.info("Adding obs and var names")
 
-        return deData
+        adata.obs_names = sampleVec
+        adata.var_names = masses
+        
+        self.logger.info("Adding meta data")
+        adata.obs["cluster"] = clusterVec
+        
+        self.logger.info("Adding spatial data")
+        adata.obsm["spatial"] = np.array(coordinates)
+
+        return adata
 
 
 
@@ -302,7 +311,7 @@ class SpectraRegion():
         """
         baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
 
-        libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
+        libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../cIMZ", "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
         self.lib = ctypes.cdll.LoadLibrary(libfile)
 
         self.lib.StatisticalRegionMerging_New.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.c_uint8]

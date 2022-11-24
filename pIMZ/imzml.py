@@ -178,6 +178,35 @@ class IMZMLExtract:
         return True
 
 
+    def bins_per_pixel(self, regionid, plot=True):
+        
+        self.logger.info("Fetching region shape")
+        rs = self.get_region_shape(regionid)
+
+        self.logger.info("Fetching region range")
+        xr,yr,zr,sc = self.get_region_range(regionid)
+
+        self.logger.info("Fetching region spectra")
+        coord2spec, coord2mz = self.get_continuous_region_spectra(regionid)
+       
+        outarray = np.zeros((rs[0], rs[1]))
+        
+        bar = makeProgressBar()
+        for coord in bar(coord2spec):
+            xpos = coord[0]-xr[0]
+            ypos = coord[1]-yr[0]
+            
+            outarray[xpos, ypos] = len(coord2mz[coord])
+            
+            
+        if plot:
+            heatmap = plt.matshow(outarray)
+            plt.colorbar(heatmap)
+            plt.show()
+            plt.close()
+            
+        return outarray
+
 
     def _coord2index(self):
         """Returns coordinates with their respective index.
@@ -790,6 +819,22 @@ class IMZMLExtract:
                 outarray[i,j,:] = self.smooth_spectrum(region_array[i,j,:], method=method, window_length=window_length, polyorder=polyorder)
 
         return outarray
+
+
+    def logarithmize_region_array(self, region_array, logfunc=lambda x: np.log1p(x)):
+        """applies logfunc to region_array
+
+        Args:
+            region_array (numpy.array): The region array to manipulate/log
+            logfunc (lambdax, optional): applies log1p function to region array. Defaults to lambdax:np.log1p.
+
+        Returns:
+            numpy.array: scaled/logarithmized regin array
+        """
+
+
+        return logfunc(region_array)
+        
 
 
 
@@ -1406,6 +1451,9 @@ class IMZMLExtract:
             specNew = f(masses_new)
         else:
             raise Exception("Unknown interpolation method")
+
+        #if sum(np.isnan(specNew)) > 0:
+        #    raise Exception("Interpolation raised NaNs")
 
         return specNew
 
@@ -2127,7 +2175,6 @@ class IMZMLExtract:
         self.logger.info("Forming region array from spectra")
 
 
-        allMinIntensities = []
         bar = makeProgressBar()
         for coord in bar(discr_coord2spec):
             xpos = coord[0]-xr[0]
@@ -2136,14 +2183,12 @@ class IMZMLExtract:
             spectra = np.array(discr_coord2spec[coord], copy=True)
 
             if makeNullLine:
-                minIntensity = np.min(spectra)
-                spectra = spectra - minIntensity
-                allMinIntensities.append(minIntensity)
+                spectra[np.isnan(spectra)] = 0
+                spectra[spectra < 0] = 0
 
             sarray[xpos, ypos, :] = spectra
 
-        if makeNullLine:
-            self.logger.info("Stats on min Intensities: {}".format(self._fivenumber(allMinIntensities)))
+
         self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
 
 
@@ -2155,7 +2200,7 @@ class IMZMLExtract:
         Args:
             region_array (np.array): region_array (3D spectra array)
             coords (list): list of coordinate tuples [(x,y)]
-            valRange (list, tiple): range to plot the spectra. Defaults to full range.
+            valRange (list, tuple): range to plot the spectra. Defaults to full range.
             xvals (np.array, list, optional): mz-Values for the entries in region_array 3rd dim. Defaults to None.
             stems (bool, optional): Whether to plot lines or stems for all intensities. Defaults to False.
         """
