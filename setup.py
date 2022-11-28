@@ -82,7 +82,7 @@ setup(name="pIMZ",
       # TODO: List of packages that this one depends upon:  
       install_requires=[
         'numpy>=1.17.5', 
-        'h5py', "openbabel",
+        'h5py',
         'matplotlib',
         'pandas',
         'scipy', 
