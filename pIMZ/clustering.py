@@ -259,7 +259,7 @@ class PCAEmbedding(RegionEmbedding):
         # according to https://scentellegher.github.io/machine-learning/2020/01/27/pca-loadings-sklearn.html
         computedPCs = ["PC{}".format(x) for x in range(1, self.dimensions+1)] # 1-based
         loadings = pd.DataFrame(self.embedding_object.components_.T, columns=computedPCs)
-        loadings.insert(loc=0, column="mass", value=self.region.idx2mass)
+        loadings.insert(loc=0, column="mass", value=self.region.get_mz_vector())
 
         return loadings
 
@@ -582,7 +582,7 @@ class FuzzyCMeansClusterer(RegionClusterer):
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.matrix_mz = np.copy(self.region.get_mz_vector())
         self.segmented = None
 
     def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
@@ -611,7 +611,7 @@ class KMeansClusterer(RegionClusterer):
     def __init__(self, region: SpectraRegion) -> None:
         super().__init__(region)
 
-        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.matrix_mz = np.copy(self.region.get_mz_vector())
         self.segmented = None
 
     def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
@@ -1637,11 +1637,36 @@ class SASARegionClusterer(ShrunkenCentroidClusterer):
 
 
     def _call_new_clusters(self, shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids):
-        shr_segmented, ams = self._get_new_clusters_func(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids, print_area=0, distance_func=lambda matrix, pxCoord, centroid, sqSStats, centroidProbability: self._distance_sasa(matrix, pxCoord, 
-                centroid, sqSStats, centroidProbability, radius=self.radius))
+        shr_segmented, ams = self._get_new_clusters_func(shr_segmented, matrix_segments, matrix, matrix_seg_centroids, matrix_shr_centroids, print_area=0) #distance_func=lambda matrix, pxCoord, centroid, sqSStats, centroidProbability: self._distance_sasa(matrix, pxCoord, centroid, sqSStats, centroidProbability, radius=self.radius)
 
         return shr_segmented, ams
 
+    def _determine_clusters(self, spectra_orig, segments, shr_seg_centroids, sSumSq, n):
+        
+        new_matrix = np.zeros( (spectra_orig.shape[0], spectra_orig.shape[1]), dtype=np.int32)
+
+        segNames = [x for x in segments]
+
+        for i in prange(spectra_orig.shape[0]):
+            for j in range(spectra_orig.shape[1]):
+
+                sigmas = np.zeros((len(segments),))
+                for si, seg in enumerate(segNames):
+                    shr_seg_centroid = shr_seg_centroids[seg]
+
+                    sigma = self._distance_sasa(spectra_orig, (i,j), shr_seg_centroid, sSumSq, len(segments[seg])/n, radius=self.radius)
+                    sigmas[si] = sigma
+
+                bestS = 0
+                bestSigma = sigmas[0]
+                for s in range(len(segNames)):
+                    if sigmas[s] < bestSigma:
+                        bestSigma = sigmas[s]
+                        bestS = s
+
+                new_matrix[i,j] = segNames[bestS]
+
+        return new_matrix
 
 
 class HierarchicalClusterer(RegionClusterer, metaclass=abc.ABCMeta):

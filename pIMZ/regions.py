@@ -202,6 +202,106 @@ class RegionClusterer(metaclass=abc.ABCMeta):
         plt.close()
 
 
+class mzBSTNode:
+    def __init__(self, key, value, data=None):
+        self.value = value
+        self.left = None
+        self.right = None
+        self.key = key
+        
+        self.data = data
+        
+    def __str__(self):
+        return "{}: {}, {}, l={}, r={}".format(self.key, self.value, self.data, self.left.key if not self.left is None else None , self.right.key if not self.right is None else None)
+
+    def __repr__(self):
+        return "{}: {}, {}, l={}, r={}".format(self.key, self.value, self.data, self.left.key if not self.left is None else None , self.right.key if not self.right is None else None)
+
+class mzBST:
+    
+    def __init__(self, values):
+        
+        arr = [(idx, value) for idx, value in enumerate(values)]
+        arr = sorted(arr, key=lambda x: x[1])
+        self.key2node = {}
+        
+        self.root = self.sortedArrayToBST(arr, valueAcc=lambda x: x[1], dataAcc=lambda x: x[0])
+        
+    
+    def sortedArrayToBST(self, arr, valueAcc, dataAcc=None):
+        
+        
+        #https://www.geeksforgeeks.org/sorted-array-to-balanced-bst/
+        
+        if not arr:
+            return None
+    
+        # find middle index
+        mid = (len(arr)) // 2
+        
+        nodeData = None
+        
+        if not dataAcc is None:
+            nodeData = dataAcc(arr[mid])
+        
+        # make the middle element the root
+        root = mzBSTNode(len(self.key2node), valueAcc(arr[mid]), data=nodeData)
+        self.key2node[root.key] = root
+        
+        # left subtree of root has all
+        # values <arr[mid]
+        root.left = self.sortedArrayToBST(arr[:mid], valueAcc, dataAcc=dataAcc)
+        
+        # right subtree of root has all
+        # values >arr[mid]
+        root.right = self.sortedArrayToBST(arr[mid+1:], valueAcc, dataAcc=dataAcc)
+        return root
+
+
+    def _maxDiffUtil(self, node: mzBSTNode, searchValue, min_diff, min_diff_key):
+        """_summary_
+
+        Args:
+            ptr (_type_): current node
+            k (_type_): value to search for
+            min_diff (_type_): minimum difference till now
+            min_diff_key (_type_): node having minimum absolute difference with K
+        """
+        
+        if node == None:
+            return
+            
+        # If k itself is present
+        if node.value == searchValue:
+            min_diff_key[0] = node
+            return
+    
+        # update min_diff and min_diff_key by 
+        # checking current node value
+        if min_diff > abs(node.value - searchValue):
+            min_diff = abs(node.value - searchValue)
+            min_diff_key[0] = node
+    
+        # if k is less than ptr->key then move
+        # in left subtree else in right subtree
+        if searchValue < node.value:
+            self._maxDiffUtil(node.left, searchValue, min_diff, min_diff_key)
+        else:
+            self._maxDiffUtil(node.right, searchValue, min_diff, min_diff_key)
+    
+    # Wrapper over maxDiffUtil()
+    def findClosestValueTo( self, value ):
+        
+        # Initialize minimum difference
+        min_diff, min_diff_key = 999999999999, [None]
+    
+        # Find value of min_diff_key (Closest key in tree with k)
+        self._maxDiffUtil(self.root, value, min_diff, min_diff_key)
+        
+        if min_diff_key[0] is None:
+            return None, None
+            
+        return min_diff_key[0].value, min_diff_key[0].data
 
 
 
@@ -250,7 +350,7 @@ class SpectraRegion():
         coordinates = [None] * numPixels
 
         exprData = np.zeros((numPixels, self.region_array.shape[2]))
-        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mass]
+        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mz]
         
         
         bar = makeProgressBar()
@@ -327,13 +427,13 @@ class SpectraRegion():
         self.lib.StatisticalRegionMerging_mode_eucl.restype = None
 
 
-    def __init__(self, region_array, idx2mass, name=None):
+    def __init__(self, region_array, idx2mz, name=None):
         """Initializes a SpectraRegion object with the following attributes:
         - lib: C++ library
         - logger (logging.Logger): Reference to the Logger object.
         - name (str): Name of the region. Defaults to None.
         - region_array (numpy.array): Array of spectra.
-        - idx2mass (numpy.array): m/z values.
+        - idx2mz (numpy.array): m/z values.
         - spectra_similarity (numpy.array): Pairwise similarity matrix. Initialized with None.
         - dist_pixel (numpy.array): Pairwise coordinate distance matrix (2-norm). Initialized with None.
         - idx2pixel (dict): Dictionary of enumerated pixels to their coordinates.
@@ -349,14 +449,14 @@ class SpectraRegion():
 
         Args:
             region_array (numpy.array): Array of spectra defining one region.
-            idx2mass (numpy.array): m/z values for given spectra.
+            idx2mz (numpy.array): m/z values for given spectra.
             name (str, optional): Name of this region (required if you want to do a comparative analysis). Defaults to None.
         """
 
         assert(not region_array is None)
-        assert(not idx2mass is None)
+        assert(not idx2mz is None)
 
-        assert(len(region_array[0,0,:]) == len(idx2mass))
+        assert(len(region_array[0,0,:]) == len(idx2mz))
 
         self.lib = None
         self.loadLib()
@@ -366,7 +466,9 @@ class SpectraRegion():
 
         self.name = None
         self.region_array = region_array
-        self.idx2mass = idx2mass
+        self.idx2mz = idx2mz
+
+        self.mz_bst = mzBST(self.idx2mz)
 
         self.spectra_similarity = None
         self.dist_pixel = None
@@ -420,10 +522,11 @@ class SpectraRegion():
         Returns:
             dict: all data in one dict
         """
+        print("Getting State")
         return {
             "name": self.name,
             "region_array": self.region_array,
-            "idx2mass": self.idx2mass,
+            "idx2mz": self.idx2mz,
             "spectra_similarity": self.spectra_similarity,
             "dist_pixel": self.dist_pixel,
             "idx2pixel": self.pixel2idx,
@@ -460,6 +563,7 @@ class SpectraRegion():
             self.idx2pixel[i] = (x,y)
             self.pixel2idx[(x,y)] = i
 
+        self.mz_bst = mzBST(self.idx2mz)
 
     @property
     def segmented(self):
@@ -601,7 +705,7 @@ class SpectraRegion():
             grp = data_file.create_group("intensities")
 
             for mzIdx in range(0, self.region_array.shape[2]):
-                mzValue = self.idx2mass[mzIdx]
+                mzValue = self.idx2mz[mzIdx]
                 dset = grp.create_dataset( str(mzIdx) , data=self.region_array[:,:, mzIdx])
                 dset.attrs["mz"] = mzValue
             data_file.close()
@@ -728,7 +832,7 @@ class SpectraRegion():
         return eidx
 
     def get_mass_from_index(self, idx):
-        return self.idx2mass[idx]
+        return self.idx2mz[idx]
  
     def _get_exmass_for_mass(self, mass, threshold=None):
         """Returns the closest mass and index in .imzML file for a specific mass.
@@ -747,7 +851,7 @@ class SpectraRegion():
         curMass = -1
         curIdx = -1
 
-        for xidx,x in enumerate(self.idx2mass):
+        for xidx,x in enumerate(self.idx2mz):
             dist = abs(x-mass)
             if dist < dist2mass and (threshold==None or dist < threshold):
                 dist2mass = dist
@@ -793,7 +897,7 @@ class SpectraRegion():
         hvIndices = IMZMLExtract.detect_hv_masses(self.region, topn=topn, bins=bins, meanThreshold=meanThreshold)
 
         if return_mz:
-            return [self.idx2mass[x] for x in hvIndices]
+            return [self.idx2mz[x] for x in hvIndices]
 
         return hvIndices
         
@@ -907,7 +1011,7 @@ class SpectraRegion():
         Test
         """.format(     self.region_array.shape[0],
                         self.region_array.shape[1],
-                        len(self.idx2mass),
+                        len(self.idx2mz),
                         self.segmented is not None,
                         "\n".join(deres)
                         )
@@ -916,13 +1020,16 @@ class SpectraRegion():
     def __repr__(self) -> str:
         return self.__str__()
 
+    def get_mz_vector(self):
+        
+        return self.idx2mz
 
-    def mass_heatmap(self, masses, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, title="{mz}", file=None):
+    def mass_heatmap(self, mzvalues, log=False, min_cut_off=None, max_cut_off=None, plot=True, verbose=True, pw=None, pw_match_name="name", title="{mz}", file=None):
         """Filters the region_region to the given masses and returns the matrix with summed
         representation of the gained spectra.
 
         Args:
-            masses (array): List of masses or protein names (requires pw set).
+            mzvalues (array): List of mzvalues or protein names (requires pw set).
             log (bool, optional): Whether to take logarithm of the output matrix. Defaults to False.
             min_cut_off (int/float, optional): Lower limit of values in the output matrix. Smaller values will be replaced with min_cut_off. Defaults to None.
             max_cut_off (int/float, optional): Upper limit of values in the output matrix. Greater values will be replaced with max_cut_off. Defaults to None.
@@ -933,31 +1040,56 @@ class SpectraRegion():
         Returns:
             numpy.array: Each element is a sum of intensities at given masses.
         """
-        if not isinstance(masses, (list, tuple, set)):
-            masses = [masses]
+        if not isinstance(mzvalues, (list, tuple, set)):
+            mzvalues = [mzvalues]
 
-        useMasses = []
-        for x in masses:
+        plotDescription = set()
+
+        useMZ = set()
+        for x in mzvalues:
             if type(x) == str:
-                massprots = pw.get_masses_for_protein(x)
-                useMasses += list(massprots)
+                plotDescription.add(x)
+
+                possibleMZs = pw.get_closest_mz_for_protein(x, match_name=pw_match_name, mz_bst=self.mz_bst)
+                
+                useMZ.update(possibleMZs)
+                
             else:
-                useMasses.append(x)
+                
+                bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(x)    
+                
+                if bestExMassIdx < 0:
+                    continue
+                
+                if verbose:
+                    self.logger.info("Processing mz {} with best existing mz {}".format(x, bestExMassForMass))
+                            
+                useMZ.add( bestExMassForMass)
 
         image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+        
+        print(useMZ)
 
-        for mass in useMasses:
+        usedMZValues = 0
+        for mz in useMZ:
             
-            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
-
-            if verbose:
-                self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+            _, mzIdx = self.mz_bst.findClosestValueTo(mz)
+            
+            if mzIdx is None or np.isnan(mzIdx) or mzIdx < 0:
+                continue
+                
+            usedMZValues += 1
+            plotDescription.add(mz)
 
             for i in range(self.region_array.shape[0]):
                 for j in range(self.region_array.shape[1]):
+                    image[i,j] += self.region_array[i,j,mzIdx]
 
-                    image[i,j] += self.region_array[i,j,bestExMassIdx]
-
+        if verbose:
+            self.logger.info("{}: Used {} of {} mz values".format(str(plotDescription), usedMZValues, len(useMZ)))
+            
+        if usedMZValues == 0:
+            return
 
         if log:
             image = np.log(image)
@@ -971,6 +1103,9 @@ class SpectraRegion():
 
         def mass_formatter(masses):
             stepsize=6
+            
+            masses = natsorted(masses)
+            
             if len(masses) <= stepsize:
                 return "; ".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])
             
@@ -987,7 +1122,7 @@ class SpectraRegion():
             heatmap = plt.matshow(image)
             plt.colorbar(heatmap)
             plt.gca().xaxis.set_ticks_position('bottom')
-            plt.title(title.format(mz=mass_formatter(masses)))
+            plt.title(title.format(mz=mass_formatter(plotDescription)))
 
             if not file is None:
                 plt.savefig(file, bbox_inches="tight")
@@ -2188,27 +2323,27 @@ class SpectraRegion():
         return cons_spectra
 
 
-    def plot_boxplot(self, masses):
+    def plot_boxplot(self, mzvalues):
         """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster.
 
         Args:
-            masses (float/list/tuple/set): A desired mass or collection of masses.
+            mzvalues (float/list/tuple/set): A desired mz or collection of mz value.
             background (int, optional): Cluster id of the background. Defaults to 0.
         """
         assert(not self.segmented is None)
 
-        if not isinstance(masses, (list, tuple, set)):
-            masses = [masses]
+        if not isinstance(mzvalues, (list, tuple, set)):
+            mzvalues = [mzvalues]
 
 
         cluster2coords = self.getCoordsForSegmented()
 
         image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
 
-        for mass in masses:
+        for mz in mzvalues:
             
-            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mass)
-            self.logger.info("Processing Mass {} with best existing mass {}".format(mass, bestExMassForMass))
+            bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mz)
+            self.logger.info("Processing Mass {} with best existing mass {}".format(mz, bestExMassForMass))
 
             
             clusterIntensities = defaultdict(list)
@@ -2230,12 +2365,12 @@ class SpectraRegion():
 
                 clusterVec += ["Cluster " + str(x)] * len(elems)
                 intensityVec += elems
-                massVec += [mass] * len(elems)
+                massVec += [mz] * len(elems)
                     
         dfObj = pd.DataFrame({"mass": massVec, "specidx": specIdxVec, "cluster": clusterVec, "intensity": intensityVec})
         dfObj = dfObj.sort_values("cluster", key=natsort_keygen())
         sns.boxplot(data=dfObj, x="cluster", y="intensity")
-        plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in masses])))
+        plt.title("Intensities per cluster for {}m/z".format(",".join([str(x) for x in mzvalues])))
 
         plt.xticks(rotation=90)
         plt.show()
@@ -2527,7 +2662,7 @@ class SpectraRegion():
         for x in segments:
             relPixels += cluster2coords.get(x, [])
 
-        spectraMatrix = np.zeros((len(relPixels), len(self.idx2mass)))
+        spectraMatrix = np.zeros((len(relPixels), len(self.idx2mz)))
 
         for pidx, px in enumerate(relPixels):
             spectraMatrix[pidx, :] = self.region_array[px[0], px[1], :]
@@ -3599,7 +3734,7 @@ document.addEventListener('readystatechange', event => {
         conditionVec = []
 
         exprData = pd.DataFrame()
-        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mass]
+        masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mz]
 
         for clus in clusters0:
 
@@ -3830,7 +3965,7 @@ document.addEventListener('readystatechange', event => {
         groupValues = sorted(np.unique(groupArr))
 
         df = pd.DataFrame()
-        df["mass"] = self.idx2mass
+        df["mass"] = self.idx2mz
 
         bar = makeProgressBar()
         for x in bar(groupValues):

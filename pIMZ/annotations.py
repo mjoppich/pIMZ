@@ -14,6 +14,7 @@ import shutil, io, base64, abc
 from natsort import natsorted
 import pandas as pd
 import numpy as np
+import pronto
 from scipy.sparse import csr_matrix
 from intervaltree import IntervalTree
 
@@ -61,8 +62,8 @@ from scipy.stats import hypergeom
 
 # applications
 import progressbar
-def makeProgressBar() -> progressbar.ProgressBar:
-    return progressbar.ProgressBar(widgets=[
+def makeProgressBar(total=None) -> progressbar.ProgressBar:
+    return progressbar.ProgressBar(maxval=total, widgets=[
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
 
@@ -88,13 +89,14 @@ class ProteinWeights():
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, filename, massMode=+1, ppm=5, min_mass=-1, max_mass=-1):
+    def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
         """Creates a ProteinWeights class. Requires a formatted proteinweights-file.
 
         Args:
             filename (str): File with at least the following columns: protein_id, gene_symbol, mol_weight_kd, mol_weight.
             massMode (int): +1 if mz-Values were captured in M+H mode, -1 if mZ-Values were captured in M-H mode (protonated or deprotonated), https://github.com/rformassspectrometry/CompoundDb/issues/38, https://www.uni-saarland.de/fileadmin/upload/lehrstuhl/jauch/An04_Massenspektroskopie_Skript_Volmer.pdf
-            ppm (int, optional): ppm (parts per million) error. Default is 5.
+            ppm (int, optional): ppm (parts per million) error used for lookup. Default is 5.
+            mz_ppm (int, optional): ppm error for storing masses. Small for exact masses, larger for experimentally derived masses. Default is 1.
             max_mass (float, optional): Maximal mass to consider/include in object. -1 for no filtering. Masses above threshold will be discarded. Default is -1.
             max_mass (float, optional): Minimal mass to consider/include in object. -1 for no filtering. Masses below threshold will be discarded. Default is -1.
         """
@@ -104,12 +106,11 @@ class ProteinWeights():
         self.min_mass = min_mass
         self.max_mass = max_mass
         self.ppm = ppm
+        self.mz_ppm = mz_ppm
         self.massMode = massMode
-
-        #self.protein2mass = defaultdict(set)
+        
         self.mz_tree = IntervalTree()
-        #self.category2id = defaultdict(set)
-        #self.protein_name2id = {}
+        self.data2slot = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
         if filename != None:
 
@@ -153,7 +154,7 @@ class ProteinWeights():
 
                 for proteinName in proteinNames:
                     #self.protein2mass[proteinName].add(mzWeight)
-                    ppmDist = self.get_ppm(mzWeight, self.ppm)
+                    ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
                     # this adds MZ values to the tree!
                     self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": massWeight, "mzWeight": mzWeight})
 
@@ -187,12 +188,20 @@ class ProteinWeights():
 
         mass2prot = defaultdict(set)
         for interval in self.mz_tree:
-            mass2prot[ interval.data["mass"] ].add(interval.data["name"])
+            mass2prot[ interval.data["mass"] ].update(interval.data["name"])
 
         return mass2prot
 
-    def get_ppm(self, mz, ppm):
+    def get_ppm(self, mz, ppm=None):
+        
+        if ppm is None:
+            ppm = self.ppm
+        
         return mz * (ppm / 1000000)
+
+    def get_ppm_range(self, mz):
+        ppmError = self.get_ppm(mz, self.ppm)
+        return (mz-ppmError, mz+ppmError)
 
     def annotate_dfs(self, dfs, ppm=5, mass_column="gene_mass", add_matches=True):
 
@@ -200,7 +209,7 @@ class ProteinWeights():
             dfs[x] = self.annotate_df(dfs[x], ppm=ppm, mass_column=mass_column, add_matches=add_matches)
 
 
-    def annotate_df(self, df, ppm=5, mass_column="gene_mass", add_matches=True):
+    def annotate_df(self, df, ppm=None, mass_column="gene_mass", add_matches=True):
         
         uniqmasses = [0] * df.shape[0]
         hitProteins = [[]] * df.shape[0]
@@ -209,9 +218,6 @@ class ProteinWeights():
 
             curmass = float(row[mass_column])
             allHitMasses = self.get_protein_from_mz(curmass, ppm=ppm)
-
-            #if row["gene_ident"] == "mass_553_6274052499639":
-            #    print(ri, curmass, allHitMasses)
 
             uniqmasses[ri] = len(allHitMasses)
             hitProteins[ri] = [x[0] for x in allHitMasses]
@@ -263,8 +269,46 @@ class ProteinWeights():
 
         return pd.DataFrame.from_records(cluster2celltype, columns=["Cluster", "CellType", "Score"])
 
+    def get_closest_mz_for_protein(self, prot_name, match_name, mz_bst, ppm=None):
+        
+        
+        #print(prot_name, match_name)
+        
+        protMZValues = self.get_data_for_protein(prot_name, pw_match_name=match_name, data_slot="mzWeight")
+        acceptedMZ = set()
+        acceptedIndices = set()
+        #print("protMZValues", protMZValues)
+        for protMZ in protMZValues:
+            
+            closestMZ, closestIdx = mz_bst.findClosestValueTo(protMZ)
+            #print("ClosestMZ", protMZ, "-->", closestMZ)
+            
+            if closestMZ is None:
+                print("Could not find", protMZ)
+                continue
+                        
+            possibleFeatures = self.get_protein_from_mz(closestMZ, match_name=match_name, ppm=ppm)
+            possibleFeatures = [x[0] for x in possibleFeatures]
+            
+            #print("possible Features", possibleFeatures)
+            #print("Contained", prot_name in possibleFeatures)
+            
+            if prot_name in possibleFeatures:
+                acceptedMZ.add(closestMZ)
+                
+        return acceptedMZ
+            
+    def get_closest_mz_for_proteins(self, prot_name, match_name, mz_bst, ppm=None):
+        retSet = set()
+        
+        for x in prot_name:
+            foundSet = self.get_closest_mz_for_protein(x, match_name, mz_bst, ppm=ppm)
+            retSet.update(foundSet)
+            
+        return retSet
 
-    def get_protein_from_mz(self, mz, ppm=5):
+
+    def get_protein_from_mz(self, mz, ppm=None, match_name="name", data_slot="mzWeight"):
         """Searches all recorded mass and proteins and reports all proteins which have at least one mass in (mass-maxdist, mass+maxdist) range.
 
         Args:
@@ -281,9 +325,11 @@ class ProteinWeights():
         overlaps = self.mz_tree.overlap(mz-ppmDist, mz+ppmDist)
         for overlap in overlaps:
             
-            protMass = overlap[2]["mzWeight"]
+            protMass = overlap[2][data_slot]
             protDist = abs(mz-protMass)
-            possibleMatches.append((overlap[2]["name"], protMass, protDist))
+            
+            for name in overlap[2][match_name]:
+                possibleMatches.append((name, protMass, protDist))
 
         possibleMatches = sorted(possibleMatches, key=lambda x: x[2])
         possibleMatches = [(x[0], x[1]) for x in possibleMatches]
@@ -294,16 +340,13 @@ class ProteinWeights():
         mz = self.get_mz_from_mass(mass)
         return self.get_protein_from_mz(mz, ppm=ppm)
 
-    
-
-
     def get_mass_for_protein(self, protein):
-        return self.get_data_for_protein(protein, data_slot="mzWeight")
+        return self.get_data_for_protein(protein, data_slot="mass")
     
     def get_mz_for_protein(self, protein):
-        return self.get_data_for_protein(protein, data_slot="mass")
+        return self.get_data_for_protein(protein, data_slot="mzWeight")
 
-    def get_data_for_protein(self, protein, data_slot="mass"):
+    def get_data_for_protein(self, protein, data_slot="mzWeight", pw_match_name="name"):
         """Returns all recorded values in data_slot for given proteins. Return None if protein not found
 
         Args:
@@ -313,13 +356,15 @@ class ProteinWeights():
         Returns:
             set: set of masses for protein
         """
+        
+        if not pw_match_name in self.data2slot or not data_slot in self.data2slot[pw_match_name]:
+            self.logger.info("Creating data2slot for data={} and slot={}".format(pw_match_name, data_slot))
+            for interval in self.mz_tree:
+                for elem in interval.data[ pw_match_name ]:
+                    self.data2slot[pw_match_name][data_slot][elem].add(interval.data[data_slot])
 
         if type(protein) == str:
-            retData = set()
-            for interval in self.mz_tree:
-                if interval.data["name"] == protein:
-                    retData.add(interval.data[data_slot])
-            return retData        
+            return self.data2slot.get(pw_match_name, {}).get(data_slot, {}).get(protein, [])
 
         allData = set()
         for x in protein:
@@ -329,20 +374,20 @@ class ProteinWeights():
         return allData
 
 
-    def get_data_for_proteins(self, proteins, data_slot="mass"):
+    def get_data_for_proteins(self, proteins, pw_match_name="name", data_slot="mass"):
 
         dataCounter = Counter()
 
         for x in proteins:
-            datas = self.get_data_for_protein(x[0], data_slot=data_slot)
+            datas = self.get_data_for_protein(x, data_slot=data_slot, pw_match_name=pw_match_name)
             
             for y in datas:
                 dataCounter[y] += 1
 
-        return dataCounter
+        return set(dataCounter)
 
 
-    def print_collisions(self, maxdist=2.0, ppm=None, print_proteins=False):
+    def print_collisions(self):
         """Prints number of proteins with collision, as well as mean and median number of collisions.
 
         For each recorded mass it is checked how many other proteins are in the (mass-maxdist, mass+maxdist) range.
@@ -352,139 +397,15 @@ class ProteinWeights():
             print_proteins (bool, optional): If True, all collision proteins are printed. Defaults to False.
         """
 
-        if (maxdist is None and ppm is None) or (not maxdist is None and not ppm is None):
-            raise ValueError("either maxdist or ppm must be None")
 
-
-        self.logger.info("Ambiguity: there exists other protein with conflicting mass")
-        self.logger.info("Collision: there exists other protein with conflicting mass due to distance/error/ppm.")
-        self.logger.info("Frequency: for how many masses does this occur?")
-        self.logger.info("Count: with how many proteins does it happen?")
-
-        allProts = set([x for x in self.protein2mass])
-        allProtMasses = Counter([len(self.protein2mass[x]) for x in self.protein2mass])
-        mass2prot = self.get_mass_to_protein()            
-        
-        collisionFrequency = Counter()
-        ambiguityFrequency = Counter()
-
-        collisionCount = Counter()
-        ambiguityCount = Counter()
-        
-        sortedMasses = sorted([x for x in mass2prot])
-
-        massAmbiguities = [len(mass2prot[x]) for x in mass2prot]
-        plt.hist(massAmbiguities, density=False, cumulative=True, histtype="step")
-        plt.yscale("log")
-        plt.show()
-        plt.close()
-
-        for mass in sortedMasses:
-
-            if not maxdist is None:
-                lmass, umass = mass-maxdist, mass+maxdist
-            else:
-                ppmdist = self.get_ppm(mass, ppm)
-                lmass, umass = mass-ppmdist, mass+ppmdist
-            
-            currentProts = mass2prot[mass]
-
-            massProts = set()
-
-            for tmass in sortedMasses:
-                if lmass <= tmass <= umass:
-                    massProts = massProts.union(mass2prot[tmass])
-
-                if umass < tmass:
-                    break
-
-            #massprots contains all protein names, which match current mass
-            assert(currentProts.intersection(massProts) == currentProts)
-
-            #this is all ambiguities
-            if len(massProts) > 0:
-                for prot in massProts:
-                    ambiguityFrequency[prot] += 1
-                    ambiguityCount[prot] += len(massProts)
-
-            # there are proteins for this current, which we are not interested in for conflicts
-            if len(currentProts) >= 1:
-                for prot in currentProts:
-                    if prot in massProts:
-                        massProts.remove(prot)
-
-            #this is ambiguity due to size error
-            #massProts are other proteins!
-            if len(massProts) > 0:
-                for prot in massProts:
-                    collisionFrequency[prot] += 1
-                    collisionCount[prot] += len(massProts)
-
-        ambiguityFreqCounter = Counter()
-        for x in ambiguityFrequency:
-            ambiguities = ambiguityFrequency[x]
-            ambiguityFreqCounter[ambiguities] += 1
-
-        collisionFreqCounter = Counter()
-        for x in collisionFrequency:
-            collisions = collisionFrequency[x]
-            collisionFreqCounter[collisions] += 1
-
-        if not maxdist is None:
-            self.logger.info("Using uncertainty of {}m/z".format(maxdist))
-        else:
-            self.logger.info("Using uncertainty of {}ppm".format(ppm))
-
-
-
-
-
-        self.logger.info("             Number of total protein/genes: {}".format(len(allProts)))
-        self.logger.info("                   Number of unique masses: {}".format(len(mass2prot)))
-        self.logger.info("")
-        self.logger.info("             Proteins/genes with ambiguity: {}".format(len(ambiguityFrequency)))
-        self.logger.info("             Mean Frequency of ambiguities: {}".format(np.mean([ambiguityFrequency[x] for x in ambiguityFrequency])))
-        self.logger.info("           Median Frequency of ambiguities: {}".format(np.median([ambiguityFrequency[x] for x in ambiguityFrequency])))
-        self.logger.info("")
-        self.logger.info("             Proteins/genes with collision: {}".format(len(collisionFrequency)))
-        self.logger.info("              Mean Frequency of collisions: {}".format(np.mean([collisionFrequency[x] for x in collisionFrequency])))
-        self.logger.info("            Median Frequency of collisions: {}".format(np.median([collisionFrequency[x] for x in collisionFrequency])))
-        self.logger.info("")
-        self.logger.info("             Proteins/genes with ambiguity: {}".format(len(ambiguityCount)))
-        self.logger.info("                Mean Number of ambiguities: {}".format(np.mean([ambiguityCount[x] for x in ambiguityCount])))
-        self.logger.info("              Median Number of ambiguities: {}".format(np.median([ambiguityCount[x] for x in ambiguityCount])))
-        self.logger.info("")
-        self.logger.info("             Proteins/genes with collision: {}".format(len(collisionCount)))
-        self.logger.info("                 Mean Number of collisions: {}".format(np.mean([collisionCount[x] for x in collisionCount])))
-        self.logger.info("               Median Number of collisions: {}".format(np.median([collisionCount[x] for x in collisionCount])))
-
-        self.logger.info("")
-        if print_proteins:
-            self.logger.info("Proteins/genes with ambiguity: {}".format([x for x in ambiguityCount]))
-        else:
-            self.logger.info("    Proteins/genes with ambiguity count: {}".format(ambiguityCount.most_common(10)))
-
-        if print_proteins:
-            self.logger.info("Proteins/genes with collision: {}".format([x for x in collisionCount]))
-        else:
-            self.logger.info("    Proteins/genes with collision count: {}".format(collisionCount.most_common(10)))
-        
-        self.logger.info("")
-        for x in ambiguityFreqCounter:
-            self.logger.info("ambiguity count; proteins with {} other matching proteins: {}".format(x, ambiguityFreqCounter[x]))
-        self.logger.info("collision count; proteins with other matching proteins: {}".format(sum([ambiguityFreqCounter[x] for x in ambiguityFreqCounter])))
-        self.logger.info("")
-        for x in collisionFreqCounter:
-            self.logger.info("collision count; proteins with {} other matching proteins: {}".format(x, collisionFreqCounter[x]))
-        self.logger.info("collision count; proteins with other matching proteins: {}".format(sum([collisionFreqCounter[x] for x in collisionFreqCounter])))
           
 
 class MaxquantPeptides(ProteinWeights):
 
-    def __init__(self, filename, massMode=+1, ppm=5, min_mass=-1, max_mass=-1, name_column="Gene names", name_function=lambda x: x.strip().split(";"), encoding='Windows-1252', error_bad_lines=False, warn_bad_lines=False):
-        super().__init__(None, massMode=massMode, ppm=ppm, min_mass=min_mass, max_mass=max_mass)
+    def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=5, min_mass=-1, max_mass=-1, name_column="Gene names", name_function=lambda x: x.strip().split(";"), encoding='Windows-1252', error_bad_lines=False, warn_bad_lines=False,carbamidomethylation=False, propionamido=False):
+        super().__init__(None, massMode=massMode, ppm=ppm, min_mass=min_mass, max_mass=max_mass, mz_ppm=mz_ppm)
 
-        self.__load_file(filename, name_column=name_column, name_function=name_function, encoding=encoding, error_bad_lines=error_bad_lines, warn_bad_lines=warn_bad_lines)
+        self.__load_file(filename, name_column=name_column, name_function=name_function, encoding=encoding, error_bad_lines=error_bad_lines, warn_bad_lines=warn_bad_lines, carbamidomethylation=carbamidomethylation, propionamido=propionamido)
 
     @classmethod
     def split(string, delimiters):
@@ -492,7 +413,7 @@ class MaxquantPeptides(ProteinWeights):
         regex_pattern = '|'.join(map(re.escape, delimiters))
         return re.split(regex_pattern, string, 0)
 
-    def __load_file(self, filename, name_column="Gene names", name_function=lambda x: x.strip().replace("_HUMAN", "").split(";"), encoding='Windows-1252', warn_bad_lines=False, error_bad_lines=False):
+    def __load_file(self, filename, name_column="Gene names", name_function=lambda x: x.strip().replace("_HUMAN", "").split(";"), encoding='Windows-1252', warn_bad_lines=False, error_bad_lines=False, carbamidomethylation=False, propionamido=False):
 
         inputfile = io.StringIO()
         with open(filename, encoding=encoding, errors="replace") as fin:
@@ -519,8 +440,6 @@ class MaxquantPeptides(ProteinWeights):
                 self.logger.error("Unable to process line {}: {}".format(ri, row))
                 continue
                 
-
-
             if not pd.isna(row[name_column]):
                 proteinNames = name_function(row[name_column])
             else:
@@ -536,18 +455,27 @@ class MaxquantPeptides(ProteinWeights):
             if len(proteinNames) == 0:
                 self.logger.warn("Skipping row for no gene name {}".format(aaSequence))
                 continue
+            
+            if carbamidomethylation or propionamido:
+                numCysteins = Counter(aaSequence)["C"]
+                #https://bioportal.bioontology.org/ontologies/PSIMOD?p=classes&conceptid=MOD:00969
+                if carbamidomethylation:
+                    molWeight = molWeight - (numCysteins * 57.02)
+                    
+                if propionamido:
+                    molWeight = molWeight - (numCysteins * 71)
 
             for proteinName in proteinNames:
-                ppmDist = self.get_ppm(mzWeight,self.ppm)
-                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight})
+                ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
+                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": [proteinName], "mass": molWeight, "mzWeight": mzWeight})
 
         allMasses = self.get_all_masses()
         self.logger.info("Loaded a total of {} proteins with {} masses".format(len(self.mz_tree), len(allMasses)))
 
 class AnnotatedProteinWeights(ProteinWeights):
 
-    def __init__(self, filename, min_mass=-1, max_mass=-1):
-        super().__init__(filename, min_mass=min_mass, max_mass=max_mass)
+    def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
+        super().__init__(filename, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
 
 
     def get_annotated_info(self, mzsearch):
@@ -556,8 +484,8 @@ class AnnotatedProteinWeights(ProteinWeights):
 
 class SDFProteinWeights(AnnotatedProteinWeights):
     
-    def __init__(self, filename, min_mass=-1, max_mass=-1):
-        super().__init__(None, min_mass=min_mass, max_mass=max_mass)
+    def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
+        super().__init__(filename, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
 
         assert(filename.endswith(".sdf"))
 
@@ -566,9 +494,9 @@ class SDFProteinWeights(AnnotatedProteinWeights):
     def __load_file(self, filename):
 
         self.sdf_dic = self.sdf_reader(filename)
+        self.category2element = defaultdict(set)
 
         for lm_id in self.sdf_dic:
-
 
             molWeight = float(self.sdf_dic[lm_id]["EXACT_MASS"])
             mzWeight = self.get_mz_from_mass(molWeight)
@@ -583,13 +511,30 @@ class SDFProteinWeights(AnnotatedProteinWeights):
 
             if self.min_mass >= 0 and mzWeight < self.min_mass:
                 continue
+        
+            ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
+            
+            intervalData = {"name": [proteinName],
+                            "mass": molWeight,
+                            "mzWeight": mzWeight,
+                            "category": [ self.sdf_dic[lm_id]["MAIN_CLASS"] ]}
+            
+            self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, intervalData)
+            
+            for cat in intervalData["category"]:
+                self.category2element[cat].add(proteinName)
 
-            ppmDist = self.get_ppm(mzWeight,self.ppm)
-            self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": proteinName, "mass": molWeight, "mzWeight": mzWeight, "category": self.sdf_dic[lm_id]["MAIN_CLASS"]})
-
+    def get_enrichment_data(self):
+        
+        enrichmentData = {}
+        
+        for x in self.category2element:
+            enrichmentData[ x ] = ("{}".format(x), set(self.category2element[x]))
+            
+        return enrichmentData
 
     @classmethod
-    def sdf_reader(cls, filename):
+    def sdf_reader(cls, filename, dbIdentifier = "LM_ID"):
         """Reads a .sdf file into a dictionary.
 
         Args:
@@ -605,7 +550,7 @@ class SDFProteinWeights(AnnotatedProteinWeights):
             line_dict = {}
             while line:
                 if line.startswith(">"):
-                    if "LM_ID" in line:
+                    if dbIdentifier in line:
                         if line_id:
                             res_dict[line_id] = line_dict
                             line_dict = {}
@@ -621,6 +566,274 @@ class SDFProteinWeights(AnnotatedProteinWeights):
 
 
 
+
+
+
+class SLProteinWeights(AnnotatedProteinWeights):
+    
+    def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1, massColumn="Exact m/z of [M+H]+", nameColumn="metabolite name",categoryColumn = "lipid class"):
+        super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
+
+        assert(filename.endswith(".tsv"))
+
+        self.__load_file(filename, massColumn=massColumn, nameColumn=nameColumn, categoryColumn=categoryColumn)
+
+    def __load_file(self, filename, massColumn, nameColumn, categoryColumn):
+
+        self.sl_df = pd.read_csv(filename, sep="\t")
+
+        
+        self.category2name = defaultdict(set)
+
+        for lineIndex, row in self.sl_df.iterrows():
+
+            molWeight = float(row[massColumn])
+            mzWeight = self.get_mz_from_mass(molWeight)
+            
+            proteinName = row[nameColumn]
+
+            if np.isnan(molWeight) or np.isnan(mzWeight):
+                continue
+
+            if self.max_mass >= 0 and mzWeight > self.max_mass:
+                continue    
+
+            if self.min_mass >= 0 and mzWeight < self.min_mass:
+                continue
+            
+            categories = row[categoryColumn].split(" | ")
+
+            ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
+            self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": [proteinName],
+                                                                       "mass": molWeight,
+                                                                       "mzWeight": mzWeight,
+                                                                       "category": categories})
+            
+            for cat in categories:
+                self.category2name[cat].add(proteinName)
+
+    def get_enrichment_data(self):
+        
+        enrichmentData = {}
+        
+        for x in self.category2name:
+            enrichmentData[ x ] = ("{}".format(x), set(self.category2name[x]))
+            
+        return enrichmentData
+
+
+class PBProteinWeights(AnnotatedProteinWeights):
+    """PBProteinWeights uses information from PathBank to acquire information about metabolites/small molecules and their corresponding pathways.
+    
+    You have to download the structures (as one file) and pathway annotations from http://pathbank.org/downloads .
+
+    Args:
+        AnnotatedProteinWeights (_type_): Objeckt from AnnotatedProteinWeights to query relevant masses.
+    """
+        
+    def __init__(self, filenameSDF, filenamePW, massMode=+1, ppm=5,mz_ppm=1, min_mass=-1, max_mass=-1, massColumn="Exact m/z of [M+H]+", nameColumn="metabolite name",categoryColumn = "lipid class", organisms=['Homo sapiens', 'Escherichia coli', 'Mus musculus',
+       'Arabidopsis thaliana', 'Saccharomyces cerevisiae', 'Bos taurus',
+       'Caenorhabditis elegans', 'Rattus norvegicus',
+       'Drosophila melanogaster', 'Pseudomonas aeruginosa']):
+        super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
+
+        self.logger.info("Reading Pathways")
+        self.pb_df = pd.read_csv(filenamePW, sep=",")       
+        self.category2name = defaultdict(set)
+        self.metabolite2pathway = defaultdict(set)
+        self.pathway2metabolite = defaultdict(set)
+        self.pathway2name = {}
+                
+        
+        ignoredPathways = set()
+        self.logger.info("Processing Pathways")
+        bar = makeProgressBar(total=self.pb_df.shape[0])
+        for lineIndex, row in bar(self.pb_df.iterrows()):
+            
+            pbID = row["PathBank ID"]
+            pbName = row["Pathway Name"]
+            metaboliteID = row["Metabolite ID"]
+            
+            if not row["Species"] in organisms:
+                ignoredPathways.add(pbID)
+                continue
+            
+            if not pbID in self.pathway2name:
+                self.pathway2name[pbID] = pbName
+            
+            self.metabolite2pathway[metaboliteID].add( pbID )
+            self.pathway2metabolite[pbID].add( metaboliteID )
+
+        self.logger.info("Ignored {} of {} pathways".format(len(ignoredPathways), len(ignoredPathways)+len(self.pathway2metabolite)))
+
+
+        self.logger.info("Reading Structures")
+        self.sdf_dic = SDFProteinWeights.sdf_reader(filenameSDF, dbIdentifier="DATABASE_ID")
+        
+        self.logger.info("Processing Structures")
+        bar = makeProgressBar()
+        for lm_id in bar(self.sdf_dic):
+            
+            if not "MOLECULAR_WEIGHT" in self.sdf_dic[lm_id]:
+                print(self.sdf_dic[lm_id])
+                continue
+
+            molWeight = float(self.sdf_dic[lm_id]["MOLECULAR_WEIGHT"])
+            mzWeight = self.get_mz_from_mass(molWeight)
+            metaboliteID = lm_id
+            
+            if self.max_mass >= 0 and mzWeight > self.max_mass:
+                continue    
+
+            if self.min_mass >= 0 and mzWeight < self.min_mass:
+                continue
+
+            ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
+            
+            self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": [metaboliteID],
+                                                                       "mass": molWeight,
+                                                                       "mzWeight": mzWeight,
+                                                                       "pathway": self.metabolite2pathway.get(metaboliteID, []),
+                                                                       "pathway_name": [self.pathway2name[x] for x in self.metabolite2pathway.get(metaboliteID, [])]})
+
+
+
+    def get_mz_for_category(self, category):
+        
+        if not category in self.category2name:
+            self.logger.error("Not a valid category: " + str(category))
+            return None
+        
+        return self.get_data_for_proteins(self.category2name[category], data_slot="mzWeight")
+
+    
+    def get_enrichment_data(self):
+        
+        enrichmentData = {}
+        
+        for x in self.pathway2metabolite:
+            enrichmentData[ x ] = ("{} ({})".format(self.pathway2name[x], x), set(self.pathway2metabolite[x]))
+            
+        return enrichmentData
+    
+    
+class ChebiProteinWeights(AnnotatedProteinWeights):
+    """PBProteinWeights uses information from PathBank to acquire information about metabolites/small molecules and their corresponding pathways.
+    
+    You have to download the structures (as one file) and pathway annotations from http://pathbank.org/downloads .
+
+    Args:
+        AnnotatedProteinWeights (_type_): Objeckt from AnnotatedProteinWeights to query relevant masses.
+    """
+    
+    def __init__(self, chebiOboCorePath, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
+        super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
+
+        self.massMode = 0
+
+        self.logger.info("Reading Pathways")
+        self.gr = pronto.Ontology(chebiOboCorePath)
+        
+        def get_mass_property( term ):
+            
+            if isinstance(term, pronto.relationship.Relationship):
+                return None
+            
+            for x in term.annotations:
+                if x.property == "http://purl.obolibrary.org/obo/chebi/mass":
+                    return float(x.literal)
+            
+            return None
+
+        self.chebiSets = defaultdict(set)
+        self.metabolite2set = defaultdict(set)
+        self.chebiID2Name = {}
+        
+        bar = makeProgressBar()
+
+        for x in bar(self.gr):
+            xterm = self.gr[x]
+            
+            if xterm.obsolete:
+                continue
+            
+            if isinstance(xterm, pronto.relationship.Relationship):
+                continue
+            
+            molWeight = get_mass_property(self.gr[x])
+                        
+            self.chebiID2Name[xterm.id] = xterm.name
+
+            if molWeight is None:
+                # not an entity
+                for subElem in xterm.subclasses(None):
+                    molWeight = get_mass_property(subElem)
+                    
+                    if molWeight is None:
+                        continue
+                    self.chebiSets[xterm.id].add(subElem.id)
+                    
+        for setName in self.chebiSets:
+            for metabolite in self.chebiSets[setName]:
+                self.metabolite2set[metabolite].add(setName)
+
+
+        self.logger.info("Reading Metabolites")
+        bar = makeProgressBar()
+        
+        for x in bar(self.gr):
+            xterm = self.gr[x]
+            
+            if xterm.obsolete:
+                continue
+            
+            if isinstance(xterm, pronto.relationship.Relationship):
+                continue
+            
+            molWeight = get_mass_property(self.gr[x])
+            
+            if not molWeight is None:
+                #it is an entity
+                
+                if np.isnan(molWeight) or molWeight <= 0:
+                    continue
+                
+                mzWeight = self.get_mz_from_mass(molWeight)
+                metaboliteID = xterm.id
+                
+                if self.max_mass >= 0 and mzWeight > self.max_mass:
+                    continue    
+
+                if self.min_mass >= 0 and mzWeight < self.min_mass:
+                    continue
+
+                ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
+                
+                
+                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": [metaboliteID], "mass": molWeight,
+                                                                           "mzWeight": mzWeight,
+                                                                           "pathway": self.metabolite2set.get(metaboliteID, []),
+                                                                           "pathway_name": [self.chebiID2Name[x] for x in self.metabolite2set.get(metaboliteID, [])]})
+                
+
+    def get_mz_for_category(self, category):
+        
+        if not category in self.category2name:
+            self.logger.error("Not a valid category: " + str(category))
+            return None
+        
+        return self.get_data_for_proteins(self.category2name[category], data_slot="mzWeight")
+
+
+    def get_enrichment_data(self):
+        
+        enrichmentData = {}
+        
+        for x in self.chebiSets:
+            enrichmentData[ x ] = ("{} ({})".format(self.chebiID2Name[x], x), set(self.chebiSets[x]))
+            
+        return enrichmentData
+    
 
 class PPIAnalysis:
 

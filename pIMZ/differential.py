@@ -198,9 +198,9 @@ class DifferentialTest(metaclass=abc.ABCMeta):
     def create_common_features(self):
         self.logger.info("Preparing common features")
         all_spec_names = [x for x in self.specs]
-        common_features = set(self.specs[all_spec_names[0]].idx2mass)
+        common_features = set(self.specs[all_spec_names[0]].get_mz_vector())
         for x in all_spec_names:
-            common_features = set.intersection(common_features, set(self.specs[all_spec_names[0]].idx2mass))
+            common_features = set.intersection(common_features, set(self.specs[all_spec_names[0]].get_mz_vector()))
 
         self.logger.info("Identified {} common features".format(len(common_features)))
         
