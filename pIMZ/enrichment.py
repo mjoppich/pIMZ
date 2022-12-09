@@ -93,10 +93,10 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
     def plotORAresult( self, dfin, title, numResults=10, figsize=(10,10)):
         #https://www.programmersought.com/article/8628812000/
         
-        def makeTitle(colDescr, colID, colSize, sucSize, setSize):
+        def makeTitle(colDescr, colSize, sucSize, setSize):
             out = []
-            for x,y,z,s,p in zip(colDescr, colID, colSize, sucSize, setSize):
-                out.append("{} ({}, cov={:.3f}={}/{})".format(x, y, z, s, p))
+            for x,z,s,p in zip(colDescr, colSize, sucSize, setSize):
+                out.append("{} (cov={:.3f}={}/{})".format(x, z, s, p))
 
             return out
 
@@ -107,7 +107,7 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
         #determine plot type
 
         termIDColumn = "elem_id"
-        termNameColumn = "elem_id"
+        termNameColumn = "elem_name"
         df = df_raw.copy()
 
 
@@ -125,7 +125,7 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
         else:
             raise ValueError()
 
-        df['termtitle'] = makeTitle(df_raw[termNameColumn], df_raw[termIDColumn], df["sample_success_fraction"], df["success_samples"], df["sample_size"])
+        df['termtitle'] = makeTitle(df_raw[termNameColumn], df["sample_success_fraction"], df["success_samples"], df["sample_size"])
 
 
         df.reset_index()
@@ -169,7 +169,7 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
 class OverrepresentationAnalysis(EnrichmentAnalysis):
     
     def __init__(self, spec:SpectraRegion, ann:ProteinWeights):
-        
+        super().__init__()
         
         self.spec = spec
         self.ann = ann
@@ -246,7 +246,7 @@ class OverrepresentationAnalysis(EnrichmentAnalysis):
         sortedElems = [x for x in setToResult]
         elemPvals = [setToResult[x]["pval"] for x in sortedElems]
         
-        print("Prelim Results", len(setToResult), len(sortedElems), len(set(sortedElems)))
+        print("Prelim Results", len(setToResult))
         
         if len(setToResult) == 0:
             return None

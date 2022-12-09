@@ -82,7 +82,7 @@ setup(name="pIMZ",
       # TODO: List of packages that this one depends upon:  
       install_requires=[
         'numpy>=1.17.5', 
-        'h5py', "networkx~=2.3", "pronto",
+        'h5py', "networkx~=2.3", "pronto", "upsetplot",
         'matplotlib',
         'pandas',
         'scipy', 
