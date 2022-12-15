@@ -1072,7 +1072,7 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         self.delta = delta
         self.results = None
 
-        self.matrix_mz = np.copy(self.region.idx2mass)
+        self.matrix_mz = np.copy(self.region.idx2mz)
 
     def _get_overall_centroid(self, spectra):
         #Calculate the overall centroid
