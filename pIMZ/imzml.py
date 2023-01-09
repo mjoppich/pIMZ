@@ -1339,7 +1339,7 @@ class IMZMLExtract:
         return sorted(hvMasses)
 
 
-    def to_reduced_peaks(self, region, topn=2000, bins=50, return_indices=False):
+    def to_reduced_masses(self, region, topn=2000, bins=50, return_indices=False):
         """Detects HV (highly variable) masses and reduces the spectra array accordingly.
 
         Args:
