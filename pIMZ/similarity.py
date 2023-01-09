@@ -147,12 +147,14 @@ class KsSimilarity:
                     - relevance score
         """
 
-        if passed_clustering.shape != self.region_array.shape:
+        if passed_clustering.shape != self.region_array.shape[0:2]:
+            print("Taking spec clustering")
             self.clustering = self.spec.meta["segmented"].copy() # initial clustering for iterative process
             self.clustering = self.clustering + 1
 
             self.clustering = self.clustering.astype(int)
         else:
+            print("Saving new clustering")
             self.clustering = passed_clustering
 
         clusters=np.unique(self.clustering)
@@ -465,9 +467,9 @@ class KsSimilarity:
             
             print("Performing KS Analysis for iteration {}".format(current_iteration))
             #TODO i think this is needed!
-            use_clustering = (current_clustering-1)
-            use_clustering[use_clustering < 0] = 0
-            ms_df = self.perform_analysis(passed_clustering=use_clustering)
+            #use_clustering = (current_clustering-1)
+            #use_clustering[use_clustering < 0] = 0
+            ms_df = self.perform_analysis(passed_clustering=np.copy(current_clustering))
             
             for clusterID in availClusters:
                 sub_df = ms_df[(ms_df.cluster_name == clusterID)].sort_values("relevance_score", ascending=False).head(100)
@@ -491,6 +493,14 @@ class KsSimilarity:
                 current_clustering[(last_clustering == clusterID) & (pixel2high_expressed >= massThreshold)] = clusterID
         
             current_iteration += 1
+            
+            plt.imshow(current_clustering)
+            plt.show()
+            plt.close()
+            
+            print("Equal pixels", np.sum(current_clustering == last_clustering))
+            print("Equal pixels %", np.sum(current_clustering == last_clustering)/pixels)
+            
                 
         return current_clustering
         

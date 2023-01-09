@@ -83,7 +83,7 @@ setup(name="pIMZ",
       install_requires=[
         'numpy>=1.17.5', 
         'h5py', "networkx~=2.3", "pronto", "upsetplot",
-        'matplotlib',
+        'matplotlib', "joblib",
         'pandas',
         'scipy', 
         'scikit-image',

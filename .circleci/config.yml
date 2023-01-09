@@ -15,7 +15,7 @@ jobs:
           command: sudo apt-get update && sudo apt-get install -y python3 python3-pip zlib1g-dev libhdf5-serial-dev pkg-config
       - run: 
           name: "pip install dependencies (-1)"
-          command: sudo pip3 install packaging fuzzy-c-means upsetplot
+          command: sudo pip3 install packaging fuzzy-c-means upsetplot joblib
       - run: 
           name: "pip install dependencies (0)"
           command: sudo pip3 install dabest
