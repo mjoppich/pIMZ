@@ -21,7 +21,7 @@ jobs:
           command: sudo pip3 install dabest
       - run:
           name: "pip install dependencies (1)"
-          command: sudo pip3 install numpy pandas --upgrade
+          command: sudo pip3 install numpy==1.24 pandas --upgrade
       - run:
           name: "pip install dependencies (2)"
           command: sudo pip3 install ms_peak_picker wheezy.template
