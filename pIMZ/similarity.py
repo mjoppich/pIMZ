@@ -75,12 +75,60 @@ import math
 #import regions
 from skimage.filters import threshold_multiotsu
 
+
+
+
+def KS_test( mass_array:np.array, clustering:np.array, clusters_considered=None, background_mass=0):
+    """ returns: dict: key = cluster, value = clustered statistics, clustered p value, unclutered statistics, unclustered p value"""
+    # classes_clustered saves all clustered intensity values for HE categories
+    classes_clustered = defaultdict(list) # mass_clustered: 0 is background
+
+    # classes_unclusteres saves all unclustered intensities values for HE categories
+    classes_unclustered = defaultdict(list) # mass_array: 0 is background
+    classes_he = defaultdict(list)
+
+    cluster_range = np.unique(clustering)
+    
+    if clusters_considered is None:
+        clusters_considered = cluster_range
+    
+    # -----do pre clustering
+    values_for_thresholding = mass_array[clustering != background_mass]
+
+    for c in cluster_range:
+        classes_he[c] = [tuple(x) for x in np.argwhere(clustering == c)]
+        
+        relevant_intensities = mass_array[ clustering == c ]
+        classes_unclustered[c] = relevant_intensities[relevant_intensities != 0]
+            
+    unclassifierd_unclustered = defaultdict(list)
+
+    # KS test
+    ks_per_cluster = {}
+    
+    background_intensities = np.concatenate( [classes_unclustered[x] for x in cluster_range ] ) #if x != c
+    
+    for c in clusters_considered:
+        #print(f"pint classes unclustered for cluster {c}: {classes_unclustered[c]}")
+        
+        foreground_intensities = classes_unclustered[c]
+        
+        if len(foreground_intensities) == 0 or len(background_intensities) == 0:
+            ks_per_cluster[c] = None, 1.0
+        else:
+            KS_test_unclustered = stats.kstest(foreground_intensities, background_intensities, alternative="less")
+            ks_per_cluster[c] = KS_test_unclustered[0], KS_test_unclustered[1]
+            
+    return ks_per_cluster
+
+
+
 class KsSimilarity:
 
     def __init__(self, spec_mz_values:SpectraRegion):
         self.spec = spec_mz_values
         # to do mz_region_array = self.spec.region_array
-        self.region_array = self.spec.region_array
+        self.region_array = np.copy(self.spec.region_array)
         self.clustering = None
 
     def perform_analysis(self, passed_clustering=np.empty([0, 0]), weight_ks=1, weight_p=1, weight_c=1, features=[], iterative=False):
@@ -101,19 +149,20 @@ class KsSimilarity:
 
         if passed_clustering.shape != self.region_array.shape:
             self.clustering = self.spec.meta["segmented"].copy() # initial clustering for iterative process
-            for r in range(self.clustering.shape[0]):
-                for c in range(self.clustering.shape[1]):
-                    self.clustering[r,c]+=1
-            clusters=np.unique(self.clustering)
+            self.clustering = self.clustering + 1
+
             self.clustering = self.clustering.astype(int)
         else:
             self.clustering = passed_clustering
 
+        clusters=np.unique(self.clustering)
 
         if features == []:
             features = range(self.region_array.shape[2])
 
-        considered_masses = list(self.excluding_outliers(self.region_array, features).keys())
+        considered_masses = self.excluding_outliers(self.region_array, features)
+        print("Identified {} of {} masses for processing.".format(len(considered_masses), self.region_array.shape[2]))
+        
         ks_test_unclustered = self.find_relevant_masses_by_ks(self.region_array, considered_masses, self.clustering, cluster_range=clusters, for_clustered=False, iterative=iterative)
         # mass, cluster, ks, p, p_mult
         # TODO only regard pixels != 0 in clustering
@@ -148,9 +197,20 @@ class KsSimilarity:
     def excluding_outliers(self, ms_region_array:np.array, masses):
         """input: three dimensional array with mass spec data
             returns: dictionary, mass:threshold, all masses where more than 5% of the pixels are expressed"""
-        considered_masses = {}
-        for mass in masses:
+        considered_masses = set()
+        
+        print("Excluding Outliers")
+        bar = makeProgressBar()
+                
+        for mass in bar(masses):
             list_mass = ms_region_array[:,:,mass].flatten()
+            
+            expr_pixels = np.sum(list_mass>0)
+            if expr_pixels > len(list_mass)*0.05:
+                considered_masses.add(mass)
+                
+            continue
+            
             #plt.imshow(region_array[:,:,0])
             list_mass = sorted(list_mass)
             # end index is the intensity above which points will be considered as outliers and therefore ignored
@@ -159,6 +219,8 @@ class KsSimilarity:
             th_outliers = list_mass[end_index]
             if th_outliers > 0:
                 considered_masses[mass] = th_outliers
+                
+                
         return considered_masses
 
 
@@ -323,114 +385,14 @@ class KsSimilarity:
         return img_he_clustered, ths
 
 
-    def KS_test(self, region_array:np.array, mass:int, he_clustered_ms_shaped:np.array, cluster_range=range(5), for_clustered=True, for_unclustered=True, clusters_considered=range(5), background_mass=0):
-        """ returns: dict: key = cluster, value = clustered statistics, clustered p value, unclutered statistics, unclustered p value"""
-        # classes_clustered saves all clustered intensity values for HE categories
-        classes_clustered = defaultdict(list) # mass_clustered: 0 is background
 
-        # classes_unclusteres saves all unclustered intensities values for HE categories
-        classes_unclustered = defaultdict(list) # mass_array: 0 is background
-        classes_he = defaultdict(list)
-
-        # get data for specific mass
-        mass_array = region_array[:,:,mass]
-        # -----do pre clustering
-        values_for_thresholding = []
-        for i in range(mass_array.shape[0]):
-            for j in range(mass_array.shape[1]):
-                pixel = mass_array[i,j]
-                if pixel!=background_mass:
-                    values_for_thresholding.append(pixel)
-                else:
-                    # value is equal to background (=0)
-                    mass_array[i,j]=-1
-        # -----end pre clustering
-        if for_clustered:
-            mass_clustered = self.clustering_multi_otsu(img_unclustered=mass_array, cluster_amount=4, values_for_thresholding=np.array(values_for_thresholding), additional_th=[0])[0]
-            #  plt.imshow(mass_clustered)
-            if for_unclustered:
-                for row in range(mass_clustered.shape[0]):
-                    for col in range(mass_clustered.shape[1]):
-                        he_class = he_clustered_ms_shaped[row][col]
-                        classes_he[he_class].append((row,col))
-                        if not mass_clustered[row][col] == 0:
-                            classes_clustered[he_class].append(mass_clustered[row][col])
-                        if not mass_array[row][col] == 0:
-                            classes_unclustered[he_class].append(mass_array[row][col])
-                
-                unclassifierd_clustered = defaultdict(list)
-                unclassifierd_unclustered = defaultdict(list)
-                # combine the remaining clusteres to one
-                for i in cluster_range:
-                    other_indices = list(cluster_range)
-                    other_indices.remove(i)
-                    for j in other_indices:
-                        unclassifierd_clustered[i] += classes_clustered[j]
-                        unclassifierd_unclustered[i] += classes_unclustered[j]
-
-                # KS test
-                ks_per_cluster = {}
-                for c in clusters_considered:
-                    KS_test_clustered = stats.kstest(classes_clustered[c], unclassifierd_clustered[c], alternative="less")
-                    KS_test_unclustered = stats.kstest(classes_unclustered[c], unclassifierd_unclustered[c], alternative="less")
-                    ks_per_cluster[c] = KS_test_clustered[0], KS_test_clustered[1], KS_test_unclustered[0], KS_test_unclustered[1]
-                return ks_per_cluster
-
-            else:
-                for row in range(mass_clustered.shape[0]):
-                    for col in range(mass_clustered.shape[1]):
-                        he_class = he_clustered_ms_shaped[row][col]
-                        classes_he[he_class].append((row,col))
-                        if not mass_clustered[row][col] == 0:
-                            classes_clustered[he_class].append(mass_clustered[row][col])
-
-                unclassifierd_clustered = defaultdict(list)
-                # combine the remaining clusteres to one
-                for i in cluster_range:
-                    other_indices = list(cluster_range)
-                    other_indices.remove(i)
-                    for j in other_indices:
-                        unclassifierd_clustered[i] += classes_clustered[j]
-
-                # KS test
-                ks_per_cluster = {}
-                for c in clusters_considered:
-                    KS_test_clustered = stats.kstest(classes_clustered[c], unclassifierd_clustered[c], alternative="less")
-                    ks_per_cluster[c] = KS_test_clustered[0], KS_test_clustered[1]
-                return ks_per_cluster
-
-        elif for_unclustered:
-            for row in range(mass_array.shape[0]):
-                for col in range(mass_array.shape[1]):
-                    he_class = he_clustered_ms_shaped[row][col]
-                    #print(f"mass={mass}, row={row}, col={col, }he_class={he_class}")
-                    classes_he[he_class].append((row,col))
-                    if not mass_array[row][col] == 0:
-                        classes_unclustered[he_class].append(mass_array[row][col])
-            
-            unclassifierd_unclustered = defaultdict(list)
-            # combine the remaining clusteres to one
-            for i in cluster_range:
-                other_indices = list(cluster_range)
-                other_indices.remove(i)
-                for j in other_indices:
-                    unclassifierd_unclustered[i] += classes_unclustered[j]
-
-            # KS test
-            ks_per_cluster = {}
-            for c in clusters_considered:
-                #print(f"pint classes unclustered for cluster {c}: {classes_unclustered[c]}")
-                if classes_unclustered[c] == [] or unclassifierd_unclustered[c] == []:
-                    ks_per_cluster[c] = None, 1.0
-                else:
-                    KS_test_unclustered = stats.kstest(classes_unclustered[c], unclassifierd_unclustered[c], alternative="less")
-                    ks_per_cluster[c] = KS_test_unclustered[0], KS_test_unclustered[1]
-            return ks_per_cluster
+    
             
         
     def find_relevant_masses_by_ks(self, region_array, masses, clustering, cluster_range=range(5), a=0.05, th_ks=0.1, for_clustered=True, for_unclustered=True, iterative=False):
         """returns two dictionarys: clustered and unclustered save all masses that have a p-value<a and ks >0.1 with results"""
         if for_clustered and for_unclustered:
+            return None
             ks_test_clustered = {}
             ks_test_unclustered = {}
             bar=makeProgressBar()
@@ -445,173 +407,184 @@ class KsSimilarity:
             return ks_test_clustered, ks_test_unclustered
 
         elif for_unclustered:
-            if iterative:
-                fraction_of_masses_th = 0.5# should be 0.9
-                highly_exp_th = 0.1#10%
-                max_iterations = 5
-                # adapt the pixels that are considered in the region array-> goal: only homogen tissue!
-                # initial clustering: spec.meta["segmented"]-> 10 clusters
                 
-                current_clustering = clustering.copy() # clustering
-                print(f"shape of clustering: {current_clustering.shape}")
-                updated_clustering=np.zeros((clustering.shape)) # new clustering  2D
-                last_amound_pixels = 2*clustering.size
-                updated_amound_pixels = clustering.size
-                iterations = 0
-                # while loop should break if too many iterations or if no change in core pixels
+            ks_test_unclustered = {}
+            
+            masses = list(masses)
+            from joblib import Parallel, delayed, parallel_backend
+            
+            with parallel_backend('loky', n_jobs=8):
+                results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering) for mass in masses)
 
-                # i need to do independent iterative processes for each cluster -> KS_test(cluster_range=c), c is single cluster
-                
-                while iterations < max_iterations and (last_amound_pixels-updated_amound_pixels)/last_amound_pixels>0.02:
-                    print(iterations)
-                    iterations += 1
-                    last_amound_pixels = updated_amound_pixels
-                    updated_amound_pixels = 0
-
-                    cluster_range = np.unique(current_clustering)
-                    cluster_range = cluster_range.tolist()
-                    if 0 in cluster_range:
-                        cluster_range.remove(0)
-
-                    ks_test_unclustered = self.find_relevant_masses_by_ks(self.region_array, masses, current_clustering, cluster_range=cluster_range, for_clustered=False, iterative=False)
-                    ms_df = self.dict_to_dataframe(ks_test_unclustered) 
-                    c2m = self.dataframe_to_cluster_dict(ms_df)
-                    if c2m=={}:
-                        print("c2m is empty")
-                        ks_test_unclustered = last_ks_test_unclustered
-                        print(last_ks_test_unclustered.keys(), np.unique(current_clustering))# both are empty
-                        break
-                    
-                    uc2m = self.find_unique_masses_for_cluster(c2m)
-                    c2m2p = {}# cluster -> mass -> pixel
-                    c2p=defaultdict(list)
-                    bar = makeProgressBar()
-                    for cluster in bar(uc2m.keys()): 
-                        m2p = {}
-                        # uc2m[cluster] is the list of masses relevant for a cluster
-                        for mass in uc2m[cluster]:
-                            mass_rel_pixels = largest_indices(self.region_array[:,:,mass], int(self.region_array[:,:,mass].size*highly_exp_th))
-                            m2p[mass] = mass_rel_pixels
-                        c2m2p[cluster] = m2p
-                        p2m=defaultdict(list)# counts pixels
-                        for mass in m2p:
-                            for pixel_tupel in m2p[mass]:
-                                p2m[pixel_tupel].append(mass)
-                        # add pixels, if they are expressed in at least "fraction_of_masses_th" masses
-                        total_masses = len(m2p)
-                        th = total_masses*fraction_of_masses_th
-                        for pixel_tupel in p2m:
-                            if len(p2m[pixel_tupel])>= th:
-                                c2p[cluster].append(pixel_tupel)
-                        
-                        # convert dict values from list to tuple (list not hashable)
-                        #c2m2p[cluster] = {key:tuple(lst) for key, lst in c2m2p[cluster].items()}
-                        #c2p[cluster] = set(c2m2p[cluster].values())
-                    current_clustering = np.zeros((clustering.shape))
-
-                    for cluster in c2p:
-                        """ # make distinct by converting to set and back to list
-                        list_cluster = list(set([item for t in (list(c2p[cluster])) for item in t]))
-                        for cluster2 in c2p:
-                            list_cluster2 = list(set([item for t in (list(c2p[cluster2])) for item in t]))
-                            c2up[cluster] = [(r,c) for (r,c) in list_cluster if (r,c) not in list_cluster2]"""
-
-                        for r,c in c2p[cluster]:
-                            current_clustering[r,c] = cluster
-                        #current_clustering[c2up[cluster]] = cluster
-                        updated_amound_pixels += len(c2p[cluster])
-
-                        print(current_clustering)
-
-                    last_ks_test_unclustered = ks_test_unclustered.copy()
-
-                    # end of loop:
-
-                    # --------------------- OLD ------------------------
-                   
-                    """print(f"updated_amound_pixels: {updated_amound_pixels}, iteration={iterations}")
-                    iterations += 1
-                    last_amound_pixels = updated_amound_pixels
-                    updated_amound_pixels = 0
-                    ks_test_unclustered = {}
-                    # total core pixels: sum of masses where pixel is core pixel: 3D; third dimension: lusteres, shape:166 211 11
-                    total_core_pixels = np.zeros([self.region_array.shape[0], self.region_array.shape[1], int(max(cluster_range))+1])
-                    
-                    #print(f"self.region_array:")
-                    #print(self.region_array)
-                    print(f"current_clustering:")
-                    print(np.unique(current_clustering))
-                    print(f"cluster_range: {cluster_range}")
-                    
-                    bar = makeProgressBar()
-                    for mass in bar(masses):
-                        # where is masse highly expressed?
-                                #   -> take a look at region array to find top 10% pixels: for each mass: core pixel candidates
-                        highest_exprvalues_for_mass = largest_indices(self.region_array[:,:,mass], int(self.region_array[:,:,mass].size*highly_exp_th))
-                                
-                        # ks test: what cluster is mass relevant for?
-                        ks_of_mass = self.KS_test(self.region_array, mass, he_clustered_ms_shaped=current_clustering, cluster_range=cluster_range, for_clustered=False, clusters_considered=cluster_range)
-                        for c in cluster_range:
-                            # is mass relevant for cluster?
-                            if ks_of_mass[c][1]< a and ks_of_mass[c][0] > th_ks:
-                                # add to dict, that saves relevant ks results
-                                ks_test_unclustered[(mass, c)] = (ks_of_mass[c][0], ks_of_mass[c][1])
-
-                                # add all highest expressed pixels to total core pixels for that cluster
-                                for (row,col) in highest_exprvalues_for_mass:
-                                    total_core_pixels[row,col, int(c)] += 1
-
-                    print("updated_clustering before update:") 
-                    print(np.unique(updated_clustering))
-                    print(updated_clustering)
-                    # PROBLEM: CANNOT FIND CORE PIXELS THAT ARE UNIQUE FOR A CLUSTER
-                    for c in cluster_range:
-                        for row in range(total_core_pixels.shape[0]):
-                            for col in range(total_core_pixels.shape[1]):
-                                # where total core pixels > 0.9 * len(masses)-> set pixel in new clustering on that cluster(=3rd dimension)
-                                if total_core_pixels[row,col, int(c)]>=fraction_of_masses_th*len(masses):
-                                    if updated_clustering[row, col]!=0: # in multiple clusters, not unique-> excluded
-                                        print(updated_clustering[row, col])
-                                        updated_clustering[row, col]=-1 
-                                    else:
-                                        updated_amound_pixels += 1
-                                        updated_clustering[row, col]=c
-
-                                current_clustering = updated_clustering
-
-                    print("updated_clustering after update:") 
-                    print(np.unique(updated_clustering))
-                    print(updated_clustering)"""
-                        
-                return ks_test_unclustered, current_clustering
-                
-            else:
-                ks_test_unclustered = {}
-                bar=makeProgressBar()
-                for mass in bar(masses):
-                    # modify: so that only unclustered is calculated
-                    ks_of_mass = self.KS_test(region_array, mass, he_clustered_ms_shaped=clustering, cluster_range=cluster_range, for_clustered=False, clusters_considered=cluster_range)
-                    for c in cluster_range:
-                        if ks_of_mass[c][1]< a and ks_of_mass[c][0] > th_ks:
-                            ks_test_unclustered[(mass, c)] = (ks_of_mass[c][0], ks_of_mass[c][1])
-                return ks_test_unclustered
+                for idx, res in enumerate(results):
+                    for c in res:
+                        if res[c][1]< a and res[c][0] > th_ks:
+                            ks_test_unclustered[(masses[idx], c)] = (res[c][0], res[c][1])
+            
+            return ks_test_unclustered
 
         elif for_clustered:
             ks_test_clustered = {}
-            bar=makeProgressBar()
-            for mass in bar(masses):
-                # modify: so that only clustered is calculated
-                ks_of_mass = self.KS_test(region_array, mass, he_clustered_ms_shaped=clustering, cluster_range=cluster_range, clusters_considered=cluster_range)
-                for c in cluster_range:
+            
+            loop = asyncio.get_event_loop() 
+            looper = asyncio.gather(*[KS_test(region_array[:,:, mass], clustering=clustering) for mass in masses]) 
+            results = loop.run_until_complete(looper)
+            
+            for res in results:
+                for c in res:
                     if ks_of_mass[c][1]< a and ks_of_mass[c][0] > th_ks:
                         ks_test_clustered[(mass, c)] = (ks_of_mass[c][0], ks_of_mass[c][1])
-            return ks_test_clustered, ks_test_unclustered
+            
+            return ks_test_clustered
         
         return None
 
 
+    def iterative_cluster_assignment(self, clustering):
+        
+        current_clustering = clustering.copy()
+        current_clustering = current_clustering+1
+        last_clustering = np.zeros( current_clustering.shape )
+        
+        pixels = clustering.size
+                     
+        current_iteration = 0
+        max_iteration = 5
+              
+        while current_iteration < max_iteration and ( pixels-np.sum(current_clustering == last_clustering) ) > 10:
+            
+            # find cluster-specific masses
+            #ms_df = self.perform_analysis()
+            
+            print("Current Iteration", current_iteration)
+            
+            availClusters = np.unique(current_clustering)            
+            cluster2masses = defaultdict(list)
+            
+            last_clustering = np.copy(current_clustering)
+            
+            print("Performing KS Analysis for iteration {}".format(current_iteration))
+            #TODO i think this is needed!
+            use_clustering = (current_clustering-1)
+            use_clustering[use_clustering < 0] = 0
+            ms_df = self.perform_analysis(passed_clustering=use_clustering)
+            
+            for clusterID in availClusters:
+                sub_df = ms_df[(ms_df.cluster_name == clusterID)].sort_values("relevance_score", ascending=False).head(100)
+                cluster2masses[clusterID] = list(sub_df.mass_name)
+                
+                
+            current_clustering = np.zeros(current_clustering.shape)
+            for clusterID in cluster2masses:
+                
+                pixel2high_expressed = np.zeros( last_clustering.shape )
+                
+                for mass in cluster2masses[clusterID]:
+                    mass_array = np.copy(self.region_array[:,:,mass])
+                    
+                    #intensity threshold
+                    intensityThreshold = np.quantile(mass_array, 0.5) #[ current_clustering == clusterID ]
+                    pixel2high_expressed += (mass_array>intensityThreshold)
+                    
+                massThreshold = np.floor( 0.9 * len(cluster2masses[clusterID]) )
+                
+                current_clustering[(last_clustering == clusterID) & (pixel2high_expressed >= massThreshold)] = clusterID
+        
+            current_iteration += 1
+                
+        return current_clustering
+        
+        fraction_of_masses_th = 0.5# should be 0.9
+        highly_exp_th = 0.1#10%
+        max_iterations = 5
+        # adapt the pixels that are considered in the region array-> goal: only homogen tissue!
+        # initial clustering: spec.meta["segmented"]-> 10 clusters
+        
+        current_clustering = clustering.copy() # clustering
+        print(f"shape of clustering: {current_clustering.shape}")
+        updated_clustering=np.zeros((clustering.shape)) # new clustering  2D
+        last_amount_pixels = 2*clustering.size
+        updated_amount_pixels = clustering.size
+        iterations = 0
+        # while loop should break if too many iterations or if no change in core pixels
+
+        # i need to do independent iterative processes for each cluster -> KS_test(cluster_range=c), c is single cluster
+        
+        while iterations < max_iterations and (last_amount_pixels-updated_amount_pixels)/last_amount_pixels>0.02:
+            print(iterations)
+            iterations += 1
+            last_amount_pixels = updated_amount_pixels
+            updated_amount_pixels = 0
+
+            cluster_range = np.unique(current_clustering)
+            cluster_range = cluster_range.tolist()
+            if 0 in cluster_range:
+                cluster_range.remove(0)
+
+            ks_test_unclustered = self.find_relevant_masses_by_ks(self.region_array, masses, current_clustering, cluster_range=cluster_range, for_clustered=False, iterative=False)
+            ms_df = self.dict_to_dataframe(ks_test_unclustered) 
+            c2m = self.dataframe_to_cluster_dict(ms_df)
+            if c2m=={}:
+                print("c2m is empty")
+                ks_test_unclustered = last_ks_test_unclustered
+                print(last_ks_test_unclustered.keys(), np.unique(current_clustering))# both are empty
+                break
+            
+            uc2m = self.find_unique_masses_for_cluster(c2m)
+            c2m2p = {}# cluster -> mass -> pixel
+            c2p=defaultdict(list)
+            bar = makeProgressBar()
+            for cluster in bar(uc2m.keys()): 
+                m2p = {}
+                # uc2m[cluster] is the list of masses relevant for a cluster
+                for mass in uc2m[cluster]:
+                    mass_rel_pixels = largest_indices(self.region_array[:,:,mass], int(self.region_array[:,:,mass].size*highly_exp_th))
+                    m2p[mass] = mass_rel_pixels
+                c2m2p[cluster] = m2p
+                p2m=defaultdict(list)# counts pixels
+                for mass in m2p:
+                    for pixel_tupel in m2p[mass]:
+                        p2m[pixel_tupel].append(mass)
+                # add pixels, if they are expressed in at least "fraction_of_masses_th" masses
+                total_masses = len(m2p)
+                th = total_masses*fraction_of_masses_th
+                for pixel_tupel in p2m:
+                    if len(p2m[pixel_tupel])>= th:
+                        c2p[cluster].append(pixel_tupel)
+                
+                # convert dict values from list to tuple (list not hashable)
+                #c2m2p[cluster] = {key:tuple(lst) for key, lst in c2m2p[cluster].items()}
+                #c2p[cluster] = set(c2m2p[cluster].values())
+            current_clustering = np.zeros((clustering.shape))
+
+            for cluster in c2p:
+
+
+                for r,c in c2p[cluster]:
+                    current_clustering[r,c] = cluster
+                #current_clustering[c2up[cluster]] = cluster
+                updated_amount_pixels += len(c2p[cluster])
+
+                print(current_clustering)
+
+            last_ks_test_unclustered = ks_test_unclustered.copy()
+
+            # end of loop:
+
+                
+        return ks_test_unclustered, current_clustering
+
+
+
+
     def dict_to_dataframe(self, ks_dict):
         my_data = defaultdict(list)
+
+        m2c = defaultdict(set)
+        for key in ks_dict:
+            mass = key[0]
+            cluster = key[1]
+            m2c[mass].add(cluster)
 
         for key in ks_dict:
             my_data["mass_name"].append(key[0])
@@ -619,6 +592,8 @@ class KsSimilarity:
             my_data["ks_value"].append(ks_dict[key][0])
             my_data["p_value"].append(ks_dict[key][1])
             my_data["p_value_mult"].append(ks_dict[key][1]*5*16000)
+            my_data["rel_in_clusters"].append( tuple(m2c[key[0]]) )
+            my_data["unique_for_cluster2"].append( len(m2c[key[0]])==1 )
 
         ks_dataframe = pd.DataFrame.from_dict(my_data)
         return ks_dataframe
