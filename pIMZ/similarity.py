@@ -965,7 +965,28 @@ class KsSimilarity:
 
     def check_mass_for_cluster(self, mass, cluster):
         if len(self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)])>0 :
-            print(self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)])
+            df_match = self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)]
+            print(f'--- SUMMARY FOR mass {df_match["mass_name"].tolist()[0]} and cluster {df_match["cluster_name"].tolist()[0]} -----------')
+            print("")
+            print('--- UNIQUENES --------------------------------------')
+            if df_match["unique_for_cluster"].tolist()[0]==True:
+                print('this mass is unique for this cluster')
+            else:
+                print(f'other clusters, mass is relevant in: {df_match["rel_in_clusters"].tolist()[0].remove(df_match["cluster_name"].tolist()[0])}') 
+            print(f'relevance score: {df_match["relevance_score"].tolist()[0]}') 
+            print("")
+            print('--- TEST RESULTS -----------------------------------')
+            print(f'statistical value: {df_match["ks_value"].tolist()[0]}') 
+            print(f'p value: {df_match["p_value"].tolist()[0]}') 
+            print(f'adjusted p value: {df_match["p_value_adj"].tolist()[0]}') 
+            print("")
+            print('--- STATISTCAL EVALUATION --------------------------')
+            print(f'sensitivity: {df_match["sensitivity"].tolist()[0]}') 
+            print(f'specificity: {df_match["specificity"].tolist()[0]}') 
+            print(f'false negative rate: {df_match["false_neg_rate"].tolist()[0]}') 
+            print(f'false positive rate: {df_match["false_pos_rate"].tolist()[0]}') 
+            print("")
+            print('----------------------------------------------------')
         else: 
             print(f"mass {mass} was not identified as characteristic for cluster {cluster}")
         self.plot_mass_with_contours(mass, cluster)
