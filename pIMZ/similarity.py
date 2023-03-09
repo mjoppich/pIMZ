@@ -97,9 +97,9 @@ import random
 
 - check_mass_for_cluster(mass, cluster)
 - statistik: in wievielen der pixel im cluster hochreguliert > th, auslesen von analysis results-> dictionary (mass: mass, p)
-- print_dictionary
-- aufruf: plot_mass_with_contours(mass, cluster)
-- return dict
+- ✓ print_dictionary
+- ✓ aufruf: plot_mass_with_contours(mass, cluster)
+- ✓ return dict
 
 - ✓ diese methode zum clustern? core pixel als seeds für k means clustering
     - avg ähnlichkeitsmaß pro cluster-> dot product von nicht core pixel: alle massen zu allen core core pixel zu cluster alle massen
@@ -228,7 +228,7 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
                             KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# ttest----
                         ks_per_cluster[c][bi] = (KS_test_unclustered[0], KS_test_unclustered[1])
             
-        print(f"mass past else: {mass}")
+        #print(f"mass past else: {mass}")
         #th_ks = 0.3
         #th_ws = 0.3
         #th_t = 20
@@ -247,7 +247,7 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
                 add_mass = [c for (ks, p) in ks_per_cluster[c] if (abs(ks) > th_ws  and p < a)]
             
             if len(add_mass)==background_amount:
-                print("true")
+                #print("true")
                 # add the mean 
                 ks_stat_mean = mean([i[0] for i in ks_per_cluster[c] if i[0]!=0])
                 p_value_mean = mean([i[1] for i in ks_per_cluster[c] if i[1]!=1])
@@ -730,7 +730,7 @@ class KsSimilarity:
 
     
     
-    def statistics_of_mass(self, masses_w_clusters=(), percentile=75, add_to_df=False, for_all=False):
+    def statistics_of_mass(self, masses_w_clusters=(), percentile=75, add_to_df=True, for_all=True):
         """(concerning one cluster use intensity threshhold)
             masses_w_clusters: list of tuples
             percentile: percentile mz value for mass-> = threhhold
@@ -966,30 +966,40 @@ class KsSimilarity:
     def check_mass_for_cluster(self, mass, cluster):
         if len(self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)])>0 :
             df_match = self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)]
-            print(f'--- SUMMARY FOR mass {df_match["mass_name"].tolist()[0]} and cluster {df_match["cluster_name"].tolist()[0]} -----------')
+            dict_match = df_match.to_dict()
+            idx = list(dict_match.values())[0].keys()
+            for k in dict_match.keys():
+                dict_match[k] = dict_match[k][list(idx)[0]]
+            print(f'--- SUMMARY FOR mass {dict_match["mass_name"]} and cluster {dict_match["cluster_name"]} -----------')
             print("")
-            print('--- UNIQUENES --------------------------------------')
-            if df_match["unique_for_cluster"].tolist()[0]==True:
+            print('--- UNIQUENES & RELEVANCE --------------------------')
+            if dict_match["unique_for_cluster"]==True:
                 print('this mass is unique for this cluster')
             else:
-                print(f'other clusters, mass is relevant in: {df_match["rel_in_clusters"].tolist()[0].remove(df_match["cluster_name"].tolist()[0])}') 
-            print(f'relevance score: {df_match["relevance_score"].tolist()[0]}') 
+                other_clusters = list(dict_match["rel_in_clusters"])
+                other_clusters.remove(dict_match["cluster_name"])
+                print(f'other clusters, mass is relevant in: {other_clusters}') 
+            print(f'relevance score: {dict_match["relevance_score"]}') 
             print("")
             print('--- TEST RESULTS -----------------------------------')
-            print(f'statistical value: {df_match["ks_value"].tolist()[0]}') 
-            print(f'p value: {df_match["p_value"].tolist()[0]}') 
-            print(f'adjusted p value: {df_match["p_value_adj"].tolist()[0]}') 
+            print(f'statistical value: {dict_match["ks_value"]}') 
+            print(f'p value: {dict_match["p_value"]}') 
+            print(f'adjusted p value: {dict_match["p_value_adj"]}') 
             print("")
             print('--- STATISTCAL EVALUATION --------------------------')
-            print(f'sensitivity: {df_match["sensitivity"].tolist()[0]}') 
-            print(f'specificity: {df_match["specificity"].tolist()[0]}') 
-            print(f'false negative rate: {df_match["false_neg_rate"].tolist()[0]}') 
-            print(f'false positive rate: {df_match["false_pos_rate"].tolist()[0]}') 
+            print(f'sensitivity: {dict_match["sensitivity"]}') 
+            print(f'specificity: {dict_match["specificity"]}') 
+            print(f'false negative rate: {dict_match["false_neg_rate"]}') 
+            print(f'false positive rate: {dict_match["false_pos_rate"]}') 
             print("")
             print('----------------------------------------------------')
         else: 
             print(f"mass {mass} was not identified as characteristic for cluster {cluster}")
         self.plot_mass_with_contours(mass, cluster)
+        if len(self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)])>0 :
+           return dict_match 
+        else:
+            return None
   
 
 def connected_cluster_size(tested_clustering):
@@ -1175,6 +1185,7 @@ def plot_outlines(bool_img, ax=None, **kwargs):
 def find_best_fitting_cluster(region_array, non_core_pixel, clustering):
     r = non_core_pixel[0]
     c = non_core_pixel[1]
+    
     this_spectrum = region_array[r,c,:]
     # iterate over all clusters
     # maximise avg dotproduct
@@ -1196,23 +1207,26 @@ def find_best_fitting_cluster(region_array, non_core_pixel, clustering):
     return assigned_cluster
 
 
-def compare_clusterings_for_data(list_of_KsSimilarity:KsSimilarity):
+def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
+    names=[]
     amount_found_masses=[]
     masses_found_for=[]
     amount_connencted_cluster=[]
     avg_size_cc=[]
     share_core_pixel=[]
 
-    for cl in list_of_KsSimilarity:
-        amount_found_masses.append(len(cl.analysis_results))
-        masses_found_for.append(np.unique(cl.analysis_results["cluster_name"]))
-        amount_cc, avg_cl_size, _ = cl.connected_cluster_size()
+    for cl in dict_of_KsSimilarity.keys():
+        ksSimilarity = dict_of_KsSimilarity[cl]
+        names.append(cl)
+        amount_found_masses.append(len(ksSimilarity.analysis_results))
+        masses_found_for.append(np.unique(ksSimilarity.analysis_results["cluster_name"]))
+        amount_cc, avg_cl_size, _ = ksSimilarity.connected_cluster_size()
         amount_connencted_cluster.append(amount_cc)
         avg_size_cc.append(avg_cl_size)
-        share_core_pixel.append(cl.core_pixel)
+        share_core_pixel.append(ksSimilarity.core_pixel)
     
 
-    data_summary = pd.DataFrame({"cluster_KsSimilarity": list_of_KsSimilarity,
+    data_summary = pd.DataFrame({"cluster_KsSimilarity": names,
                                  "amount_found_masses": amount_found_masses,
                                  "masses_found_for": masses_found_for,
                                  "amount_connencted_cluster": amount_connencted_cluster,
