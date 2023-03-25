@@ -78,6 +78,8 @@ import math
 #import regions
 from skimage.filters import threshold_multiotsu
 import random
+from sklearn.cluster import KMeans
+from scipy.spatial import distance
 
 
 #TODO:
@@ -267,13 +269,17 @@ class KsSimilarity:
         self.region_array = np.copy(self.spec.region_array)
         self.initial_clustering = None
         self.core_pixel = None
+        self.clusterwise_core_pixel = defaultdict(list) # for each cluster, append all tuples (r,c) that are core
         self.clustering = None
+        self.core_similarity_clustering = None
+        self.core_similarity_dict=None
         self.filled_clustering = None
         self.quality_masses = None
         self.quality_pixel = None
         self.count=0
         self.data_summary = None # find relevant masses
         self.analysis_results = None # save perform_analysis data here
+        self.cluster_distances = None
 
     def perform_analysis(self, passed_clustering=np.empty([0, 0]), weight_ks=1, weight_p=1, weight_c=1, features=[], iterative=False, th_t=10, a=0.05, method=stats.ttest_ind, raw=False):
         """ This function finds masses that represent a certein cluster 
@@ -303,6 +309,7 @@ class KsSimilarity:
             self.clustering = passed_clustering
 
         clusters=np.unique(self.clustering)
+
 
         if features == []:
             features = range(self.region_array.shape[2])
@@ -673,6 +680,8 @@ class KsSimilarity:
             print("Equal pixels", np.sum(current_clustering == last_clustering))
             print("Equal pixels %", np.sum(current_clustering == last_clustering)/pixels)
             self.core_pixel = np.sum(current_clustering == self.initial_clustering)
+            # add clusterwise corepixel
+            self.find_clusterwise_core_pixel()
 
         for c in np.unique(current_clustering):
             p = np.sum(current_clustering == c)
@@ -943,6 +952,16 @@ class KsSimilarity:
         return cl_to_core
     
 
+    def find_clusterwise_core_pixel(self):
+        """fills default dict clusterID-> list of all core pixels"""
+        
+        for cl in np.unique(self.initial_clustering):#for each cluster
+            core_indices = list(zip(*np.where(self.clustering==cl)))
+            for indices in core_indices:
+                self.clusterwise_core_pixel[cl].append(indices)
+    
+    
+
     def plot_mass_with_contours(self, mass, cluster, initial_clustering=True, clustering = None):
         """plots mass heatmap and cluster contours"""
         if initial_clustering:
@@ -963,6 +982,31 @@ class KsSimilarity:
         self.filled_clustering = filled_clustering
 
 
+    def compute_core_pixel_similarity_clustering(self, sampling=True, samplesize=100):
+        """compute similatity of all pixels to all core pixels of each cluster """
+        #core_similarity = np.zeros((self.region_array.shape[0],self.region_array.shape[1], int(max(self.clusterwise_core_pixel.keys()))+1))
+        core_similarity = defaultdict(lambda: defaultdict(list))
+        self.core_similarity_clustering = np.zeros((self.region_array.shape[0],self.region_array.shape[1]))
+        
+        bar = makeProgressBar()
+        for r in bar(range(self.region_array.shape[0])):
+            for c in range(self.region_array.shape[1]):
+                this_spectrum = self.region_array[r,c,:]
+                dot_products = []
+                for cl in self.clusterwise_core_pixel.keys():
+                    if sampling:
+                        # draw 10 random core pixel:
+                        sample_core = random.sample(self.clusterwise_core_pixel[cl], samplesize)
+                    else:
+                        sample_core = self.clusterwise_core_pixel[cl]
+                    for pixel in sample_core:
+                        core_spectrum = self.region_array[pixel[0],pixel[1],:]
+                        dot_products.append(np.dot(this_spectrum, core_spectrum))
+                    core_similarity[r,c][int(cl)].append(mean(dot_products))
+                self.core_similarity_clustering[r,c] = max(core_similarity[r,c], key=core_similarity[r,c].get)
+        self.core_similarity_dict = core_similarity
+
+
     def check_mass_for_cluster(self, mass, cluster):
         if len(self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)])>0 :
             df_match = self.analysis_results[(self.analysis_results["mass_name"]==mass) & (self.analysis_results["cluster_name"]==cluster)]
@@ -979,18 +1023,18 @@ class KsSimilarity:
                 other_clusters = list(dict_match["rel_in_clusters"])
                 other_clusters.remove(dict_match["cluster_name"])
                 print(f'other clusters, mass is relevant in: {other_clusters}') 
-            print(f'relevance score: {dict_match["relevance_score"]}') 
+            print(f'relevance score: {round(dict_match["relevance_score"],4)}') 
             print("")
             print('--- TEST RESULTS -----------------------------------')
-            print(f'statistical value: {dict_match["ks_value"]}') 
-            print(f'p value: {dict_match["p_value"]}') 
-            print(f'adjusted p value: {dict_match["p_value_adj"]}') 
+            print(f'statistical value: {round(dict_match["ks_value"],4)}') 
+            print(f'p value: {round(dict_match["p_value"],4)}') 
+            print(f'adjusted p value: {round(dict_match["p_value_adj"],4)}') 
             print("")
             print('--- STATISTCAL EVALUATION --------------------------')
-            print(f'sensitivity: {dict_match["sensitivity"]}') 
-            print(f'specificity: {dict_match["specificity"]}') 
-            print(f'false negative rate: {dict_match["false_neg_rate"]}') 
-            print(f'false positive rate: {dict_match["false_pos_rate"]}') 
+            print(f'sensitivity: {round(dict_match["sensitivity"],4)}') 
+            print(f'specificity: {round(dict_match["specificity"],4)}') 
+            print(f'false negative rate: {round(dict_match["false_neg_rate"],4)}') 
+            print(f'false positive rate: {round(dict_match["false_pos_rate"],4)}') 
             print("")
             print('----------------------------------------------------')
         else: 
@@ -1210,28 +1254,90 @@ def find_best_fitting_cluster(region_array, non_core_pixel, clustering):
 def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
     names=[]
     amount_found_masses=[]
-    masses_found_for=[]
+    clusterID=[]
     amount_connencted_cluster=[]
     avg_size_cc=[]
     share_core_pixel=[]
 
     for cl in dict_of_KsSimilarity.keys():
         ksSimilarity = dict_of_KsSimilarity[cl]
-        names.append(cl)
-        amount_found_masses.append(len(ksSimilarity.analysis_results))
-        masses_found_for.append(np.unique(ksSimilarity.analysis_results["cluster_name"]))
+        found_masses_for_cluster = ksSimilarity.found_masses_for_cluster(len_only=True)
         amount_cc, avg_cl_size, _ = ksSimilarity.connected_cluster_size()
-        amount_connencted_cluster.append(amount_cc)
-        avg_size_cc.append(avg_cl_size)
-        share_core_pixel.append(ksSimilarity.core_pixel)
+        for c in list(found_masses_for_cluster.keys()):
+            names.append(cl)
+            amount_found_masses.append(found_masses_for_cluster[c])
+            clusterID.append(c)
+            amount_connencted_cluster.append(amount_cc)
+            avg_size_cc.append(avg_cl_size)
+            share_core_pixel.append(len(ksSimilarity.clusterwise_core_pixel[c]))
     
 
     data_summary = pd.DataFrame({"cluster_KsSimilarity": names,
+                                 "clusterID": clusterID,
                                  "amount_found_masses": amount_found_masses,
-                                 "masses_found_for": masses_found_for,
                                  "amount_connencted_cluster": amount_connencted_cluster,
                                  "avg_size_cc": avg_size_cc,
                                  "share_core_pixel": share_core_pixel})
     return data_summary
+
+def homogeneity(clustering:np.array, ignore_zero=True):
+    """computes distribution of euklidean distance """
+    clustering_dict = matrix_to_dict(clustering)
+    distances = defaultdict(list)
+    indices = defaultdict(list)
+    summary = {}
+    for c in clustering_dict.keys():
+        if ignore_zero and c==0:
+            continue
+        center = tuple(KMeans(n_clusters=1).fit(clustering_dict[c]).cluster_centers_[0])
+        for elem in clustering_dict[c]:
+            euc_dist = distance.euclidean(elem, center)
+            #cluster dispersion
+            distances[c].append(euc_dist)
+            indices[c].append(elem)
+        cl_std = np.std(distances[c])
+        cl_mean = mean(distances[c])
+        # share of own cluster within 3 std 
+        """own_counter = 0
+        other_counter = 0
+        r_range = range(max(math.floor(center[0]-cl_std),0), min(math.ceil(center[0]+cl_std), clustering.shape[0]))
+        c_range = range(max(math.floor(center[1]-cl_std),0), min(math.ceil(center[1]+cl_std), clustering.shape[1]))
+        for row in r_range:
+            for col in c_range:
+                if distance.euclidean((row,col), center)<cl_std:
+                    if ignore_zero:
+                        if clustering[row,col] == c:
+                            own_counter+=1
+                        elif clustering[row,col] != 0:
+                            other_counter+=1
+                    else:
+                        if clustering[row,col] == c:
+                            own_counter+=1
+                        else:
+                            other_counter+=1"""
+        if ignore_zero:
+            A = np.count_nonzero(clustering)
+        else:
+            A = clustering.size
+        n = len(clustering_dict[c])
+        l = n/A
+        K = l**(-1)*sum(d<3*cl_std for d in distances[c])/n
+        L = (K/math.pi)**0.5
+        
+        summary[c] = {"centroid":center, "mean":cl_mean, "std":cl_std, "L(3*std)":L}
+        
+    return summary, distances
+
+
+
+def matrix_to_dict(matrix_2d:np.array):
+    cluster_dict = defaultdict(list)
+    for r in range(matrix_2d.shape[0]):
+        for c in range(matrix_2d.shape[1]):
+            cluster = matrix_2d[r,c]
+            cluster_dict[cluster].append((r,c))
+    return cluster_dict
+
+
     
     
