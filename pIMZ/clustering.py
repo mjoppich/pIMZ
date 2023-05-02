@@ -614,10 +614,10 @@ class KMeansClusterer(RegionClusterer):
         self.matrix_mz = np.copy(self.region.get_mz_vector())
         self.segmented = None
 
-    def fit(self, num_target_clusters: int, max_iterations: int = 100, verbose: bool = False):
+    def fit(self, num_target_clusters: int, max_iterations: int = 300, verbose: bool = False):
         
         elem_matrix, idx2ij = self.region.prepare_elem_matrix()
-        kmeans = cluster.KMeans(n_clusters=num_target_clusters, random_state=0).fit(elem_matrix)
+        kmeans = cluster.KMeans(n_clusters=num_target_clusters, max_iter=max_iterations, random_state=0).fit(elem_matrix)
 
         if hasattr(kmeans, 'labels_'):
             y_pred = kmeans.labels_.astype(int)

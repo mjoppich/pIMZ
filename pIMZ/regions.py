@@ -2323,7 +2323,7 @@ class SpectraRegion():
         return cons_spectra
 
 
-    def plot_boxplot(self, mzvalues):
+    def plot_boxplot(self, mzvalues, pw=None, pw_match_name="name"):
         """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster.
 
         Args:
@@ -2335,12 +2335,35 @@ class SpectraRegion():
         if not isinstance(mzvalues, (list, tuple, set)):
             mzvalues = [mzvalues]
 
+        plotDescription = set()
+
+        useMZ = set()
+        for x in mzvalues:
+            if type(x) == str:
+                plotDescription.add(x)
+
+                possibleMZs = pw.get_closest_mz_for_protein(x, match_name=pw_match_name, mz_bst=self.mz_bst)
+                
+                useMZ.update(possibleMZs)
+                
+            else:
+                
+                bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(x)    
+                
+                if bestExMassIdx < 0:
+                    continue
+                
+                if verbose:
+                    self.logger.info("Processing mz {} with best existing mz {}".format(x, bestExMassForMass))
+                            
+                useMZ.add( bestExMassForMass)
+
+
 
         cluster2coords = self.getCoordsForSegmented()
 
-        image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
 
-        for mz in mzvalues:
+        for mz in useMZ:
             
             bestExMassForMass, bestExMassIdx = self._get_exmass_for_mass(mz)
             self.logger.info("Processing Mass {} with best existing mass {}".format(mz, bestExMassForMass))

@@ -409,7 +409,8 @@ class KsSimilarity:
             return ks_test_clustered, ks_test_unclustered
 
         elif for_unclustered:
-                
+            print("For unclustered part")
+ 
             ks_test_unclustered = {}
             
             masses = list(masses)
@@ -426,6 +427,8 @@ class KsSimilarity:
             return ks_test_unclustered
 
         elif for_clustered:
+            
+            print("For clustered part")
             ks_test_clustered = {}
             
             loop = asyncio.get_event_loop() 
