@@ -84,29 +84,6 @@ from scipy.spatial import distance
 
 #TODO:
 
-"""
-- wie gut beschreibt mein clustering meine daten?
-- welche massen beschreiben welche cluster?
-
-- ✓ results: für alle clustering vgl:
-- ✓ skimage: avg zsmh cluster size-> id pro neue abgegrenzte bereiche: viel viele? avg size?
-- ✓ vielviele massen finde ich?
-- ✓ wieviele core pixel?/ was ist der anteil an core pixeln im cluster?-> % in iterative 
-
-- ✓ Funktion für user: plot_mass_with_contours(mass, cluster)
-    - heatmap über masse: wie stark ist sie exprimiert? imshow
-    - contourplot des Clusters auf gleichem bild
-
-- check_mass_for_cluster(mass, cluster)
-- statistik: in wievielen der pixel im cluster hochreguliert > th, auslesen von analysis results-> dictionary (mass: mass, p)
-- ✓ print_dictionary
-- ✓ aufruf: plot_mass_with_contours(mass, cluster)
-- ✓ return dict
-
-- ✓ diese methode zum clustern? core pixel als seeds für k means clustering
-    - avg ähnlichkeitsmaß pro cluster-> dot product von nicht core pixel: alle massen zu allen core core pixel zu cluster alle massen
-"""
-
 
 
 def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, background_mass=0, general_background=False, mass=0, method=stats.kstest, th_t=10, a=0.05, th_ks=0.3, th_ws=10):
@@ -117,6 +94,7 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
         lines outcommented:  ttest----   
     
     """
+    
     # classes_clustered saves all clustered intensity values for HE categories
     classes_clustered = defaultdict(list) # mass_clustered: 0 is background
 
@@ -137,6 +115,7 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
         relevant_intensities = mass_array[ clustering == c ]
         classes_unclustered[c] = relevant_intensities[relevant_intensities != 0]
     unclassifierd_unclustered = defaultdict(list)
+    #print(f'cluster 1:{classes_unclustered[1]}')
 
     # KS test nur gegen einen cluster: cluster considered
     if type(cluster_considered)!=type(cluster_range):
@@ -147,9 +126,13 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
         for c in cluster_range:
             #background cluster is c
             background_intensities = classes_unclustered[c]
-            if len(foreground_intensities) == 0 or len(background_intensities) == 0:
+            if len(foreground_intensities) == 0:
                 pass
                 #ks_per_cluster[c] = None, 1.0
+            elif len(background_intensities)==0:
+                # no intensities in background
+                ks_per_cluster[cluster_considered].append((1, 0))
+
             else:
                 #KS_test_unclustered = stats.kstest(foreground_intensities, background_intensities, alternative="less")
                 KS_test_unclustered = stats.kstest(foreground_intensities, background_intensities, alternative="less")
@@ -221,14 +204,17 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
                         continue
                     background_intensities = classes_unclustered[b]
                     
-                    if len(foreground_intensities) == 0 or len(background_intensities) == 0:
+                    if len(foreground_intensities) == 0 :
                         pass
+                    elif len(background_intensities) == 0:
+                        ks_per_cluster[c][bi] = (th_t+1, 0)
                     else:
                         if method==stats.kstest:
                             KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
                         elif method==stats.ttest_ind:
                             KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# ttest----
                         ks_per_cluster[c][bi] = (KS_test_unclustered[0], KS_test_unclustered[1])
+                        #print(f'ks,p: {KS_test_unclustered[0], KS_test_unclustered[1]}')
             
         #print(f"mass past else: {mass}")
         #th_ks = 0.3
@@ -247,13 +233,15 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
                 add_mass = [c for (ks, p) in ks_per_cluster[c] if (abs(ks) > th_t  and p < a)]
             elif method==stats.wilcoxon:
                 add_mass = [c for (ks, p) in ks_per_cluster[c] if (abs(ks) > th_ws  and p < a)]
-            
             if len(add_mass)==background_amount:
-                #print("true")
+                #print(f"{mass}: true")
                 # add the mean 
                 ks_stat_mean = mean([i[0] for i in ks_per_cluster[c] if i[0]!=0])
                 p_value_mean = mean([i[1] for i in ks_per_cluster[c] if i[1]!=1])
                 ks_per_cluster_sig[c].append((ks_stat_mean, p_value_mean))
+            elif len(add_mass)>(background_amount*0.85):
+                pass
+            
         #print(f"mass end: {mass}") 
 
         return ks_per_cluster_sig
@@ -263,11 +251,15 @@ def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, 
 
 class KsSimilarity:
 
-    def __init__(self, spec_mz_values:SpectraRegion):
+    def __init__(self, spec_mz_values:SpectraRegion, initial_cl_metaseg=False):
         self.spec = spec_mz_values
         # to do mz_region_array = self.spec.region_array
         self.region_array = np.copy(self.spec.region_array)
-        self.initial_clustering = None
+        if initial_cl_metaseg:
+            self.initial_clustering = spec_mz_values.meta['segmented'].copy()
+            self.initial_clustering = self.initial_clustering +1
+        else:
+            self.initial_clustering = None
         self.core_pixel = None
         self.clusterwise_core_pixel = defaultdict(list) # for each cluster, append all tuples (r,c) that are core
         self.clustering = None
@@ -566,7 +558,7 @@ class KsSimilarity:
     
             
         
-    def find_relevant_masses_by_ks(self, region_array, masses, clustering, cluster_range=range(5), a=0.05, th_t=10, th_ks=0.5, for_clustered=True, for_unclustered=True, iterative=False, method=stats.ttest_ind):
+    def find_relevant_masses_by_ks(self, region_array, masses, clustering, cluster_range=range(5), a=0.05, th_t=10, th_ks=0.5, for_clustered=True, for_unclustered=True, iterative=False, method=stats.ttest_ind, parallel=False):
         """returns two dictionarys: clustered and unclustered save all masses that have a p-value<a and ks >0.1 with results"""
         if for_clustered and for_unclustered:
             return None
@@ -578,16 +570,29 @@ class KsSimilarity:
             #method=stats.ttest_ind
             #method=stats.wilcoxon
             print(f"method: {method}")
+            if parallel:
 
-            from joblib import Parallel, delayed, parallel_backend
-            print("in loky")
-            with parallel_backend('loky', n_jobs=8):
-                results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=method, th_t=th_t, a=a) for mass in masses)
-                #results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=stats.ttest_ind) for mass in masses)
-                #results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=stats.wilcoxon) for mass in masses)
-                
-                # 2nd for loop: test all clusters against one background=c
-                #results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, cluster_considered=c, general_background=False, mass=mass) for mass in masses for c in cluster_range)
+                from joblib import Parallel, delayed, parallel_backend
+                print("in loky")
+                with parallel_backend('loky', n_jobs=8):
+                    results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=method, th_t=th_t, a=a) for mass in masses)
+    
+                    background_amount= len(np.unique(clustering))-1
+                    for idx, res in enumerate(results): #???
+                    #for res in results:
+                        for c in res:
+                            # ks_test_unclustered[(res, c)] = (res[c][0], res[c][1])
+                            # ks_test_unclustered[(masses[idx], c)] = (res[c][0], res[c][1]) #???
+                            ks_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) #???
+
+                self.data_summary = ks_test_unclustered
+
+                return ks_test_unclustered
+            else: 
+        
+                bar = makeProgressBar()
+                results = (KS_test(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=method, th_t=th_t, a=a) for mass in bar(masses))
+
                 background_amount= len(np.unique(clustering))-1
                 for idx, res in enumerate(results): #???
                 #for res in results:
@@ -596,9 +601,9 @@ class KsSimilarity:
                         # ks_test_unclustered[(masses[idx], c)] = (res[c][0], res[c][1]) #???
                         ks_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) #???
 
-            self.data_summary = ks_test_unclustered
-            
-            return ks_test_unclustered
+                self.data_summary = ks_test_unclustered
+
+                return ks_test_unclustered
 
         elif for_clustered:
             return None
@@ -609,7 +614,9 @@ class KsSimilarity:
     def iterative_cluster_assignment(self, clustering, th_t, a, method=stats.ttest_ind, max_iteration=5, raw=False):
         
         current_clustering = clustering.copy()
-        current_clustering = current_clustering+1
+        if 0 in current_clustering.flatten():
+            print('current_clustering = current_clustering+1,  as clustering contains 0')
+            current_clustering = current_clustering+1
         last_clustering = np.zeros( current_clustering.shape )
         
         pixels = clustering.size
@@ -940,6 +947,42 @@ class KsSimilarity:
 
         return len(np.unique(connected_clusters)), avg_cluster_size, size_count
     
+
+    def density(self, radius:int, circular=False, test_clustering="initial", plotting=False):
+        """computes average share of surrounding area for pixels of each cluster.
+        
+        Parameters: - clustering: np.ndarray, the clustering that is tested for cluster density
+                    - radius: the radius that determines the size of the search area around each pixel
+                    - circular: if true: compute euklidean dist to determine wether in area
+                                else: take rectangular area
+                    
+        returns:    - dict: cluster 
+                        -> avg share of same cluster pixels over all pixels in that cluster in given radius."""
+        
+        clustering_dict = {'initial':self.initial_clustering, 'core':self.clustering, 'filled':self.filled_clustering}
+        tested_clustering = clustering_dict[test_clustering]
+
+        density_dict = defaultdict(list)
+        for row in range(tested_clustering.shape[0]):
+            for col in range(tested_clustering.shape[1]):
+                cl = tested_clustering[row, col]
+                surrounding_clusters = get_surrounding_area(tested_clustering, (row,col), radius=radius, circular=circular)
+                same_cl = sum(c == cl for c in surrounding_clusters)
+                share = same_cl/len(surrounding_clusters)
+                density_dict[cl].append(share)
+        
+        avg_density_dict = {}
+        for cl in density_dict.keys():
+            avg_density_dict[cl] = mean(density_dict[cl])
+
+        if plotting:
+            df = pd.DataFrame([(k,i) for k in density_dict.keys() for i in density_dict[k]], 
+                              columns=['cluster','density'])
+            sns.violinplot(data=df, x="cluster", y="density", linewidth=0.5, width=0.95)
+
+        return avg_density_dict
+    
+    
     def core_pixel_per_cluster(self):
         """returns: dict: cluster-> (amount_core_pixel, share_core_pixel)"""
         self.initial_clustering
@@ -1258,11 +1301,13 @@ def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
     amount_connencted_cluster=[]
     avg_size_cc=[]
     share_core_pixel=[]
+    density=[]
 
     for cl in dict_of_KsSimilarity.keys():
         ksSimilarity = dict_of_KsSimilarity[cl]
         found_masses_for_cluster = ksSimilarity.found_masses_for_cluster(len_only=True)
         amount_cc, avg_cl_size, _ = ksSimilarity.connected_cluster_size()
+        cl_density = ksSimilarity.density(radius=1, circular=False)
         for c in list(found_masses_for_cluster.keys()):
             names.append(cl)
             amount_found_masses.append(found_masses_for_cluster[c])
@@ -1270,6 +1315,7 @@ def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
             amount_connencted_cluster.append(amount_cc)
             avg_size_cc.append(avg_cl_size)
             share_core_pixel.append(len(ksSimilarity.clusterwise_core_pixel[c]))
+            density.append(cl_density[c])
     
 
     data_summary = pd.DataFrame({"cluster_KsSimilarity": names,
@@ -1277,7 +1323,8 @@ def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
                                  "amount_found_masses": amount_found_masses,
                                  "amount_connencted_cluster": amount_connencted_cluster,
                                  "avg_size_cc": avg_size_cc,
-                                 "share_core_pixel": share_core_pixel})
+                                 "share_core_pixel": share_core_pixel,
+                                 "density":density})
     return data_summary
 
 def homogeneity(clustering:np.array, ignore_zero=True):
@@ -1327,6 +1374,28 @@ def homogeneity(clustering:np.array, ignore_zero=True):
         summary[c] = {"centroid":center, "mean":cl_mean, "std":cl_std, "L(3*std)":L}
         
     return summary, distances
+
+
+def get_surrounding_area(matrix:np.ndarray,p,radius=1, circular=False):
+    """return list of all values in surrounding area
+    Parameters: - circular """
+    r = matrix.shape[0]
+    c = matrix.shape[1]
+    search_area = matrix[max(p[0]-radius,0) : min(p[0]+radius+1,r),  max(p[1]-radius,0) : min(p[1]+radius+1,c)]
+    if not circular:
+        return search_area.flatten().tolist()
+    
+    seach_area_circular = []
+    for row in range(max(p[0]-radius,0), min(p[0]+radius+1,r)):
+        for col in range( max(p[1]-radius,0), min(p[1]+radius+1,c)):
+            if row == p[0] and col == p[1]:
+                continue
+            eukl_dist = math.sqrt((row - p[0])*(row - p[0]) + (col - p[1])*(col - p[1]))
+            if eukl_dist <= radius:
+                seach_area_circular.append(matrix[row,col])
+
+    return seach_area_circular
+
 
 
 
