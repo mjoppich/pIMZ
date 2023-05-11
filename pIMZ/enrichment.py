@@ -159,7 +159,7 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
         ax.set_xlabel('Neg. Log. Adj. p-Value')
         ax.set_yticks(df.termtitle)
         ax.set_yticklabels(df.termtitle, fontdict={'horizontalalignment': 'right'})
-        plt.grid(b=None)
+        plt.grid(False)
         plt.tight_layout()
         plt.yticks(fontsize=16)
         plt.show()
