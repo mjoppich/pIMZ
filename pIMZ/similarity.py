@@ -7,7 +7,7 @@ import math
 from collections import defaultdict, Counter
 import glob
 import shutil, io, base64, abc
-from typing import Dict, Any, Iterable, Union
+from typing import Dict, Any, Iterable
 
 # general package
 from natsort import natsorted
@@ -82,174 +82,119 @@ from sklearn.cluster import KMeans
 from scipy.spatial import distance
 
 
-#TODO:
-
-
-
-def KS_test( mass_array:np.array, clustering:np.array, cluster_considered=None, background_mass=0, general_background=False, mass=0, method=stats.kstest, th_t=10, a=0.05, th_ks=0.3, th_ws=10):
-    """ returns: dict: key = cluster, value = clustered statistics, clustered p value, unclutered statistics, unclustered p value
-
-        ttest wrong implemented... -> results are empty/ no masses meet conditions:
-        add_mass = [c for idx,(ks, p) in enumerate(ks_per_cluster[c]) if (abs(ks)< stats.t.ppf(1.0 - a, deg_free[c][idx]) and p < a)] #for ttest----
-        lines outcommented:  ttest----   
+def stats_test( mass_array:np.array, clustering:np.array, method=stats.kstest, th_t=10, a=0.05, th_ks=0.3, th_ws=10, background_mass=0):
+    """ 
+    for the intensity array of one mass, for each cluster it is tested weather this mass is significantly overexpressed 
+    comared to each other cluster individually. 
     
+    Args:
+            - mass_array: np.ndarray of mz values 
+            - clustering: np.array of same shape as mass_array: discrite values that determine clusters
+            **
+            - method: statistical methos that is used to determine significante of a mass for a cluster 
+            - th_t, th_ks, th_ws: significance thresholds for test_values 
+            - a: alpha for p_value
+            
+    returns: 
+            dict: { key = cluster : value = [( statistics_value, p_value ), ( statistics_value, p_value ), ...] }
+                > the list of results includes all significant results. If len == number of clusters-1, 
+                the mass is significantly overexpressed in the tested cluster, comared to any other cluster 
     """
-    
-    # classes_clustered saves all clustered intensity values for HE categories
-    classes_clustered = defaultdict(list) # mass_clustered: 0 is background
 
     # classes_unclusteres saves all unclustered intensities values for HE categories
     classes_unclustered = defaultdict(list) # mass_array: 0 is background
     classes_he = defaultdict(list)
 
-    cluster_range = np.unique(clustering)
-    
-    if cluster_considered is None:
-        cluster_considered = cluster_range
+    cluster_considered = np.unique(clustering)
     
     # -----do pre clustering
-    values_for_thresholding = mass_array[clustering != background_mass]
-    for c in cluster_range:
+    #values_for_thresholding = mass_array[clustering != background_mass]
+    for c in cluster_considered:
         classes_he[c] = [tuple(x) for x in np.argwhere(clustering == c)]
         
         relevant_intensities = mass_array[ clustering == c ]
         classes_unclustered[c] = relevant_intensities[relevant_intensities != 0]
-    unclassifierd_unclustered = defaultdict(list)
-    #print(f'cluster 1:{classes_unclustered[1]}')
 
-    # KS test nur gegen einen cluster: cluster considered
-    if type(cluster_considered)!=type(cluster_range):
-        # compare expression in one cluster to every other seperatly-> intersection
-        ks_per_cluster=defaultdict(list)
-        # foreground cluster is consdered cluster
-        foreground_intensities = classes_unclustered[cluster_considered]
-        for c in cluster_range:
-            #background cluster is c
-            background_intensities = classes_unclustered[c]
-            if len(foreground_intensities) == 0:
-                pass
-                #ks_per_cluster[c] = None, 1.0
-            elif len(background_intensities)==0:
-                # no intensities in background
-                ks_per_cluster[cluster_considered].append((1, 0))
+    
+    # compare expression in one cluster to every other seperatly
+    stats_per_cluster=dict()
 
-            else:
-                #KS_test_unclustered = stats.kstest(foreground_intensities, background_intensities, alternative="less")
-                KS_test_unclustered = stats.kstest(foreground_intensities, background_intensities, alternative="less")
-                ks_per_cluster[cluster_considered].append((KS_test_unclustered[0], KS_test_unclustered[1]))
+    if method==stats.wilcoxon:
+        # find samplesize of smallest cluster
+        amount_classes_unclustered = {}
+        for c in classes_unclustered.keys():
+            amount_classes_unclustered[c] = len(classes_unclustered[c])
+        smallest_cluster_size = min(amount_classes_unclustered.values())
+        # random sampling to get equal sizes
+        wilcoxon_random_draw = {}
+        for c in classes_unclustered.keys():
+            random_draw = random.sample(classes_unclustered[c].tolist(), smallest_cluster_size)
+            wilcoxon_random_draw[c] = random_draw
 
-        return ks_per_cluster
-
-    # KS test
-    if general_background:
-        ks_per_cluster = {}
-        background_intensities = np.concatenate( [classes_unclustered[x] for x in cluster_range ] ) #if x != c
-        
-        # compare expression in one custer compared to rest
         for c in cluster_considered:
-            foreground_intensities = classes_unclustered[c]
-            
-            if len(foreground_intensities) == 0 or len(background_intensities) == 0:
-                ks_per_cluster[c] = None, 1.0
-            else:
-                #KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
-                KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
-                ks_per_cluster[c] = KS_test_unclustered[0], KS_test_unclustered[1]
+            stats_per_cluster[c] = [(0, 1)] * len(cluster_considered)
 
-        return ks_per_cluster
-    
-    else:
-        # compare expression in one cluster to every other seperatly-> intersection
-        #background_intensities = np.concatenate( [classes_unclustered[x] for x in cluster_range ] ) #if x != c
-        ks_per_cluster=dict()
-
-        if method==stats.wilcoxon:
-            # find samplesize of smallest cluster
-            amount_classes_unclustered = {}
-            for c in classes_unclustered.keys():
-                amount_classes_unclustered[c] = len(classes_unclustered[c])
-            smallest_cluster_size = min(amount_classes_unclustered.values())
-            # random sampling to get equal sizes
-            wilcoxon_random_draw = {}
-            for c in classes_unclustered.keys():
-                print("random sampling")
-                print(type(classes_unclustered[c].tolist()))
-                print(smallest_cluster_size)
-                random_draw = random.sample(classes_unclustered[c].tolist(), smallest_cluster_size)
-                wilcoxon_random_draw[c] = random_draw
-
-            for c in cluster_considered:
-                ks_per_cluster[c] = [(0, 1)] * len(cluster_considered)
-
-                foreground_intensities = wilcoxon_random_draw[c]
-                for bi, b in enumerate(cluster_considered):
-                    if c == b:
-                        continue
-                    background_intensities = wilcoxon_random_draw[b]
-                    
-                    if len(foreground_intensities) == 0 or len(background_intensities) == 0:
-                        pass
-                    else:
-                        KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# wilcoxon----
-                        ks_per_cluster[c][bi] = (KS_test_unclustered[0], KS_test_unclustered[1])
-            
-
-        else:
-            for c in cluster_considered:
-                ks_per_cluster[c] = [(0, 1)] * len(cluster_considered)
-
-                foreground_intensities = classes_unclustered[c]
-                for bi, b in enumerate(cluster_considered):
-                    if c == b:
-                        continue
-                    background_intensities = classes_unclustered[b]
-                    
-                    if len(foreground_intensities) == 0 :
-                        pass
-                    elif len(background_intensities) == 0:
-                        ks_per_cluster[c][bi] = (th_t+1, 0)
-                    else:
-                        if method==stats.kstest:
-                            KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
-                        elif method==stats.ttest_ind:
-                            KS_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# ttest----
-                        ks_per_cluster[c][bi] = (KS_test_unclustered[0], KS_test_unclustered[1])
-                        #print(f'ks,p: {KS_test_unclustered[0], KS_test_unclustered[1]}')
-            
-        #print(f"mass past else: {mass}")
-        #th_ks = 0.3
-        #th_ws = 0.3
-        #th_t = 20
-        #a = 0.001
-        #a = 0.05
-        background_amount= len(cluster_considered)-1
-        ks_per_cluster_sig=defaultdict(list)
+            foreground_intensities = wilcoxon_random_draw[c]
+            for bi, b in enumerate(cluster_considered):
+                if c == b:
+                    continue
+                background_intensities = wilcoxon_random_draw[b]
+                
+                if len(foreground_intensities) == 0 :
+                    pass
+                elif len(background_intensities) == 0:
+                    stats_per_cluster[c][bi] = (th_ws+1, 0)
+                else:
+                    stats_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# wilcoxon----
+                    stats_per_cluster[c][bi] = (stats_test_unclustered[0], stats_test_unclustered[1])
         
-        for c in ks_per_cluster.keys():
-            #add_mass = [c for (ks, p) in ks_per_cluster[c] if (ks > 0 and p < 1)] 
-            if method==stats.kstest:
-                add_mass = [c for (ks, p) in ks_per_cluster[c] if (ks > th_ks and p < a)]
-            elif method==stats.ttest_ind:
-                add_mass = [c for (ks, p) in ks_per_cluster[c] if (abs(ks) > th_t  and p < a)]
-            elif method==stats.wilcoxon:
-                add_mass = [c for (ks, p) in ks_per_cluster[c] if (abs(ks) > th_ws  and p < a)]
-            if len(add_mass)==background_amount:
-                #print(f"{mass}: true")
-                # add the mean 
-                ks_stat_mean = mean([i[0] for i in ks_per_cluster[c] if i[0]!=0])
-                p_value_mean = mean([i[1] for i in ks_per_cluster[c] if i[1]!=1])
-                ks_per_cluster_sig[c].append((ks_stat_mean, p_value_mean))
-            elif len(add_mass)>(background_amount*0.85):
-                pass
-            
-        #print(f"mass end: {mass}") 
 
-        return ks_per_cluster_sig
+    else:
+        for c in cluster_considered:
+            stats_per_cluster[c] = [(0, 1)] * len(cluster_considered)
+
+            foreground_intensities = classes_unclustered[c]
+            for bi, b in enumerate(cluster_considered):
+                if c == b:
+                    continue
+                background_intensities = classes_unclustered[b]
+                
+                if len(foreground_intensities) == 0 :
+                    pass
+                elif len(background_intensities) == 0:
+                    if method==stats.ttest_ind:
+                        stats_per_cluster[c][bi] = (th_t+1, 0)
+                    else: #ks_test
+                        stats_per_cluster[c][bi] = (1, 0)
+                else:
+                    if method==stats.kstest:
+                        stats_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
+                    elif method==stats.ttest_ind:
+                        stats_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# ttest----
+                    stats_per_cluster[c][bi] = (stats_test_unclustered[0], stats_test_unclustered[1])
+        
+    background_amount = len(cluster_considered)-1
+    stats_per_cluster_sig=defaultdict(list)
+    
+    for c in stats_per_cluster.keys():
+        if method==stats.kstest:
+            add_mass = [c for (ks, p) in stats_per_cluster[c] if (ks > th_ks and p < a)]
+        elif method==stats.ttest_ind:
+            add_mass = [c for (test_value, p) in stats_per_cluster[c] if (abs(test_value) > th_t  and p < a)]
+        elif method==stats.wilcoxon:
+            add_mass = [c for (test_value, p) in stats_per_cluster[c] if (abs(test_value) > th_ws  and p < a)]
+        if len(add_mass)==background_amount:
+            # add the mean 
+            test_stat_mean = mean([i[0] for i in stats_per_cluster[c] if i[0]!=0])
+            p_value_mean = mean([i[1] for i in stats_per_cluster[c] if i[1]!=1])
+            stats_per_cluster_sig[c].append((test_stat_mean, p_value_mean))
+
+    return stats_per_cluster_sig
     
 
 
 
-class KsSimilarity:
+class StatsSimilarity:
 
     def __init__(self, spec_mz_values:SpectraRegion, initial_cl_metaseg=False):
         self.spec = spec_mz_values
@@ -257,7 +202,6 @@ class KsSimilarity:
         self.region_array = np.copy(self.spec.region_array)
         if initial_cl_metaseg:
             self.initial_clustering = spec_mz_values.meta['segmented'].copy()
-            self.initial_clustering = self.initial_clustering +1
         else:
             self.initial_clustering = None
         self.core_pixel = None
@@ -268,36 +212,32 @@ class KsSimilarity:
         self.filled_clustering = None
         self.quality_masses = None
         self.quality_pixel = None
-        self.count=0
         self.data_summary = None # find relevant masses
         self.analysis_results = None # save perform_analysis data here
-        self.cluster_distances = None
 
-    def perform_analysis(self, passed_clustering=np.empty([0, 0]), weight_ks=1, weight_p=1, weight_c=1, features=[], iterative=False, th_t=10, a=0.05, method=stats.ttest_ind, raw=False):
+    def perform_analysis(self, passed_clustering=np.empty([0, 0]), weight_stats=1, weight_p=1, weight_c=1, features=[], th_t=10, a=0.05, method=stats.ttest_ind, parallel=True):
         """ This function finds masses that represent a certein cluster 
         
-            input:  mendatory:  - spec_mz_values: mz values in SpectraRegion format
-                    optional:   - clustering: array, default is spec_mz_values.meta["segmented"]
-                                - weights: floats 
-                                - features: indices of masses that analysis should be done on, default all
-                                - iterative: Use itaerative process when performing analysis 
-                                    to find core pixels(=most homogene tissue) and relevant masses per cluster
+        Args:
+            - passed_clustering: np.array discrete values, clustering for self.region_array, shape of self.region_array
+            **
+            - weights, th_t, a, method: as in relevance_ranking
+            - parallel: weather or not stats_test is performed parallelized for masses
+            - features: indices of masses that analysis should be done on, default all
+        
 
-            return: dataframe with all information for masses per cluster such as 
-                    - ks statistics
-                    - p-values
-                    - relevance score
+        return: dataframe with all information for masses per cluster such as 
+                - ttest(/ wilcoxon/ ks) statistics
+                - p-values
+                - relevance score
         """
-        self.initial_clustering = passed_clustering
 
         if passed_clustering.shape != self.region_array.shape[0:2]:
-            print("Taking spec clustering")
+            print("No clustering passed, or differing shape. Using meta['segmented'] clustering")
             self.clustering = self.spec.meta["segmented"].copy() # initial clustering for iterative process
-            self.clustering = self.clustering + 1
-
             self.clustering = self.clustering.astype(int)
         else:
-            print("Saving new clustering")
+            print("Saving passed clustering")
             self.clustering = passed_clustering
 
         clusters=np.unique(self.clustering)
@@ -309,25 +249,8 @@ class KsSimilarity:
         considered_masses = self.excluding_outliers(self.region_array, features)
         print("Identified {} of {} masses for processing.".format(len(considered_masses), self.region_array.shape[2]))
         
-        ks_test_unclustered = self.find_relevant_masses_by_ks(self.region_array, considered_masses, self.clustering, cluster_range=clusters, for_clustered=False, iterative=iterative, th_t=th_t, a=a, method=method)
-        # mass, cluster, ks, p, p_mult
-        # TODO only regard pixels != 0 in clustering
-        if iterative:
-            ms_df = self.dict_to_dataframe(ks_test_unclustered[0]) 
-            core_clustering = ks_test_unclustered[1]
-            print(f"ks_test_unclustered[1].shape: {core_clustering.shape}")
-            print(f"region.array:{self.region_array.shape}")
-            plt.imshow(core_clustering)
-            # ---------self.clustering: replacing unused pixels by -1. Actually: replace the self.clustering completely
-            for r in range(self.clustering.shape[0]):
-                for c in range(self.clustering.shape[1]):
-                    if core_clustering[r,c] == 0:
-                        self.clustering[r,c] = -1
-            # ---------
-            if raw:
-                return ms_df
-        else:
-            ms_df = self.dict_to_dataframe(ks_test_unclustered) 
+        stats_test_unclustered = self.find_relevant_masses_by_stats_test(self.region_array, considered_masses, self.clustering, cluster_range=clusters, th_t=th_t, a=a, method=method, parallel=parallel)
+        ms_df = self.dict_to_dataframe(stats_test_unclustered) 
 
         if not 'p_value' in ms_df.columns:
             print("not 'p_value' in ms_df.columns")
@@ -336,15 +259,13 @@ class KsSimilarity:
         # multiple testing correction
         rej, elemAdjPvals, _, _ = multipletests(ms_df["p_value"], alpha=a, method='fdr_bh', is_sorted=False, returnsorted=False)
         ms_df["p_value_adj"] = elemAdjPvals
+        self.analysis_results = ms_df 
         # dict: mass is key -> needed lateron for relevence ranking
-        ks_p_dict = self.dataframe_to_mass_dict(ms_df)
+        stats_p_dict = self.dataframe_to_mass_dict(ms_df)
         # dict: cluster is key
         rel_masses_for_cluster = self.dataframe_to_cluster_dict(ms_df)
-        # add column: is unique?
-        #ms_df = self.find_unique_masses_for_cluster(rel_masses_for_cluster, ms_df)
         # add score for relevance
-        self.analysis_results = ms_df 
-        ms_df = self.relevance_ranking(ks_test=ks_p_dict, considered_masses=rel_masses_for_cluster, clusters=clusters, weight_ks=weight_ks, weight_p=weight_p, weight_c=weight_c, cluster_amount=len(clusters), df_ms=ms_df)
+        ms_df = self.relevance_ranking(stats_test=stats_p_dict, considered_masses=rel_masses_for_cluster, clusters=clusters, weight_stats=weight_stats, weight_p=weight_p, weight_c=weight_c, cluster_amount=len(clusters), df_ms=ms_df)
         self.analysis_results = ms_df 
         return ms_df
 
@@ -364,46 +285,36 @@ class KsSimilarity:
                 considered_masses.add(mass)
                 
             continue
-            
-            #plt.imshow(region_array[:,:,0])
-            list_mass = sorted(list_mass)
-            # end index is the intensity above which points will be considered as outliers and therefore ignored
-            len(list_mass)
-            end_index=int(math.floor(len(list_mass)*0.95))
-            th_outliers = list_mass[end_index]
-            if th_outliers > 0:
-                considered_masses[mass] = th_outliers
-                
                 
         return considered_masses
 
 
     def dataframe_to_mass_dict(self, ms_df):
         """input: dataframe
-            return: dict: {mass: {c1:(ks,p),c2:(ks,p) } }"""
-        ks_p_dict = {}
+            return: dict: {mass: {c1:(stats,p),c2:(stats,p) } }"""
+        stats_p_dict = {}
         for i in ms_df.index:
             c = ms_df["cluster_name"][i]
             mass = ms_df["mass_name"][i]
-            ks = ms_df["ks_value"][i]
+            stats = ms_df["test_value"][i]
             p = ms_df["p_value_adj"][i]
-            if mass in ks_p_dict.keys():
-                ks_p_dict[mass].update({c:(ks,p)})
+            if mass in stats_p_dict.keys():
+                stats_p_dict[mass].update({c:(stats,p)})
             else:
-                ks_p_dict[mass]={c:(ks,p)}
-        return ks_p_dict
+                stats_p_dict[mass]={c:(stats,p)}
+        return stats_p_dict
 
 
     def dataframe_to_cluster_dict(self, mf_df):
         """input: dataframe
             return: dict: cluster: all masses """
-        relevant_masses_by_cluster_raw = defaultdict(list)
+        relevant_masses_by_cluster = defaultdict(list)
         for i in mf_df.index:
                 c = mf_df["cluster_name"][i]
                 mass = mf_df["mass_name"][i]
-                relevant_masses_by_cluster_raw[c].append(mass)
-        relevant_masses_by_cluster_raw= dict(sorted(relevant_masses_by_cluster_raw.items()))
-        return relevant_masses_by_cluster_raw
+                relevant_masses_by_cluster[c].append(mass)
+        relevant_masses_by_cluster= dict(sorted(relevant_masses_by_cluster.items()))
+        return relevant_masses_by_cluster
 
 
     def find_unique_masses_for_cluster(self, rel_masses_for_cluster, df_ms=pd.DataFrame([])):
@@ -477,18 +388,26 @@ class KsSimilarity:
         return 1 - (c / (cluster_amount-1))
 
 
-    def ks_value_normalization(self, ks):
-        if ks<0:
+    def stats_test_value_normalization(self, stats):
+        if stats<0:
             return 0
-        max_ks = max(self.analysis_results["ks_value"])
-        return ks/max_ks
+        max_stats = max(self.analysis_results["test_value"])
+        return stats/max_stats
     
     
-    def relevance_ranking(self, ks_test:dict, considered_masses:defaultdict(list), clusters:list, weight_ks:float, weight_p: float, weight_c:float, cluster_amount:int, df_ms=pd.DataFrame([])):
-        """weight_p: 1/p * weight_p, weight_c: is mass only relevant in one cluster? 1/amount of occurence * weight_c  
-        Einzelne Terme normalisieren mega relevant ist 1 unrelevant ist 0
-        considered_masses[c] = mass1, mass2, ...
-        ks_test: {mass:{cluster:(ks,p), cluster:(ks,p)}}
+    def relevance_ranking(self, stats_test:dict, considered_masses:defaultdict(list), clusters:list, weight_stats:float, weight_p: float, weight_c:float, cluster_amount:int, df_ms=pd.DataFrame([])):
+        """
+        Args:
+            - stats_test: {mass:{cluster:(stats,p), cluster:(stats,p)}}, result of dataframe_to_mass_dict()
+            - considered_masses: default_dict: {[cluster1]:[mass1, mass2,...], [cluster2]:[...] ...}
+            - clusters: clusters that are cinsidered (usually all)
+            - weight_stats: stats_value * weight_stats
+            - weight_p: 1/p_adj * weight_p, 
+            - weight_c: is mass only relevant in one cluster? 1/amount of occurence * weight_c  
+            - cluster_amount
+            **
+            - df_ms: dataframe 
+           
         return: dict: c-> sorted list of relevant masses, or add column in dataframe, if given"""
         
         if df_ms.shape==(0,0):
@@ -497,16 +416,15 @@ class KsSimilarity:
             for c in clusters:
                 cluster_dict_relevance = {}
                 for mass in considered_masses[c]:
-                    ks_value = ks_test[mass][c][0]
-                    ks_value = self.ks_value_normalization(ks_value)
-                    # here, padj needs to be used, removing multiple testing error
+                    test_value = stats_test[mass][c][0]
+                    test_value = self.stats_test_value_normalization(test_value)
                     idx = self.analysis_results.index[(self.analysis_results['mass_name']==mass)] & self.analysis_results.index[(self.analysis_results['cluster_name']==c)]
                     idx = list(idx)[0]
                     p_value_adj = self.analysis_results["p_value_adj"][idx]
                     p_value_adj = self.p_value_normalization(p_value_adj)
-                    amount_of_occurence = self.cluster_am_normalization(len(ks_test[mass]), cluster_amount=cluster_amount)
-                    score = ks_value * weight_ks + p_value_adj * weight_p + amount_of_occurence * weight_c
-                    score = score/(weight_ks + weight_p + weight_c)
+                    amount_of_occurence = self.cluster_am_normalization(len(stats_test[mass]), cluster_amount=cluster_amount)
+                    score = test_value * weight_stats + p_value_adj * weight_p + amount_of_occurence * weight_c
+                    score = min(score/(weight_stats + weight_p + weight_c),1)
                     cluster_dict_relevance[mass] = score
                 for mass in sorted(cluster_dict_relevance, key=cluster_dict_relevance.get, reverse=True):
                     if c in sorted_relevance_by_cluster.keys():
@@ -522,18 +440,17 @@ class KsSimilarity:
                 if c not in considered_masses.keys():
                     continue
                 for mass in considered_masses[c]:
-                    ks_value = ks_test[mass][c][0]
-                    ks_value = self.ks_value_normalization(ks_value)
-                    # here, padj needs to be used, removing multiple testing error
+                    test_value = stats_test[mass][c][0]
+                    test_value = self.stats_test_value_normalization(test_value)
                     idx = self.analysis_results.index[(self.analysis_results['mass_name']==mass)] & self.analysis_results.index[(self.analysis_results['cluster_name']==c)]
                     idx = list(idx)[0]
                     p_value_adj = self.analysis_results["p_value_adj"][idx]
                     p_value_adj = self.p_value_normalization(p_value_adj)
 
-                    #p_value_adj = self.p_value_normalization(ks_test[mass][c][1])
-                    amount_of_occurence = self.cluster_am_normalization(len(ks_test[mass]), cluster_amount=cluster_amount)
-                    score = ks_value * weight_ks + p_value_adj * weight_p + amount_of_occurence * weight_c
-                    score = score/(weight_ks + weight_p + weight_c)
+                    #p_value_adj = self.p_value_normalization(stats_test[mass][c][1])
+                    amount_of_occurence = self.cluster_am_normalization(len(stats_test[mass]), cluster_amount=cluster_amount)
+                    score = test_value * weight_stats + p_value_adj * weight_p + amount_of_occurence * weight_c
+                    score = min(score/(weight_stats + weight_p + weight_c),1)
                     index_mass = df_ms.index[(df_ms['mass_name'] ==mass) & (df_ms['cluster_name'] == c)].tolist()[0]
                     df_ms.at[index_mass, "relevance_score"] = score
             return df_ms
@@ -558,93 +475,94 @@ class KsSimilarity:
     
             
         
-    def find_relevant_masses_by_ks(self, region_array, masses, clustering, cluster_range=range(5), a=0.05, th_t=10, th_ks=0.5, for_clustered=True, for_unclustered=True, iterative=False, method=stats.ttest_ind, parallel=False):
-        """returns two dictionarys: clustered and unclustered save all masses that have a p-value<a and ks >0.1 with results"""
-        if for_clustered and for_unclustered:
-            return None
-        elif for_unclustered:
-            print("For unclustered part")
- 
-            ks_test_unclustered = {}
-            
-            masses = list(masses)
-            #method=stats.ttest_ind
-            #method=stats.wilcoxon
-            print(f"method: {method}")
-            if parallel:
-
-                from joblib import Parallel, delayed, parallel_backend
-                print("in loky")
-                with parallel_backend('loky', n_jobs=8):
-                    results = Parallel()(delayed(KS_test)(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=method, th_t=th_t, a=a) for mass in masses)
-    
-                    background_amount= len(np.unique(clustering))-1
-                    for idx, res in enumerate(results): #???
-                    #for res in results:
-                        for c in res:
-                            # ks_test_unclustered[(res, c)] = (res[c][0], res[c][1])
-                            # ks_test_unclustered[(masses[idx], c)] = (res[c][0], res[c][1]) #???
-                            ks_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) #???
-
-                self.data_summary = ks_test_unclustered
-
-                return ks_test_unclustered
-            else: 
+    def find_relevant_masses_by_stats_test(self, region_array, masses, clustering, cluster_range=range(5), a=0.05, th_t=10, th_ks=0.5, for_unclustered=True, method=stats.ttest_ind, parallel=True):
+        """returns two dictionarys: clustered and unclustered save all masses that have a p-value<a and test_value >0.1 with results"""
         
-                bar = makeProgressBar()
-                results = (KS_test(region_array[:,:, mass], clustering=clustering, general_background=False, mass=mass, method=method, th_t=th_t, a=a) for mass in bar(masses))
+        stats_test_unclustered = {}
+
+        masses = list(masses)
+        print(f"method: {method}")
+        if parallel:
+
+            from joblib import Parallel, delayed, parallel_backend
+            print("in loky")
+            with parallel_backend('loky', n_jobs=8):
+                results = Parallel()(delayed(stats_test)(region_array[:,:, mass], clustering=clustering, method=method, th_t=th_t, a=a) for mass in masses)
 
                 background_amount= len(np.unique(clustering))-1
-                for idx, res in enumerate(results): #???
-                #for res in results:
+                for idx, res in enumerate(results): 
                     for c in res:
-                        # ks_test_unclustered[(res, c)] = (res[c][0], res[c][1])
-                        # ks_test_unclustered[(masses[idx], c)] = (res[c][0], res[c][1]) #???
-                        ks_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) #???
+                        stats_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) 
 
-                self.data_summary = ks_test_unclustered
+            self.data_summary = stats_test_unclustered
 
-                return ks_test_unclustered
+            return stats_test_unclustered
+        else: 
 
-        elif for_clustered:
-            return None
+            bar = makeProgressBar()
+            results = (stats_test(region_array[:,:, mass], clustering=clustering, method=method, th_t=th_t, a=a) for mass in bar(masses))
+
+            background_amount= len(np.unique(clustering))-1
+            for idx, res in enumerate(results): 
+                for c in res:
+                    stats_test_unclustered[(masses[idx], c)] = (res[c][0][0], res[c][0][1]) 
+
+            self.data_summary = stats_test_unclustered
+
+            return stats_test_unclustered
+
+
+
+    def iterative_cluster_assignment(self, clustering:np.array, th_t:float, a:float, method=stats.ttest_ind, max_iteration=5, parallel=True):
+        """
+            > performs analysis setting: 
+                - self.analysis_results
+                - self.clustering
+                - self.core_pixel
+                - self.clusterwise_core_pixel
+                - self.quality_masses
+                - self.quality_pixel
+                - self.data_summary
+
+        Args:
+            - clustering: eg meta['segmented']
+            - th_t: significance threshhold for test statistics
+            - a: significance threshhold for p value
+            - method: statistical test 
+            **
+            - max_iterations: for iterative optimization
+            - parallel: weather or not masses are done parallel
+            
+        return:
+            - self clustering
         
-        return None
-
-
-    def iterative_cluster_assignment(self, clustering, th_t, a, method=stats.ttest_ind, max_iteration=5, raw=False):
+        """
+        self.initial_clustering=clustering.copy()
         
         current_clustering = clustering.copy()
-        if 0 in current_clustering.flatten():
-            print('current_clustering = current_clustering+1,  as clustering contains 0')
-            current_clustering = current_clustering+1
-        last_clustering = np.zeros( current_clustering.shape )
+        b = min(current_clustering.flatten())-1 # should be -1 for meta.['segmented']
+        print(f'choosing background value {b}')
+        last_clustering = np.full( current_clustering.shape , b, dtype=int)
         
         pixels = clustering.size
                      
         current_iteration = 0
 
-        quanlity_analysis_pixel = defaultdict(list)# defaultdicts 1-10
-        quanlity_analysis_masses = defaultdict(list)# defaultdicts 1-10
+        quanlity_analysis_pixel = defaultdict(list)# defaultdicts 0-9
+        quanlity_analysis_masses = defaultdict(list)# defaultdicts 0-9
             
               
         while current_iteration < max_iteration and ( pixels-np.sum(current_clustering == last_clustering) ) > 10:
             
             # find cluster-specific masses
-            #ms_df = self.perform_analysis()
-            
             print("Current Iteration", current_iteration)
             
             availClusters = np.unique(current_clustering)            
             cluster2masses = defaultdict(list)
-            
             last_clustering = np.copy(current_clustering)
             
-            print("Performing KS Analysis for iteration {}".format(current_iteration))
-            #TODO i think this is needed!
-            #use_clustering = (current_clustering-1)
-            #use_clustering[use_clustering < 0] = 0
-            ms_df = self.perform_analysis(passed_clustering=np.copy(current_clustering),th_t=th_t, a=a, method=method, raw=raw)
+            print("Performing stats test Analysis for iteration {}".format(current_iteration))
+            ms_df = self.perform_analysis(passed_clustering=np.copy(current_clustering),th_t=th_t, a=a, method=method, parallel=parallel)
             
             if not 'p_value' in ms_df.columns:
                 print("not 'p_value' in ms_df.columns")
@@ -662,7 +580,7 @@ class KsSimilarity:
                 cluster2masses[clusterID] = list(sub_df.mass_name)
                 
                 
-            current_clustering = np.zeros(current_clustering.shape)
+            current_clustering = np.full( current_clustering.shape , b, dtype=int)
             for clusterID in cluster2masses:
                 
                 pixel2high_expressed = np.zeros( last_clustering.shape )
@@ -702,26 +620,25 @@ class KsSimilarity:
         return current_clustering
         
 
-    def dict_to_dataframe(self, ks_dict):
+    def dict_to_dataframe(self, stats_test_dict):
         my_data = defaultdict(list)
 
         m2c = defaultdict(set)
-        for key in ks_dict:
+        for key in stats_test_dict:
             mass = key[0]
             cluster = key[1]
             m2c[mass].add(cluster)
 
-        for key in ks_dict:
+        for key in stats_test_dict:
             my_data["mass_name"].append(key[0])
             my_data["cluster_name"].append(key[1])
-            my_data["ks_value"].append(ks_dict[key][0])
-            my_data["p_value"].append(ks_dict[key][1])
-            #my_data["p_value_adj"].append(ks_dict[key][1]*5*16000)
+            my_data["test_value"].append(stats_test_dict[key][0])
+            my_data["p_value"].append(stats_test_dict[key][1])
             my_data["rel_in_clusters"].append(tuple(m2c[key[0]]))
             my_data["unique_for_cluster"].append(len(m2c[key[0]])==1)
 
-        ks_dataframe = pd.DataFrame.from_dict(my_data)
-        return ks_dataframe
+        stats_dataframe = pd.DataFrame.from_dict(my_data)
+        return stats_dataframe
 
     
     def remove_similar_masses(self, mass_window_range=20):
@@ -761,13 +678,13 @@ class KsSimilarity:
         if add_to_df:
             print("adding statistics for masses to results df")
             if not 'sensitivity' in self.analysis_results.columns:
-                self.analysis_results['sensitivity'] = "NaN"
+                self.analysis_results.loc[:,'sensitivity'] = "NaN"
             if not 'specificity' in self.analysis_results.columns:
-                self.analysis_results['specificity'] = "NaN"
+                self.analysis_results.loc[:,'specificity'] = "NaN"
             if not 'false_neg_rate' in self.analysis_results.columns:
-                self.analysis_results['false_neg_rate'] = "NaN"
+                self.analysis_results.loc[:,'false_neg_rate'] = "NaN"
             if not 'false_pos_rate' in self.analysis_results.columns:
-                self.analysis_results['false_pos_rate'] = "NaN"
+                self.analysis_results.loc[:,'false_pos_rate'] = "NaN"
 
 
             if for_all:
@@ -804,10 +721,10 @@ class KsSimilarity:
                     false_pos_rate = np.sum( (binary_mass == 1) & (self.clustering != cluster) ) / np.sum(self.clustering != cluster)
                     false_neg_rate = np.sum( (binary_mass == 0) & (self.clustering == cluster) ) / np.sum(self.clustering == cluster)
 
-                    self.analysis_results['sensitivity'][ind] = sensitivity
-                    self.analysis_results['specificity'][ind] = specificity
-                    self.analysis_results['false_pos_rate'][ind] = false_pos_rate
-                    self.analysis_results['false_neg_rate'][ind] = false_neg_rate
+                    self.analysis_results.loc[ind,'sensitivity'] = sensitivity
+                    self.analysis_results.loc[ind,'specificity'] = specificity
+                    self.analysis_results.loc[ind,'false_pos_rate'] = false_pos_rate
+                    self.analysis_results.loc[ind,'false_neg_rate'] = false_neg_rate
 
 
             else: # add to df, only specific
@@ -909,7 +826,7 @@ class KsSimilarity:
             to_show = np.copy(self.initial_clustering)
         else:
             to_show = np.copy(self.clustering)
-        to_show[to_show!=cl_to_show] = 0
+        to_show[to_show!=cl_to_show] = -2
         if show:
             plt.imshow(to_show)
         return to_show
@@ -961,8 +878,7 @@ class KsSimilarity:
                         -> avg share of same cluster pixels over all pixels in that cluster in given radius."""
         
         clustering_dict = {'initial':self.initial_clustering, 'core':self.clustering, 'filled':self.filled_clustering}
-        tested_clustering = clustering_dict[test_clustering]
-
+        tested_clustering = clustering_dict[test_clustering].copy()
         density_dict = defaultdict(list)
         for row in range(tested_clustering.shape[0]):
             for col in range(tested_clustering.shape[1]):
@@ -979,7 +895,9 @@ class KsSimilarity:
         if plotting:
             df = pd.DataFrame([(k,i) for k in density_dict.keys() for i in density_dict[k]], 
                               columns=['cluster','density'])
-            sns.violinplot(data=df, x="cluster", y="density", linewidth=0.5, width=0.95)
+            plt.figure(figsize=(10, 3))
+            sns.violinplot(data=df, x="cluster", y="density", linewidth=0.50)#,width=0.95)
+            plt.show()
 
         return avg_density_dict
     
@@ -1020,7 +938,7 @@ class KsSimilarity:
         filled_clustering = self.clustering.copy()
         for r in range(self.clustering.shape[0]):
             for c in range(self.clustering.shape[1]):
-                if self.clustering[r,c]==0:
+                if self.clustering[r,c]==-1:
                     # non core pixel: 
                     filled_clustering[r,c]=find_best_fitting_cluster(self.region_array, (r,c), self.clustering)
         self.filled_clustering = filled_clustering
@@ -1070,7 +988,7 @@ class KsSimilarity:
             print(f'relevance score: {round(dict_match["relevance_score"],4)}') 
             print("")
             print('--- TEST RESULTS -----------------------------------')
-            print(f'statistical value: {round(dict_match["ks_value"],4)}') 
+            print(f'statistical value: {round(dict_match["test_value"],4)}') 
             print(f'p value: {round(dict_match["p_value"],4)}') 
             print(f'adjusted p value: {round(dict_match["p_value_adj"],4)}') 
             print("")
@@ -1184,11 +1102,15 @@ def remove_similar_masses(ms_df:pd.DataFrame, mass_window_range=20):
 
 
 
-def show_one_cluster(clustering, cl_to_show, show=False):
+def show_one_cluster(clustering, cl_to_show, show=True):
     to_show = np.copy(clustering)
+    if cl_to_show==0:
+        to_show = to_show+1
+        cl_to_show = cl_to_show+1
     to_show[to_show!=cl_to_show] = 0
     if show:
         plt.imshow(to_show)
+        
     return to_show
 
 
@@ -1279,7 +1201,7 @@ def find_best_fitting_cluster(region_array, non_core_pixel, clustering):
     # maximise avg dotproduct
     similarity_to_cluster = {}
     for cl in np.unique(clustering):
-        if cl==0:
+        if cl==-1:
             continue
 
         dot_products = []
@@ -1295,7 +1217,7 @@ def find_best_fitting_cluster(region_array, non_core_pixel, clustering):
     return assigned_cluster
 
 
-def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
+def compare_clusterings_for_data(dict_of_statsSimilarity:dict):
     names=[]
     amount_found_masses=[]
     clusterID=[]
@@ -1304,22 +1226,21 @@ def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
     share_core_pixel=[]
     density=[]
 
-    for cl in dict_of_KsSimilarity.keys():
-        ksSimilarity = dict_of_KsSimilarity[cl]
-        found_masses_for_cluster = ksSimilarity.found_masses_for_cluster(len_only=True)
-        amount_cc, avg_cl_size, _ = ksSimilarity.connected_cluster_size()
-        cl_density = ksSimilarity.density(radius=1, circular=False)
+    for cl in dict_of_statsSimilarity.keys():
+        statsSimilarity = dict_of_statsSimilarity[cl]
+        found_masses_for_cluster = statsSimilarity.found_masses_for_cluster(len_only=True)
+        amount_cc, avg_cl_size, _ = statsSimilarity.connected_cluster_size()
+        cl_density = statsSimilarity.density(radius=1, circular=False)
         for c in list(found_masses_for_cluster.keys()):
             names.append(cl)
             amount_found_masses.append(found_masses_for_cluster[c])
             clusterID.append(c)
             amount_connencted_cluster.append(amount_cc)
             avg_size_cc.append(avg_cl_size)
-            share_core_pixel.append(len(ksSimilarity.clusterwise_core_pixel[c]))
+            share_core_pixel.append(len(statsSimilarity.clusterwise_core_pixel[c]))
             density.append(cl_density[c])
     
-
-    data_summary = pd.DataFrame({"cluster_KsSimilarity": names,
+    data_summary = pd.DataFrame({"cluster_statsSimilarity": names,
                                  "clusterID": clusterID,
                                  "amount_found_masses": amount_found_masses,
                                  "amount_connencted_cluster": amount_connencted_cluster,
@@ -1328,14 +1249,14 @@ def compare_clusterings_for_data(dict_of_KsSimilarity:dict):
                                  "density":density})
     return data_summary
 
-def homogeneity(clustering:np.array, ignore_zero=True):
+def homogeneity(clustering:np.array, ignore_bg=True):
     """computes distribution of euklidean distance """
     clustering_dict = matrix_to_dict(clustering)
     distances = defaultdict(list)
     indices = defaultdict(list)
     summary = {}
     for c in clustering_dict.keys():
-        if ignore_zero and c==0:
+        if ignore_bg and c==-1:
             continue
         center = tuple(KMeans(n_clusters=1).fit(clustering_dict[c]).cluster_centers_[0])
         for elem in clustering_dict[c]:
@@ -1363,8 +1284,8 @@ def homogeneity(clustering:np.array, ignore_zero=True):
                             own_counter+=1
                         else:
                             other_counter+=1"""
-        if ignore_zero:
-            A = np.count_nonzero(clustering)
+        if ignore_bg:
+            A = np.count_nonzero(clustering!=-1)
         else:
             A = clustering.size
         n = len(clustering_dict[c])
@@ -1407,7 +1328,3 @@ def matrix_to_dict(matrix_2d:np.array):
             cluster = matrix_2d[r,c]
             cluster_dict[cluster].append((r,c))
     return cluster_dict
-
-
-    
-    
