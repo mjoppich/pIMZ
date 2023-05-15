@@ -150,7 +150,9 @@ def stats_test( mass_array:np.array, clustering:np.array, method=stats.kstest, t
         
 
     else:
+        #print(f'clusters considered: {cluster_considered}')
         for c in cluster_considered:
+            #print(c)
             stats_per_cluster[c] = [(0, 1)] * len(cluster_considered)
 
             foreground_intensities = classes_unclustered[c]
@@ -159,7 +161,9 @@ def stats_test( mass_array:np.array, clustering:np.array, method=stats.kstest, t
                     continue
                 background_intensities = classes_unclustered[b]
                 
+                
                 if len(foreground_intensities) == 0 :
+                    #print('len(fg) = 0')
                     pass
                 elif len(background_intensities) == 0:
                     if method==stats.ttest_ind:
@@ -168,13 +172,18 @@ def stats_test( mass_array:np.array, clustering:np.array, method=stats.kstest, t
                         stats_per_cluster[c][bi] = (1, 0)
                 else:
                     if method==stats.kstest:
+                        #print(f'len fg:{len(foreground_intensities)}, len bg:{background_intensities}')
                         stats_test_unclustered = method(foreground_intensities, background_intensities, alternative="less")
                     elif method==stats.ttest_ind:
                         stats_test_unclustered = method(foreground_intensities, background_intensities, alternative="greater")# ttest----
                     stats_per_cluster[c][bi] = (stats_test_unclustered[0], stats_test_unclustered[1])
-        
+                    #print(f'bg: {b} starts results: {stats_test_unclustered[0], stats_test_unclustered[1]}')
+    
+    
     background_amount = len(cluster_considered)-1
     stats_per_cluster_sig=defaultdict(list)
+    
+    #print(f'background_amount: {background_amount}')
     
     for c in stats_per_cluster.keys():
         if method==stats.kstest:
