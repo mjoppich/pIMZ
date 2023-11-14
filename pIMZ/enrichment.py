@@ -48,7 +48,6 @@ import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from statsmodels.distributions.empirical_distribution import ECDF
 from statsmodels.stats.multitest import multipletests
-from statistics import NormalDist
 
 
 from .imzml import IMZMLExtract
@@ -168,21 +167,23 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
 
 class OverrepresentationAnalysis(EnrichmentAnalysis):
     
-    def __init__(self, spec:SpectraRegion, ann:ProteinWeights):
+    def __init__(self, ann:ProteinWeights):
         super().__init__()
         
-        self.spec = spec
         self.ann = ann
     
     
-    def perform_analysis(self, pws, inputDF, match_name="name", featureColumn="feature", numberDetectedFeatures=None, pvalCutOff=0.05, minAbsLog2FC= 0.25, onlyPos=False, verbose_prints=None):
+    def perform_analysis(self, pws, inputDF, mz_bst, numFeatures=None, match_name="name", featureColumn="feature", numberDetectedFeatures=None, pvalCutOff=0.05, minAbsLog2FC= 0.25, onlyPos=False, verbose_prints=None):
         
         
         #
         ## First determine how many peaks could there be => at most region-array entries
         #
-        measuredGenes = self.spec.region_array.shape[2]
-        print("Measured Features", measuredGenes)
+        if numFeatures is None:
+            numFeatures = len(set(inputDF["feature"]))
+        
+        measuredGenes = numFeatures
+        print("Measured Features", numFeatures)
         
         
         sigDF = inputDF.loc[lambda x: x["#matches"]!= 0]
@@ -204,7 +205,7 @@ class OverrepresentationAnalysis(EnrichmentAnalysis):
         for pathwayID in bar(pws):
 
             pathwayName, pathwayFeatures = pws[pathwayID]
-            setFeatures = self.ann.get_closest_mz_for_proteins(pathwayFeatures, match_name=match_name, mz_bst=self.spec.mz_bst)
+            setFeatures = self.ann.get_closest_mz_for_proteins(pathwayFeatures, match_name=match_name, mz_bst=mz_bst)
             #print(list(setFeatures)[:5])
             sampleSize = len(setFeatures)
             

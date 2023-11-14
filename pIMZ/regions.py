@@ -192,7 +192,7 @@ class RegionClusterer(metaclass=abc.ABCMeta):
                                 showcopy[i,j] = 1
 
         fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=True)
+        Plotter.plot_array_scatter(showcopy, fig=fig, discrete_legend=True)
         if not highlight is None and len(highlight) > 0:
             plt.title("Highlighted (yellow) clusters: {}".format(", ".join([str(x) for x in highlight])), y=1.08)
 
@@ -410,6 +410,8 @@ class SpectraRegion():
         """Prepares everything for the usage of the C++ library
         """
         baseFolder = str(os.path.dirname(os.path.realpath(__file__)))
+        
+        #print(baseFolder)
 
         libfile = (glob.glob(os.path.join(baseFolder, "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../cIMZ", "libPIMZ*.so")) + glob.glob(os.path.join(baseFolder, "../build/lib*/pIMZ/", "libPIMZ*.so")))[0]
         self.lib = ctypes.cdll.LoadLibrary(libfile)
@@ -1068,7 +1070,7 @@ class SpectraRegion():
 
         image = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
         
-        print(useMZ)
+        #print(useMZ)
 
         usedMZValues = 0
         for mz in useMZ:
@@ -1604,7 +1606,45 @@ class SpectraRegion():
         plt.show()
         plt.close()
 
-    def plot_tic(self, min_cut_off=None, max_cut_off=None, masses=None, hist=False, plot_log=False):
+    def get_tic(self, min_cut_off=None, max_cut_off=None, masses=None, logvalues=False):
+        
+        
+        showcopy = np.zeros((self.region_array.shape[0], self.region_array.shape[1]))
+
+        massIndices = [x for x in range(self.region_array.shape[2])]
+
+        if masses != None:
+
+            massIndices = []
+            
+            for mass in masses:
+                mx, idx = self._get_exmass_for_mass(mass)
+                massIndices.append(idx)
+
+        massIndices = sorted(massIndices)
+        allCounts = []
+
+        for i in range(0, showcopy.shape[0]):
+            for j in range(0, showcopy.shape[1]):
+                pixelcount = np.sum(self.region_array[i,j, massIndices])
+
+                showcopy[i,j] = pixelcount
+                allCounts.append(pixelcount)
+
+
+        if min_cut_off != None:
+            showcopy[showcopy <= min_cut_off] = min_cut_off
+
+        if max_cut_off != None:
+            showcopy[showcopy >= max_cut_off] = max_cut_off
+
+        if logvalues:
+            showcopy = np.log(showcopy)
+            
+        return showcopy
+
+
+    def plot_tic(self, min_cut_off=None, max_cut_off=None, masses=None, hist=False, plot_log=False, plot=True):
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
@@ -1651,10 +1691,12 @@ class SpectraRegion():
         if plot_log:
             showcopy = np.log(showcopy)
 
-        fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=False)
-        plt.show()
-        plt.close()
+
+        if plot:
+            fig, _ = plt.subplots()
+            Plotter.plot_array_scatter(showcopy, fig=fig, discrete_legend=False)
+            plt.show()
+            plt.close()
 
 
         if hist:
@@ -1865,7 +1907,7 @@ class SpectraRegion():
                             showcopy[i,j] = 1
 
         fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, showcopy, discrete_legend=True)
+        Plotter.plot_array_scatter(showcopy, fig=fig, discrete_legend=True)
         if not highlight is None and len(highlight) > 0:
             plt.title("Highlighted (yellow) clusters: {}".format(", ".join([str(x) for x in highlight])), y=1.08)
 

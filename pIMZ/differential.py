@@ -48,8 +48,7 @@ import scipy.cluster as spc
 from scipy.cluster.vq import kmeans2
 from statsmodels.distributions.empirical_distribution import ECDF
 from statsmodels.stats.multitest import multipletests
-from statistics import NormalDist
-
+from scipy.stats import norm
 
 from .imzml import IMZMLExtract
 from .plotting import Plotter
@@ -64,6 +63,8 @@ def makeProgressBar() -> progressbar.ProgressBar:
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
 
+class GroupedRegions:
+    pass
 
 class DifferentialTest(metaclass=abc.ABCMeta):
 
@@ -83,7 +84,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion]], corr_method="benjamini_hochberg", testname="Differential", threshold=0.2, pseudo_count=1e-9) -> None:
+    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion], GroupedRegions], corr_method="benjamini_hochberg", testname="Differential", threshold=0.2, pseudo_count=1e-9) -> None:
 
         
         if isinstance(specs, SpectraRegion):
@@ -236,6 +237,9 @@ class DifferentialTest(metaclass=abc.ABCMeta):
             markerDFs[elem] = clusterDF
 
         return markerDFs
+
+
+
 
     def do_de_analysis(self, group1: Dict[Any, Iterable], group2: Dict[Any, Iterable], grouping:str) -> pd.DataFrame:
 
@@ -651,7 +655,6 @@ class DifferentialEmpireTest(DifferentialTest):
         self.logger.info("Fourth pass - calculate adjusted gene p-value")
 
         allZVals = []
-        nd=NormalDist()
 
         bar = makeProgressBar()
         for fi, feature in bar(enumerate(common_features)):
@@ -683,8 +686,11 @@ class DifferentialEmpireTest(DifferentialTest):
             if (1-genePzdist) < 10 ** -10:
                 genePzdist -= 10 ** -10
 
-            geneZzdist = nd.inv_cdf(genePzdist)
-            geneP = 2*(1-nd.cdf(abs(geneZzdist)))
+            #geneZzdist = nd.inv_cdf(genePzdist)
+            geneZzdist = norm.ppf(genePzdist)
+            
+            #geneP = 2*(1-nd.cdf(abs(geneZzdist)))
+            geneP = 2*(1-norm.cdf(abs(geneZzdist)))
 
             featureResults[feature]["p_value"] = geneP
 
@@ -701,7 +707,7 @@ class DifferentialEmpireTest(DifferentialTest):
 
 
     def calculateZ(group1, group2, group1Bin, group2Bin, bin2ecdf1, bin2ecdf2, median=None, samples=100):
-        nd=NormalDist()
+
         geneFCs = []
         geneZ = 0
 
@@ -747,8 +753,11 @@ class DifferentialEmpireTest(DifferentialTest):
                         group2P -= 10 ** -10
 
                     #print(group1P, group2P)
-                    group1Z = nd.inv_cdf(group1P)
-                    group2Z = nd.inv_cdf(group2P)
+                    #group1Z = nd.inv_cdf(group1P)
+                    #group2Z = nd.inv_cdf(group2P)
+                    
+                    group1Z = norm.ppf(group1P)
+                    group2Z = norm.ppf(group2P)
 
                     geneZ += group1Z+group2Z
                 else:

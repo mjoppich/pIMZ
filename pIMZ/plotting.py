@@ -58,9 +58,86 @@ class Plotter():
 
 
 
+    @classmethod
+    def _plot_arrays_grouped(cls, regions, group1, group2, discrete_legend=False, log=False):
+        
+        colsPerGroup = 3
+        
+        lgroup1 = list(group1)
+        lgroup2 = list(group2)
+        
+        rowsGroup1 = math.ceil(len(group1)/colsPerGroup)
+        rowsGroup2 = math.ceil(len(group2)/colsPerGroup)
+        
+        numRows = max([rowsGroup1, rowsGroup2])
+               
+        vrange_min, vrange_max = np.inf,-np.inf
+        
+        for x in lgroup1+lgroup2:
+            
+            minval = np.min(regions[x])
+            maxval = np.max(regions[x])
+            
+            vrange_min = min(minval, vrange_min)
+            vrange_max = max(maxval, vrange_max)
+                   
+        fig, axes = plt.subplots(nrows=numRows, ncols=2*colsPerGroup, sharex=False, sharey=False)
+                
+        normalizer=matplotlib.colors.Normalize(vrange_min,vrange_max)
+        im=matplotlib.cm.ScalarMappable(norm=normalizer)
+        
+        usedCoords = []
+        
+        def set_axis_color(ax, color):
+            ax.spines['bottom'].set_color(color)
+            ax.spines['top'].set_color(color) 
+            ax.spines['right'].set_color(color)
+            ax.spines['left'].set_color(color)
+        
+        groupOffset = 0
+        for ci, cname in enumerate(lgroup1):
+            
+            colindex = ci % colsPerGroup
+            rowindex = int(np.floor(ci / colsPerGroup))
+
+            coord = (rowindex, groupOffset+colindex)
+            
+            ax = axes[coord]
+            usedCoords.append(coord)
+            
+            set_axis_color(ax, "darkred")
+            
+            cls.plot_array_scatter(regions[cname], ax=ax, discrete_legend=discrete_legend, norm=normalizer)
+
+        groupOffset = colsPerGroup
+        for ci, cname in enumerate(lgroup2):
+            
+            colindex = ci % colsPerGroup
+            rowindex = int(np.floor(ci / colsPerGroup))
+            
+            coord = (rowindex, groupOffset+colindex)
+            
+            ax = axes[coord]
+            usedCoords.append(coord)
+            
+            set_axis_color(ax, "darkgreen")
+            
+            cls.plot_array_scatter(regions[cname], ax=ax, discrete_legend=discrete_legend, norm=normalizer)
+
+        for i in range(axes.shape[0]):
+            for j in range(axes.shape[1]):
+                
+                if not (i,j) in usedCoords:
+                    fig.delaxes(axes[(i,j)])
+
+
+        fig.subplots_adjust(right=0.8)
+        cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+        fig.colorbar(im, ax=axes.ravel().tolist(), cax=cbar_ax, shrink=0.6)
+
 
     @classmethod
-    def plot_array_scatter(cls, fig, arr, discrete_legend=True):
+    def plot_array_scatter(cls, arr, fig=None, ax=None, discrete_legend=True, norm=None):
         
         shapeSize = (cls.dot_shape_size**2) *0.33
 
@@ -77,8 +154,12 @@ class Plotter():
 
         else:
             cmap = plt.cm.get_cmap('viridis')
-            cnorm = matplotlib.colors.Normalize()
-            cnorm.autoscale(arr)
+            
+            if norm is None:
+                cnorm = matplotlib.colors.Normalize()
+                cnorm.autoscale(arr)
+            else:
+                cnorm = norm
         
 
         xs = []
@@ -98,7 +179,12 @@ class Plotter():
                     val = arr[i,j]
                     vals.append( val )
 
-        ax = fig.get_axes()[0]
+        if ax is None:
+            if fig is None:
+                ax = plt.gcf().get_axes()[0]
+            else:
+                ax = fig.get_axes()[0]
+            
         if discrete_legend:
             # calculate the POSITION of the tick labels
             #positions = np.linspace(0, len(valid_vals), len(valid_vals))
@@ -118,8 +204,12 @@ class Plotter():
         else:
             ax.set_aspect('equal', 'box')
             ax.invert_yaxis()
+            
             heatmap = ax.scatter(xs, ys, c=vals, s=shapeSize, marker=cls.dot_shape, cmap=cmap, norm=cnorm)
-            plt.colorbar(heatmap)
+            
+            if norm is None:
+                plt.colorbar(heatmap)
+            
 
     LW = 0.3
 

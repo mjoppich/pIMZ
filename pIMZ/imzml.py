@@ -125,10 +125,9 @@ class IMZMLExtract:
         self.logger = logging.getLogger('IMZMLExtract')
         self.logger.setLevel(logging.INFO)
 
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setLevel(logging.INFO)
-
-        self.logger.addHandler(consoleHandler)
+        #consoleHandler = logging.StreamHandler()
+        #consoleHandler.setLevel(logging.INFO)
+        #self.logger.addHandler(consoleHandler)
 
         self.fname = fname
         self.parser = ImzMLParser(fname)
@@ -685,7 +684,7 @@ class IMZMLExtract:
 
         return spectrum-new_base
 
-    def _get_median_spectrum(self, region_array):
+    def _get_median_spectrum(self, region_array, quantile=0.5):
         """Calculates the median spectrum of all spectra in region_array.
 
         Args:
@@ -699,9 +698,15 @@ class IMZMLExtract:
 
         for i in range(0, region_array.shape[2]):
 
-            median_profile[i] = np.median(region_array[:,:,i])
+            median_profile[i] = np.quantile(region_array[:,:,i], [quantile])[0]
 
-        startedLog = np.quantile([x for x in median_profile if x > 0], [0.05])[0]
+        qvec = [x for x in median_profile if x > 0]
+        
+        startedLog = 0
+        
+        if len(qvec) > 0:
+            startedLog = np.quantile(qvec, [0.05])[0]
+            
         if startedLog == 0:
             # TODO set this to 0.5 * smallest positive value
             startedLog = 0.001
@@ -836,9 +841,56 @@ class IMZMLExtract:
         return logfunc(region_array)
         
 
+    def normalize_region_arrays(self, raDict, refQuantiles=None):
+        
+        assert (len(raDict) >= 2)
+        
+        if refQuantiles is None:
+            refQuantiles = {}
+        
+        
+        raDictEntries = [x for x in raDict]
+        refArray = raDict[raDictEntries[0]]
+        
+        refConsSpec = self._get_median_spectrum(refArray, refQuantiles.get(raDictEntries[0], 0.5))
+        
+        def is_not_number(x):
+        
+            if(math.isinf(x) and x > 0):
+                return True
+            elif(math.isinf(x) and x < 0):
+                return True
+            elif(math.isnan(x)):
+                return True
+            else:
+                return False
+        
+        outArrays = {}
+        outArrays[raDictEntries[0]] = refArray.copy()
+        
+        for i in raDictEntries[1:]:
+            
+            oArray = raDict[i].copy()
+            oQuantile = refQuantiles.get(i, 0.5)
+            
+            oConsSpec = self._get_median_spectrum(oArray, oQuantile)
+            
+            allfcs = oConsSpec / refConsSpec
+            allfcs = [x for x in allfcs if not is_not_number(x)]
+            
+            scaleFactor = np.median(allfcs)
+            
+            print("Region", i, "median FC", scaleFactor)
+            
+            oArray = oArray * (1/scaleFactor)
+            
+            outArrays[i] = oArray
+            
+        return outArrays
+            
 
 
-    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10, division=100, simple=True):
+    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10, division=100, simple=True, median_quantile=0.5):
         """Returns a normalized array of spectra.
 
         Args:
@@ -863,7 +915,10 @@ class IMZMLExtract:
             numpy.array: Normalized region_array.
         """
         
-        assert (normalize in [None, "zscore", "baselines_pybaseline", "baseline_rubberband", "tic", "max_intensity_spectrum", "max_intensity_region", "max_intensity_all_regions", "vector", "inter_median", "intra_median", "baseline_cor", "baseline_cor_local"])
+        assert (normalize in [None, "zscore", "baselines_pybaseline", "baseline_rubberband", "tic", "max_intensity_spectrum",
+                              "max_intensity_region", "max_intensity_all_regions", "vector",
+                              "inter_median", "intra_median",
+                              "baseline_cor", "baseline_cor_local"])
 
 
         if normalize in ["vector"]:
@@ -913,9 +968,9 @@ class IMZMLExtract:
 
             return outarray
 
-        if normalize in ["inter_median", "intra_median"]:
+        if normalize in ["inter_median", "intra_median", "intra_fc"]:
             
-            ref_spectra = self._get_median_spectrum(region_array)
+            ref_spectra = self._get_median_spectrum(region_array, quantile=median_quantile)
 
             if normalize == "intra_median":
 
@@ -995,7 +1050,7 @@ class IMZMLExtract:
                     inter_norm = inter_norm / global_median
 
                 return inter_norm
-
+            
 
         region_dims = region_array.shape
         outarray = np.array(region_array, copy=True)
@@ -1038,7 +1093,7 @@ class IMZMLExtract:
         peakplot = _prepare_tic_array(region_array)
 
         fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
+        Plotter.plot_array_scatter(peakplot, fig=fig, discrete_legend=False)
         plt.title("TIC (total summed intensity per pixel)", y=1.08)
         plt.show()
         plt.close()
@@ -1052,7 +1107,7 @@ class IMZMLExtract:
         peakplot = _prepare_tnc_array(region_array)
 
         fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
+        Plotter.plot_array_scatter(peakplot, fig=fig, discrete_legend=False)
         plt.title("TNC (total normed intensity per pixel)", y=1.08)
         plt.show()
         plt.close()
@@ -1067,7 +1122,7 @@ class IMZMLExtract:
         peakplot = _prepare_ppp_array(region_array, threshold)
 
         fig, _ = plt.subplots()
-        Plotter.plot_array_scatter(fig, peakplot, discrete_legend=False)
+        Plotter.plot_array_scatter(peakplot, fig=fig, discrete_legend=False)
         plt.title("Peaks Per Pixel", y=1.08)
         if not file is None:
             plt.savefig(file, bbox_inches="tight")

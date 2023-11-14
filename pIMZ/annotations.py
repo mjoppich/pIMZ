@@ -113,8 +113,7 @@ class ProteinWeights():
         self.data2slot = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
         if filename != None:
-
-            self.__load_file()
+            self.__load_file(filename)
 
 
     def __load_file(self, filename):
@@ -483,6 +482,11 @@ class AnnotatedProteinWeights(ProteinWeights):
 
 
 class SDFProteinWeights(AnnotatedProteinWeights):
+    """ Used for HMDB metabolite structures
+
+    Args:
+        AnnotatedProteinWeights (_type_): _description_
+    """
     
     def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
         super().__init__(filename, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
@@ -570,6 +574,11 @@ class SDFProteinWeights(AnnotatedProteinWeights):
 
 
 class SLProteinWeights(AnnotatedProteinWeights):
+    """Swiss Lipids Annotation
+
+    Args:
+        AnnotatedProteinWeights (_type_): _description_
+    """
     
     def __init__(self, filename, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1, massColumn="Exact m/z of [M+H]+", nameColumn="metabolite name",categoryColumn = "lipid class"):
         super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
@@ -631,14 +640,14 @@ class PBProteinWeights(AnnotatedProteinWeights):
         AnnotatedProteinWeights (_type_): Objeckt from AnnotatedProteinWeights to query relevant masses.
     """
         
-    def __init__(self, filenameSDF, filenamePW, massMode=+1, ppm=5,mz_ppm=1, min_mass=-1, max_mass=-1, massColumn="Exact m/z of [M+H]+", nameColumn="metabolite name",categoryColumn = "lipid class", organisms=['Homo sapiens', 'Escherichia coli', 'Mus musculus',
+    def __init__(self, filenameSDF, filenameMetabolites, massMode=+1, ppm=5,mz_ppm=1, min_mass=-1, max_mass=-1, massColumn="Exact m/z of [M+H]+", nameColumn="metabolite name",categoryColumn = "lipid class", organisms=['Homo sapiens', 'Escherichia coli', 'Mus musculus',
        'Arabidopsis thaliana', 'Saccharomyces cerevisiae', 'Bos taurus',
        'Caenorhabditis elegans', 'Rattus norvegicus',
        'Drosophila melanogaster', 'Pseudomonas aeruginosa']):
         super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
 
         self.logger.info("Reading Pathways")
-        self.pb_df = pd.read_csv(filenamePW, sep=",")       
+        self.pb_df = pd.read_csv(filenameMetabolites, sep=",")       
         self.category2name = defaultdict(set)
         self.metabolite2pathway = defaultdict(set)
         self.pathway2metabolite = defaultdict(set)
@@ -694,7 +703,10 @@ class PBProteinWeights(AnnotatedProteinWeights):
                                                                        "mass": molWeight,
                                                                        "mzWeight": mzWeight,
                                                                        "pathway": self.metabolite2pathway.get(metaboliteID, []),
-                                                                       "pathway_name": [self.pathway2name[x] for x in self.metabolite2pathway.get(metaboliteID, [])]})
+                                                                       "pathway_name": [self.pathway2name[x] for x in self.metabolite2pathway.get(metaboliteID, [])],
+                                                                       "pathway_pretty_name": ["{} ({})".format(self.pathway2name[x], x) for x in self.metabolite2pathway.get(metaboliteID, [])]
+                                                                       })
+            
 
 
 
