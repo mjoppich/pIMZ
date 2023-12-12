@@ -49,6 +49,7 @@ from scipy.cluster.vq import kmeans2
 
 from .imzml import IMZMLExtract
 from .plotting import Plotter
+import matplotlib.gridspec as gridspec
 
 #web/html
 import jinja2
@@ -113,7 +114,7 @@ class GroupedRegions:
 
             self.logger.info("Added new Stream Handler")     
         
-    def plot_function_grouped(self, plotfunc, discrete_legend=False, log2=False):
+    def plot_function_grouped(self, plotfunc, discrete_legend=False, log2=False, figsize=(8,6), colorbar_fraction=0.15, title_font_size=12):
         
         plotElems = dict()
         for x in self.regions:
@@ -121,8 +122,127 @@ class GroupedRegions:
                 plotElems[x] = np.log2(plotfunc(self.regions[x]))
             else:
                 plotElems[x] = plotfunc(self.regions[x])
+        
             
-        Plotter._plot_arrays_grouped(plotElems, self.group2regions[self.groups[0]], self.group2regions[self.groups[1]], discrete_legend=discrete_legend)
+        Plotter._plot_arrays_grouped(plotElems, self.group2regions[self.groups[0]], self.group2regions[self.groups[1]], discrete_legend=discrete_legend,
+                                     figsize=figsize, colorbar_fraction=colorbar_fraction,title_font_size=title_font_size)
+         
+         
+         
+    def plot_function_grouped_nice(self, plotfunc, log2=False, figsize=(8,6), title="Grouped Intensities", title_font_size=12, colors=["crimson", "indigo"]):
+        
+        
+        
+        plotElems = dict()
+        for x in self.regions:
+            if log2:
+                plotElems[x] = np.log2(plotfunc(self.regions[x]))
+            else:
+                plotElems[x] = plotfunc(self.regions[x])
+        
+        #
+        ## Preparations
+        #
+        
+        def flatten(l):
+            return [item for sublist in l for item in sublist]  
+        
+        groups = [
+            self.group2regions[x] for x in self.groups
+        ]
+        
+        colsPerGroup = 3
+
+        rowGroups = [math.ceil(len(group)/colsPerGroup) for group in groups]
+        numRows = max(rowGroups)
+               
+        vrange_min, vrange_max = np.inf,-np.inf
+        
+        for x in flatten(groups):
+            
+            minval = np.min(plotElems[x])
+            maxval = np.max(plotElems[x])
+            
+            vrange_min = min(minval, vrange_min)
+            vrange_max = max(maxval, vrange_max)
+               
+
+        normalizer=matplotlib.colors.Normalize(vrange_min,vrange_max)
+        im=matplotlib.cm.ScalarMappable(norm=normalizer)
+            
+        
+        #
+        ## Plotting
+        #
+        
+        fig = plt.figure(figsize=figsize)
+        
+        fig.suptitle(title, fontsize=12)#, bbox={'facecolor':'none', 'alpha':0.5, 'pad':5})
+
+        
+        
+        groupsPerRow = 2
+        groupRows = np.ceil(len(groups) / groupsPerRow)
+        rowHeight = (1.0/groupRows) * 0.97
+        
+        #print("groupRows", groupRows)
+
+        for i in range(len(groups)):
+            #outer
+            outergs = gridspec.GridSpec(1, 1)
+            
+            rowNum = i//groupsPerRow
+            
+            bottomVal = rowNum*rowHeight+0.01
+            topVal = (1+rowNum)*rowHeight-0.01
+            
+            #print(i, "row", rowNum, "bottomVal", bottomVal, "topVal", topVal)
+            
+            outergs.update(bottom=bottomVal,left=(i%2)*.5+0.02, 
+                        top=topVal,  right=(1+i%2)*.5-0.02)
+
+            outerax = fig.add_subplot(outergs[0])
+            outerax.tick_params(axis='both',which='both',bottom=0,left=0,
+                                labelbottom=0, labelleft=0)
+            outerax.set_facecolor(colors[i])
+            outerax.patch.set_alpha(0.3)
+
+            #inner
+            gs = gridspec.GridSpec(numRows, colsPerGroup)
+            gs.update(bottom=bottomVal+0.1,   left=(i%2)*.5+0.08, 
+                        top=topVal-0.1,  right=(1+i%2)*.5-0.05,
+                        wspace=0.35, hspace=0.35)
+            
+            
+            
+            for k, regname in enumerate(groups[i]):
+                ax = fig.add_subplot(gs[k])
+                
+                Plotter.plot_array_scatter(plotElems[regname], ax=ax, discrete_legend=False, norm=normalizer)
+                ax.set_title(str(regname), fontsize=title_font_size, color=colors[i])
+                
+
+
+        #ax_list = fig.axes
+        #print(ax_list)
+        #divider = make_axes_locatable(ax_list[0])
+        #cbar_ax = divider.append_axes("right", size="5%", pad=0.05)
+        
+        #gs = gridspec.GridSpec(1, 1)
+        #cbar_ax = fig.add_subplot(gs[0])
+
+        #cbar_ax = fig.add_axes([1.0-(colorbar_fraction-0.05), 0.15, (colorbar_fraction-0.05)/2, 0.7], label='Log Intensity')
+        cbar = fig.colorbar(im, ax=fig.axes, shrink=0.5, pad=0.01, orientation = 'horizontal') #cax=cbar_ax,
+
+        cbar.ax.yaxis.set_ticks_position('left')
+        
+        if log2:
+            cbar.ax.set_xlabel("Log Intensity")
+        else:
+            cbar.ax.set_xlabel("Intensity")
+            
+        #plt.tight_layout()
+        
             
 
     def __iter__(self):
@@ -187,7 +307,7 @@ class GroupedRegions:
     
     def boxplot_feature_expression(self, features, selected_groups, accept_threshold=0.2,
                                    verbose=False, grouping="segmented", log=False,
-                                   pw=None, pw_match_name="name"):
+                                   pw=None, pw_match_name="name", figsize=(8, 3)):
         
         if not isinstance(features, (list, tuple, set)):
             features = [features]
@@ -273,13 +393,22 @@ class GroupedRegions:
                 allvalues.append(("group2", ("group2", 1), val))
 
         exprdf = pd.DataFrame.from_records(allvalues, columns=["group", "slide", "value"])
+        exprdf["slide"] = exprdf["slide"].apply(lambda x: str(x))
         
-        #print(set(exprdf["slide"]))
+        #print(exprdf.head())
        
         xorder = [x for x in g1Values] + [("group1", 1), ("group2", 1)] + [x for x in g2Values]
-        #print(xorder)
+        xorder = [str(x) for x in xorder]
+        #print("xorder", xorder)
         
         chart = sns.violinplot(x ="slide", y = "value", data = exprdf, order=xorder, log_scale=log)
         
+        if log:
+            chart.set_ylabel("Log Intensity")
+        else:
+            chart.set_ylabel("Intensity")
+            
         chart.set_xticklabels(chart.get_xticklabels(), rotation=45, horizontalalignment='right')
-        plt.show()
+        
+        if not figsize is None:
+            chart.figure.set_size_inches(figsize[0], figsize[1])

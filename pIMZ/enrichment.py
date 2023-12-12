@@ -89,7 +89,7 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
                                                 N=numcolors)
         return cmap
 
-    def plotORAresult( self, dfin, title, numResults=10, figsize=(10,10)):
+    def plotORAresult( self, dfin, title, numResults=10, figsize=(10,10), outfile=None):
         #https://www.programmersought.com/article/8628812000/
         
         def makeTitle(colDescr, colSize, sucSize, setSize):
@@ -161,6 +161,11 @@ class EnrichmentAnalysis(metaclass=abc.ABCMeta):
         plt.grid(False)
         plt.tight_layout()
         plt.yticks(fontsize=16)
+        
+        if not outfile is None:
+            plt.savefig(outfile + ".png", bbox_inches='tight')
+            plt.savefig(outfile + ".pdf", bbox_inches='tight')
+        
         plt.show()
 
 

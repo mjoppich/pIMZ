@@ -59,7 +59,7 @@ class Plotter():
 
 
     @classmethod
-    def _plot_arrays_grouped(cls, regions, group1, group2, discrete_legend=False, log=False):
+    def _plot_arrays_grouped(cls, regions, group1, group2, discrete_legend=False, log=False, figsize=(8,6), colorbar_fraction=0.15, title_font_size=12):
         
         colsPerGroup = 3
         
@@ -81,7 +81,7 @@ class Plotter():
             vrange_min = min(minval, vrange_min)
             vrange_max = max(maxval, vrange_max)
                    
-        fig, axes = plt.subplots(nrows=numRows, ncols=2*colsPerGroup, sharex=False, sharey=False)
+        fig, axes = plt.subplots(nrows=numRows, ncols=2*colsPerGroup, sharex=False, sharey=False, figsize=figsize)
                 
         normalizer=matplotlib.colors.Normalize(vrange_min,vrange_max)
         im=matplotlib.cm.ScalarMappable(norm=normalizer)
@@ -108,6 +108,7 @@ class Plotter():
             set_axis_color(ax, "darkred")
             
             cls.plot_array_scatter(regions[cname], ax=ax, discrete_legend=discrete_legend, norm=normalizer)
+            ax.set_title(str(cname), fontsize=title_font_size)
 
         groupOffset = colsPerGroup
         for ci, cname in enumerate(lgroup2):
@@ -123,6 +124,7 @@ class Plotter():
             set_axis_color(ax, "darkgreen")
             
             cls.plot_array_scatter(regions[cname], ax=ax, discrete_legend=discrete_legend, norm=normalizer)
+            ax.set_title(str(cname), fontsize=title_font_size)
 
         for i in range(axes.shape[0]):
             for j in range(axes.shape[1]):
@@ -131,9 +133,20 @@ class Plotter():
                     fig.delaxes(axes[(i,j)])
 
 
-        fig.subplots_adjust(right=0.8)
-        cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+        line=plt.Line2D([0.525, 0.525], [0.05,0.95], color='purple', transform=fig.transFigure)
+        fig.add_artist(line)
+
+        fig.subplots_adjust(right=1.0-colorbar_fraction, wspace=0.4, hspace=0.4)
+        
+        cbar_ax = fig.add_axes([1.0-(colorbar_fraction-0.05), 0.15, (colorbar_fraction-0.05)/2, 0.7], label='Log Intensity')
         fig.colorbar(im, ax=axes.ravel().tolist(), cax=cbar_ax, shrink=0.6)
+        cbar_ax.yaxis.set_ticks_position('left')
+        
+        
+        if log:
+            cbar_ax.set_xlabel("Log Intensity")
+        else:
+            cbar_ax.set_xlabel("Intensity")
 
 
     @classmethod

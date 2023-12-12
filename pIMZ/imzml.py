@@ -890,7 +890,7 @@ class IMZMLExtract:
             
 
 
-    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10, division=100, simple=True, median_quantile=0.5):
+    def normalize_region_array(self, region_array, normalize=None, lam=105, p = 0.01, iters = 10, division=100, simple=True, median_quantile=0.5, shape=None):
         """Returns a normalized array of spectra.
 
         Args:
@@ -1007,6 +1007,10 @@ class IMZMLExtract:
                 self.logger.info("Collecting fold changes")
                 for i in bar(range(region_array.shape[0])):
                     for j in range(region_array.shape[1]):
+                        
+                        if not shape is None:
+                            if not shape[i,j]:
+                                continue
 
                         foldchanges = (scalingFactor * region_array[i][j] / ref_spectra).astype(int)
                         for fc in foldchanges:
@@ -1037,7 +1041,7 @@ class IMZMLExtract:
 
                     currentCount += fcAdd
 
-                self.logger.info("Median elements".format(medians))
+                self.logger.info("Median elements: {}".format(len(medians)))
 
                 global_median = sum([medians[x] for x in medians]) / len(medians)
                 global_median = global_median / scalingFactor
@@ -1084,13 +1088,17 @@ class IMZMLExtract:
 
         return outarray
 
+    def get_tic_array(self, region_array):
+        tic_array = _prepare_tic_array(region_array)
+        return tic_array
+
     def plot_tic(self, region_array):
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
             region_array (numpy.array): Array of spectra.
         """
-        peakplot = _prepare_tic_array(region_array)
+        peakplot = self.get_tic_array(region_array)
 
         fig, _ = plt.subplots()
         Plotter.plot_array_scatter(peakplot, fig=fig, discrete_legend=False)
