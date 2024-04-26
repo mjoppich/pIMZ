@@ -150,6 +150,36 @@ class Plotter():
 
 
     @classmethod
+    def plot_array_imshow(cls, arr, fig=None, ax=None, discrete_legend=True, norm=None):
+        
+        
+        cmap = plt.cm.get_cmap('viridis')
+        
+        if norm is None:
+            cnorm = matplotlib.colors.Normalize()
+            cnorm.autoscale(arr)
+        else:
+            cnorm = norm
+        
+        if ax is None:
+            if fig is None:
+                ax = plt.gcf().get_axes()[0]
+            else:
+                ax = fig.get_axes()[0]
+            
+            
+        ax.set_aspect('equal', 'box')
+        ax.invert_yaxis()
+        
+        im = ax.imshow(arr, cmap=cmap, norm=cnorm)
+        
+        
+        if norm is None:
+            plt.colorbar(im)
+
+
+
+    @classmethod
     def plot_array_scatter(cls, arr, fig=None, ax=None, discrete_legend=True, norm=None):
         
         shapeSize = (cls.dot_shape_size**2) *0.33

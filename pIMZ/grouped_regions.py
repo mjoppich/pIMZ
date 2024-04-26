@@ -129,16 +129,26 @@ class GroupedRegions:
          
          
          
-    def plot_function_grouped_nice(self, plotfunc, log2=False, figsize=(8,6), title="Grouped Intensities", title_font_size=12, colors=["crimson", "indigo"]):
+    def plot_function_grouped_nice(self, plotfunc, log2=False, figsize=(8,6), title="Grouped Intensities", title_font_size=12, colors=["crimson", "indigo"], with_input_masks=False, input_mask_grouping="segmented", selected_groups=None):
         
-        
+        if with_input_masks:
+            assert( not input_mask_grouping is None)
+            assert( not selected_groups is None)
         
         plotElems = dict()
         for x in self.regions:
+            
             if log2:
-                plotElems[x] = np.log2(plotfunc(self.regions[x]))
+                plotArray = np.log2(plotfunc(self.regions[x]))
             else:
-                plotElems[x] = plotfunc(self.regions[x])
+                plotArray = plotfunc(self.regions[x])
+                
+            if with_input_masks:
+                input_masks_group1, _, _, _ = self.create_input_masks({x: selected_groups[x]}, None, input_mask_grouping, verbose=False)
+                
+                plotArray[~input_masks_group1[x]] = 0
+                
+            plotElems[x] = plotArray
         
         #
         ## Preparations
@@ -163,11 +173,13 @@ class GroupedRegions:
             minval = np.min(plotElems[x])
             maxval = np.max(plotElems[x])
             
+            print(x, minval, maxval, vrange_min, vrange_max)
+            
             vrange_min = min(minval, vrange_min)
             vrange_max = max(maxval, vrange_max)
                
-
-        normalizer=matplotlib.colors.Normalize(vrange_min,vrange_max)
+        print("Color Range", vrange_min, "-->", vrange_max)
+        normalizer=matplotlib.colors.Normalize(vmin=vrange_min,vmax=vrange_max)
         im=matplotlib.cm.ScalarMappable(norm=normalizer)
             
         
@@ -218,7 +230,7 @@ class GroupedRegions:
             for k, regname in enumerate(groups[i]):
                 ax = fig.add_subplot(gs[k])
                 
-                Plotter.plot_array_scatter(plotElems[regname], ax=ax, discrete_legend=False, norm=normalizer)
+                Plotter.plot_array_imshow(plotElems[regname], ax=ax, norm=normalizer)
                 ax.set_title(str(regname), fontsize=title_font_size, color=colors[i])
                 
 
@@ -279,10 +291,11 @@ class GroupedRegions:
 
             pixels_group1 += np.sum(input_masks_group1[spec_name].flatten())
 
-            spec_groups2 = group2.get(spec_name, [])
-            for spec_group in spec_groups2:
-                input_masks_group2[spec_name][np.where(spec.meta[grouping] == spec_group)] = 1
-            
+            if not group2 is None:
+                spec_groups2 = group2.get(spec_name, [])
+                for spec_group in spec_groups2:
+                    input_masks_group2[spec_name][np.where(spec.meta[grouping] == spec_group)] = 1
+                
             pixels_group2 += np.sum(input_masks_group2[spec_name].flatten())
 
 
@@ -306,7 +319,7 @@ class GroupedRegions:
 
     
     def boxplot_feature_expression(self, features, selected_groups, accept_threshold=0.2,
-                                   verbose=False, grouping="segmented", log=False,
+                                   verbose=False, grouping="segmented", log=False, feature_sum=True,
                                    pw=None, pw_match_name="name", figsize=(8, 3)):
         
         if not isinstance(features, (list, tuple, set)):
@@ -362,7 +375,13 @@ class GroupedRegions:
                 #fIdx = self.specs[spec_name]._get_exmass_for_mass(feature)[1]
 
                 if spec_name in input_masks_group1 :
-                    spec_values = np.ravel(spec.region_array[:,:,fIdxs][input_masks_group1[spec_name]])
+                    
+                    selArray = spec.region_array[:,:,fIdxs]
+                    
+                    if feature_sum == True:
+                        selArray = np.sum(selArray, axis=2)
+                    
+                    spec_values = np.ravel(selArray[input_masks_group1[spec_name]])
                     spec_values = spec_values[spec_values > accept_threshold]
 
                     if len(spec_values) > 0:
@@ -370,7 +389,12 @@ class GroupedRegions:
 
                 if spec_name in input_masks_group2:
 
-                    spec_values = np.ravel(spec.region_array[:,:,fIdxs][input_masks_group2[spec_name]])
+                    selArray = spec.region_array[:,:,fIdxs]
+                    
+                    if feature_sum == True:
+                        selArray = np.sum(selArray, axis=2)
+
+                    spec_values = np.ravel(selArray[input_masks_group2[spec_name]])
                     spec_values = spec_values[spec_values > accept_threshold]
                     
                     if len(spec_values) > 0:
@@ -396,6 +420,7 @@ class GroupedRegions:
         exprdf["slide"] = exprdf["slide"].apply(lambda x: str(x))
         
         #print(exprdf.head())
+        print("maxvalue", exprdf.value.max())
        
         xorder = [x for x in g1Values] + [("group1", 1), ("group2", 1)] + [x for x in g2Values]
         xorder = [str(x) for x in xorder]
