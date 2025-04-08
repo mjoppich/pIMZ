@@ -338,7 +338,7 @@ class SpectraRegion():
             pickle.dump(self, fout)
 
 
-    def to_spatial_anndata(self, grouping="segmented") -> anndata.AnnData:
+    def to_spatial_anndata(self, grouping="segmented", library_id="pimz", pixel_size=20) -> anndata.AnnData:
 
         assert grouping in self.meta
 
@@ -348,6 +348,7 @@ class SpectraRegion():
         sampleVec = [None] * numPixels
         clusterVec = [None] * numPixels
         coordinates = [None] * numPixels
+        coordsEntry = [None] * numPixels
 
         exprData = np.zeros((numPixels, self.region_array.shape[2]))
         masses = [("mass_" + str(x)).replace(".", "_") for x in self.idx2mz]
@@ -367,6 +368,9 @@ class SpectraRegion():
                 sampleVec[colPos] = pxl_name
                 clusterVec[colPos] = self.meta[grouping][pxl]
                 coordinates[colPos] =  np.array(pxl)
+
+                coordsEntry[colPos] = (pxl_name, 1, i, j, i, j)
+                
         
 
                 
@@ -392,6 +396,26 @@ class SpectraRegion():
         
         self.logger.info("Adding spatial data")
         adata.obsm["spatial"] = np.array(coordinates)
+
+        adata.uns["spatial"] = {}
+        adata.uns["spatial"][library_id] = {}
+        adata.uns["spatial"][library_id]["scalefactors"] = { 'bin_size_um': pixel_size,
+                                                             'microns_per_pixel': 0.25,
+                                                             'spot_diameter_fullres': 1,
+                                                             'tissue_hires_scalef': 0.25}
+
+        coords = pd.DataFrame.from_records(coordsEntry, index=0)
+        coords.columns = ["idx", "in_tissue", "array_row", "array_col", "pxl_col_in_fullres", "pxl_row_in_fullres"]
+        coords.drop("idx", inplace=True, axis=1)
+        
+        coords.columns = ["in_tissue", "array_row", "array_col", "pxl_col_in_fullres", "pxl_row_in_fullres"]
+        # https://github.com/scverse/squidpy/issues/657
+        coords.set_index(coords.index.astype(adata.obs.index.dtype), inplace=True)
+    
+        adata.obs = pd.merge(adata.obs, coords, how="left", left_index=True, right_index=True)
+        adata.obsm["spatial"] = adata.obs[["pxl_row_in_fullres", "pxl_col_in_fullres"]].values
+        adata.obs.drop(columns=["pxl_row_in_fullres", "pxl_col_in_fullres"], inplace=True)
+
 
         return adata
 

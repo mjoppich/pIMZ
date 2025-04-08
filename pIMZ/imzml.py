@@ -2193,7 +2193,7 @@ class IMZMLExtract:
         return diffMean
 
 
-    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None, makeNullLine=False):
+    def get_region_array_for_continuous_region(self, regionid, resolution=0.1, method="akima", new_masses=None, makeNullLine=False, check_strictly_increasing=False):
 
         self.logger.info("Fetching region range")
         xr,yr,zr,sc = self.get_region_range(regionid)
@@ -2229,11 +2229,40 @@ class IMZMLExtract:
 
         bar = makeProgressBar()
         for coord in bar(coord2spec):
-            discr_spec = self.interpolate_spectrum(coord2spec[coord], coord2mz[coord], masses_new, method=method)
-            assert(len(discr_spec) == rs[2])
-            discr_coord2spec[coord] = discr_spec
+            
+            coordSpecInts = np.array(coord2spec[coord], copy=True)
+            coordSpecMZs = np.array(coord2mz[coord], copy=True)
+                
+            diffs = np.diff(coordSpecMZs)
+            if check_strictly_increasing:
+                if not np.all(diffs > 0):
+                    # mz-values not strictly increasing!
+                    sortedIdx = np.argsort(coordSpecMZs)
+                    
+                    coordSpecInts = coordSpecInts[sortedIdx]
+                    coordSpecMZs = coordSpecMZs[sortedIdx]
+                    
+                    use_idx = []
+                    for i in range(len(coordSpecMZs)-1):
+                        if coordSpecMZs[i] ==  coordSpecMZs[i+1]:
+                            continue
+                        use_idx.append(i)
+                    use_idx = np.array(use_idx)
+                    
+                    coordSpecInts = coordSpecInts[use_idx]
+                    coordSpecMZs = coordSpecMZs[use_idx]
 
-        paddedSpectra = 0
+            discr_spec = self.interpolate_spectrum(coordSpecInts, coordSpecMZs, masses_new, method=method)
+            assert(len(discr_spec) == rs[2])
+            
+            xpos = coord[0]-xr[0]
+            ypos = coord[1]-yr[0]
+
+            if makeNullLine:
+                discr_spec[np.isnan(discr_spec)] = 0
+                discr_spec[discr_spec < 0] = 0
+
+            sarray[xpos, ypos, :] = discr_spec
 
         self.logger.info("Forming region array from spectra")
 
@@ -2252,11 +2281,10 @@ class IMZMLExtract:
             sarray[xpos, ypos, :] = spectra
 
 
-        self.logger.info("Finished region {} with shape {} ({} padded pixels)".format(regionid, rs, paddedSpectra))
+        self.logger.info("Finished region {} with shape {}".format(regionid, rs))
 
 
         return sarray, masses_new
-
     def plot_spectra(self, region_array, coords, valRange, xvals=None, stems=False, label="", start_plot=True, end_plot=True):
         """plots selected spectra in a given range for region_array
 

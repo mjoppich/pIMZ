@@ -738,7 +738,7 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
         AnnotatedProteinWeights (_type_): Objeckt from AnnotatedProteinWeights to query relevant masses.
     """
     
-    def __init__(self, chebiOboCorePath, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1):
+    def __init__(self, chebiOboCorePath, massMode=+1, ppm=5, mz_ppm=1, min_mass=-1, max_mass=-1, mass_literal="http://purl.obolibrary.org/obo/chebi/mass"):
         super().__init__(None, min_mass=min_mass, max_mass=max_mass, massMode=massMode, ppm=ppm, mz_ppm=mz_ppm)
 
         self.massMode = 0
@@ -752,7 +752,7 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
                 return None
             
             for x in term.annotations:
-                if x.property == "http://purl.obolibrary.org/obo/chebi/mass":
+                if x.property == mass_literal:
                     return float(x.literal)
             
             return None
