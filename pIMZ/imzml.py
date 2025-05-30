@@ -45,6 +45,11 @@ from scipy.spatial import ConvexHull
 from scipy.signal import savgol_filter
 
 
+from joblib import Parallel, delayed
+from tqdm import tqdm
+import hnswlib
+import networkx as nx
+
 #web/html
 import jinja2
 
@@ -106,8 +111,7 @@ def _prepare_tnc_array(region_array):
     return peakplot
 
 
-from joblib import Parallel, delayed
-from tqdm import tqdm
+
 
 class PeakFinder:
 
@@ -309,8 +313,6 @@ class PeakFinderNE(PeakFinder):
 
 
 
-import hnswlib
-import networkx as nx
 
 
 class PeakAligner:

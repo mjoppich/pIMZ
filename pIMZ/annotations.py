@@ -67,6 +67,8 @@ def makeProgressBar(total=None) -> progressbar.ProgressBar:
         progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
         ])
 
+import tqdm
+
 
 class ProteinWeights():
     """
@@ -762,10 +764,8 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
         self.category2name = defaultdict(set)
 
         self.chebiID2Name = {}
-        
-        bar = makeProgressBar()
 
-        for x in bar(self.gr):
+        for x in tqdm.tqdm(self.gr, total=len(self.gr), desc="Processing ChEBI Ontology"):
             xterm = self.gr[x]
             
             if xterm.obsolete:
@@ -793,9 +793,8 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
 
 
         self.logger.info("Reading Metabolites")
-        bar = makeProgressBar()
         
-        for x in bar(self.gr):
+        for x in tqdm.tqdm(self.gr, total=len(self.gr), desc="Processing ChEBI Metabolites"):
             xterm = self.gr[x]
             
             if xterm.obsolete:

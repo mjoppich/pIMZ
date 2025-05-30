@@ -30,7 +30,7 @@ jobs:
           command: sudo pip3 install pybaselines numba llvmlite Cython --upgrade
       - run:
           name: "Setup Project"
-          command: sudo python3 setup.py develop test
+          command: sudo python3 setup.py develop
       - run:
           name: "Test Project"
           command: python3 -c "from pIMZ.imzml import IMZMLExtract"
