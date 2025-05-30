@@ -1133,10 +1133,10 @@ class SpectraRegion():
             masses = natsorted(masses)
             
             if len(masses) <= stepsize:
-                return "; ".join([str(round(x, 3)) if not type(x) in [str] else x for x in masses])
+                return "; ".join([str(round(x, 6)) if not type(x) in [str] else x for x in masses])
             
             else:
-                allmasses = [str(round(x, 3)) if not type(x) in [str] else x for x in masses]
+                allmasses = [str(round(x, 6)) if not type(x) in [str] else x for x in masses]
                 
                 linestr = []
                 for i in range(0, len(allmasses), stepsize):

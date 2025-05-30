@@ -42,6 +42,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.stats import kurtosis
 from scipy.interpolate import interp1d
 from scipy.spatial import ConvexHull
+from scipy.signal import savgol_filter
 
 
 #web/html
@@ -103,6 +104,508 @@ def _prepare_tnc_array(region_array):
             peakplot[i,j] = np.linalg.norm(region_array[i, j, :])
 
     return peakplot
+
+
+from joblib import Parallel, delayed
+from tqdm import tqdm
+
+class PeakFinder:
+
+    def __init__(self, n_jobs=1):
+        """
+        PeakFinder class is used to find peaks in the spectra using the scipy signal library.        
+
+        Args:
+            n_jobs (int, optional): Number of parallel jobs to run. Defaults to 1.
+        
+        """
+        self.n_jobs = n_jobs
+
+    def find_peaks(self, coord2spec, coord2mz, min_peak_height=0.001, peak_prominence=0.0005):
+        """
+        Finds peaks in the given spectra using the scipy signal library.
+
+        Args:
+            coord2spec (dict): Dictionary mapping coordinates to spectra.
+            coord2mz (dict): Dictionary mapping coordinates to m/z values.
+            min_peak_height (float): Minimum height of peaks to be detected.
+            peak_prominence (float): Minimum prominence of peaks to be detected.
+        
+        """
+
+        def find_peaks_in_spectrum(mz, intensities, min_peak_height=0.01, peak_prominence=0.5):
+            """Helper function for parallel peak finding"""
+            norm_intensities = intensities / np.max(intensities)
+            peaks, properties = signal.find_peaks(
+                norm_intensities, 
+                height=min_peak_height, 
+                prominence=peak_prominence
+            )
+            return mz[peaks], intensities[peaks]
+
+        print(f"Finding peaks in {len(coord2spec)} spectra using {self.n_jobs} cores...")
+        results = Parallel(n_jobs=self.n_jobs)(
+            delayed(find_peaks_in_spectrum)(
+                mz, intensities, min_peak_height, peak_prominence
+            ) for mz, intensities in tqdm(zip(coord2mz.values(), coord2spec.values()), total=len(coord2spec), desc="Finding peaks")
+        )
+
+        all_peaks = [r[0] for r in results]
+        peak_intensities = [r[1] for r in results]
+
+        coord2peaks = {x: y for x, y in zip(coord2spec.keys(), all_peaks)}
+        coord2intensities = {x: y for x, y in zip(coord2spec.keys(), peak_intensities)}
+
+        return coord2peaks, coord2intensities
+    
+class PeakFinderNaiv(PeakFinder):
+    def __init__(self, n_jobs=1):
+        """
+        PeakFinder class is used to find peaks in the spectra using the scipy signal library.        
+
+        Args:
+            n_jobs (int, optional): Number of parallel jobs to run. Defaults to 1.
+        
+        """
+        super().__init__(n_jobs=n_jobs)
+
+
+
+    def find_peaks(self, coord2spec, coord2mz, min_height=0):
+        """
+        Finds peaks in the given spectra using the scipy signal library.
+
+        Args:
+            coord2spec (dict): Dictionary mapping coordinates to spectra.
+            coord2mz (dict): Dictionary mapping coordinates to m/z values.
+            min_peak_height (float): Minimum height of peaks to be detected.
+            peak_prominence (float): Minimum prominence of peaks to be detected.
+        
+        """
+
+        def find_peaks_non_uniform(mz, intensities, threshold):
+
+            peaks = intensities > threshold
+
+            return mz[peaks], intensities[peaks]
+
+
+
+        print(f"Finding peaks in {len(coord2spec)} spectra using {self.n_jobs} cores...")
+        results = Parallel(n_jobs=self.n_jobs)(
+            delayed(find_peaks_non_uniform)(
+                mz, intensities, min_height
+            ) for mz, intensities in tqdm(zip(coord2mz.values(), coord2spec.values()), total=len(coord2spec), desc="Finding peaks")
+        )
+
+        all_peaks = [r[0] for r in results]
+        peak_intensities = [r[1] for r in results]
+
+        coord2peaks = {x: y for x, y in zip(coord2spec.keys(), all_peaks)}
+        coord2intensities = {x: y for x, y in zip(coord2spec.keys(), peak_intensities)}
+
+        return coord2peaks, coord2intensities
+
+
+class PeakFinderNE(PeakFinder):
+    def __init__(self, n_jobs=1):
+        """
+        PeakFinder class is used to find peaks in the spectra using the scipy signal library.        
+
+        Args:
+            n_jobs (int, optional): Number of parallel jobs to run. Defaults to 1.
+        
+        """
+        super().__init__(n_jobs=n_jobs)
+
+
+
+    def find_peaks(self, coord2spec, coord2mz, max_peak_width=5, snr_threshold=3, min_neighbors=2, window_length=5, polyorder=3):
+        """
+        Finds peaks in the given spectra using the scipy signal library.
+
+        Args:
+            coord2spec (dict): Dictionary mapping coordinates to spectra.
+            coord2mz (dict): Dictionary mapping coordinates to m/z values.
+            min_peak_height (float): Minimum height of peaks to be detected.
+            peak_prominence (float): Minimum prominence of peaks to be detected.
+        
+        """
+
+        def find_peaks_non_uniform(mz, intensities, min_neighbors=2, snr_threshold=3, window_length=5, polyorder=3, max_peak_width=5):
+            """
+            Find peaks in non-uniformly spaced 1D data (e.g., mass spectrometry).
+            
+            Parameters:
+                x (array): Non-uniform x-values (e.g., m/z).
+                y (array): Corresponding intensities.
+                min_spacing (float): Minimum x-distance between peaks.
+                min_neighbors (int): Number of adjacent points to check on each side.
+                snr_threshold (float): Minimum signal-to-noise ratio for a peak.
+                window_length (int): Savitzky-Golay filter window size.
+                polyorder (int): Savitzky-Golay polynomial order.
+            
+            Returns:
+                peaks (list): Indices of detected peaks.
+            """
+            # Smooth the data to reduce noise
+            y_smooth = savgol_filter(intensities, window_length=window_length, polyorder=polyorder)
+            
+            # Estimate noise level (median absolute deviation)
+            noise = np.median(np.abs(intensities - np.median(y_smooth))) / 0.6745  # MAD to STD estimate
+            if noise == 0:
+                noise = 1e-6  # Avoid division by zero
+
+            peaks = []
+            n = len(mz)
+
+
+            # Check if current point is a local maximum
+            is_peak = np.ones(len(mz), dtype=bool)
+
+            # Vectorized neighbor check
+            for j in range(1, min_neighbors + 1):
+                is_peak &= ((abs(mz[i]-mz[i-j]) >= max_peak_width_mz) | (y_smooth[j:-j] > y_smooth[:-2*j]))  # Left neighbors
+                is_peak &= ((abs(mz[i]-mz[i-j]) >= max_peak_width_mz) | (y_smooth[j:-j] > y_smooth[2*j: ]))   # Right neighbors
+                is_peak = np.pad(is_peak, (j, j), 'constant', constant_values=False)
+
+            valid_peaks = np.where(is_peak & (y_smooth > snr_threshold * noise))[0]
+
+            # Process peaks with spacing constraint
+            peaks = []
+            last_peak_x = -np.inf
+            max_peak_width_mz = max_peak_width * mz[0] / 1000000 # ppm
+
+
+            for i in valid_peaks:
+                current_x = x[i]
+                if current_x - last_peak_x >= max_peak_width_mz:
+                    peaks.append(i)
+                    last_peak_x = current_x
+                else:
+                    # Replace if current peak is higher
+                    if y_smooth[i] > y_smooth[peaks[-1]]:
+                        peaks[-1] = i
+                        last_peak_x = current_x
+            
+            return mz[peaks], intensities[peaks]
+
+
+
+        print(f"Finding peaks in {len(coord2spec)} spectra using {self.n_jobs} cores...")
+        results = Parallel(n_jobs=self.n_jobs)(
+            delayed(find_peaks_non_uniform)(
+                mz, intensities, min_neighbors, snr_threshold, window_length, polyorder, max_peak_width
+            ) for mz, intensities in tqdm(zip(coord2mz.values(), coord2spec.values()), total=len(coord2spec), desc="Finding peaks")
+        )
+
+        all_peaks = [r[0] for r in results]
+        peak_intensities = [r[1] for r in results]
+
+        coord2peaks = {x: y for x, y in zip(coord2spec.keys(), all_peaks)}
+        coord2intensities = {x: y for x, y in zip(coord2spec.keys(), peak_intensities)}
+
+        return coord2peaks, coord2intensities
+
+
+
+import hnswlib
+import networkx as nx
+
+
+class PeakAligner:
+
+    def __init__(self):
+        pass
+
+
+
+    def _round_and_group_peaks(self, all_peaks, peak_intensities, decimal_precision=4):
+        """
+        Round peaks and group identical m/z values to reduce dataset size.
+        
+        Parameters:
+        - all_peaks: List of peak arrays from each spectrum
+        - peak_intensities: List of intensity arrays from each spectrum
+        - decimal_precision: Number of decimal places to keep
+        
+        Returns:
+        - combined_peaks: Array of unique rounded m/z values
+        - sample_indices: Array mapping to original spectra
+        - intensity_map: Dict mapping (rounded m/z, sample_idx) to max intensity
+        - reverse_map: Dict mapping rounded m/z to original m/z values
+        """
+        intensity_map = {}
+        original_mz_map = defaultdict(list)
+        
+        # Round peaks and track max intensities
+        for sample_idx, (peaks, intensities) in tqdm(enumerate(zip(all_peaks, peak_intensities)), total=len(all_peaks), desc="Rounding peaks"):
+            rounded_peaks = np.round(peaks, decimals=decimal_precision)
+            
+            for mz, rounded_mz, intensity in zip(peaks, rounded_peaks, intensities):
+                key = (rounded_mz, sample_idx)
+
+                if intensity > 0:
+                    if key in intensity_map:
+                        if intensity > intensity_map[key]:
+                            intensity_map[key] = intensity
+                            original_mz_map[rounded_mz][sample_idx] = mz
+                    else:
+                        intensity_map[key] = intensity
+                        if rounded_mz not in original_mz_map:
+                            original_mz_map[rounded_mz] = {}
+                        original_mz_map[rounded_mz][sample_idx] = mz
+        
+        # Create combined array of unique rounded peaks
+        combined_peaks = np.array(sorted(original_mz_map.keys()))
+        
+        return combined_peaks, intensity_map, original_mz_map
+
+
+    def _build_hnsw_index(self, peaks, ppm_tolerance=100, ef_construction=200, M=16, num_threads=-1):
+        """
+        Build HNSW index for approximate nearest neighbor search with ppm tolerance
+        
+        Parameters:
+        - peaks: Array of m/z values
+        - ppm_tolerance: Mass tolerance in parts-per-million
+        - ef_construction: HNSW parameter (higher = more accurate but slower build)
+        - M: HNSW parameter (number of bi-directional links)
+        
+        Returns:
+        - index: HNSW index
+        - radii: Array of dynamic search radii for each peak
+        """
+        # Convert to 2D array for HNSW
+        data = peaks.reshape(-1, 1).astype('float32')
+        
+        # Create index
+        index = hnswlib.Index(space='l2', dim=1)
+
+        print("Num Peaks", len(peaks))
+        print("M", M)
+        print("ef_construction", ef_construction)
+        index.init_index(max_elements=len(peaks), ef_construction=ef_construction, M=M, random_seed=42)
+
+        index.add_items(data, num_threads=num_threads)
+        
+        # Calculate dynamic search radii
+        radii = peaks * ppm_tolerance / 1e6
+        return index, radii
+
+
+    def _find_peak_clusters_ann(self, peaks, ppm_tolerance=100, ef_search=50, n_neighbors=50, num_threads=-1):
+        """
+        Find peak clusters using approximate nearest neighbors
+        
+        Parameters:
+        - peaks: Array of m/z values
+        - ppm_tolerance: Mass tolerance in parts-per-million
+        - ef_search: HNSW search parameter (higher = more accurate but slower)
+        
+        Returns:
+        - clusters: List of peak clusters
+        """
+        # Build HNSW index
+        print("Generating Index")
+        index, radii = self._build_hnsw_index(peaks, ppm_tolerance, num_threads=num_threads)
+        print("Generating Index Done")
+        
+        # Create graph for connected components
+        graph = nx.Graph()
+        
+        # Add all peaks as nodes
+        for i, (mz, rad) in enumerate(zip(peaks, radii)):
+            graph.add_node(i, mz=mz, rad=rad)
+        
+        # Find neighbors for each point within dynamic radius
+        for i, (mz, radius) in tqdm(enumerate(zip(peaks, radii)), total=len(peaks), desc="Finding neighbors for ppm={}".format(ppm_tolerance)):
+            # Set ef parameter for this query (can be adjusted based on radius)
+            index.set_ef(max(ef_search, int(ef_search * (1 + np.log1p(radius)))))
+            
+            # Query ANN
+            query_point = np.array([mz]).astype('float32').reshape(1, 1)
+            labels, distances = index.knn_query(query_point, k=n_neighbors)
+
+            #radius = radius / 2
+            
+            # Filter by actual radius
+            #valid_neighbors = labels[0][distances[0] <= radius]
+            #valid_distances = distances[0][distances[0] <= radius]
+            valid_neighbors = labels[0]
+
+            verbose_on = False
+            #if 175.0 <= mz <= 175.2:
+            #    verbose_on=True
+
+
+            if verbose_on:
+                print("Debugging")
+                print("Peak", i)
+                print("Query Point", mz)
+                print("labels", labels)
+                print("Distances", distances)
+                print("Neighbors", valid_neighbors)
+                print("Neighbor mz", [graph.nodes[int(x)]["mz"] for x in valid_neighbors])
+                
+                print("Actual distances", [(graph.nodes[i]["mz"]-graph.nodes[int(x)]["mz"]) for x in valid_neighbors])
+                print("Radii", radius)
+
+            used_neighbors = []
+
+            if len(valid_neighbors) == 0:
+                pass # no neighbors found => singular peak!
+            else:
+                for ni, neighbor in enumerate(valid_neighbors):
+
+                    distance = abs(graph.nodes[i]["mz"]-graph.nodes[int(neighbor)]["mz"])
+
+                    if neighbor != i and distance <= radius:  # exclude self
+                        graph.add_edge(i, int(neighbor), distance=distance)
+                        used_neighbors.append(int(neighbor))
+
+            if verbose_on:
+                print("Accepted Neighbors", used_neighbors)
+        
+        
+
+        # Find connected components
+        clusters = list(set([tuple(x) for x in nx.connected_components(graph)]))
+        print(len([x for x in clusters if len(x) == 1]), "/", len(clusters), "are isolates")
+        
+        #clusters = list(set(clusters + [tuple([x]) for x in nx.isolates(graph)]))
+        #print(len([x for x in clusters if len(x) == 1]), "/", len(clusters), "are isolates")
+            
+        # Filter single-point clusters (optional)
+        #clusters = [c for c in clusters if len(c) > 1]
+        
+        return clusters, graph
+
+
+    
+    def align_peaks(self, coord2peaks, coord2intensities, ppm_tolerance=10, n_neighbors=15, decimal_precision=8, ann_ef_search=200, min_fraction=0.01):
+        """
+        Aligns peaks in the given spectra using approximate nearest neighbors.
+
+        Args:
+            coord2spec (dict): Dictionary mapping coordinates to spectra.
+            coord2mz (dict): Dictionary mapping coordinates to m/z values.
+            mz_values (numpy.array): Array of m/z values.
+            ppm (int, optional): Parts per million for peak alignment. Defaults to 10.
+            n_neighbors (int, optional): Number of neighbors for peak alignment. Defaults to 15.
+            decimal_precision (int, optional): Decimal precision for peak alignment. Defaults to 8.
+            ann_ef_search (int, optional): Number of nearest neighbors to search for. Defaults to 200.
+        Returns:
+            coord2aligned_intensities (dict): Dictionary mapping coordinates to aligned intensities.
+            aligned_peaks (numpy.array): Array of aligned m/z values.
+        """
+
+        coords_list = list(coord2peaks.keys())
+        all_peaks = list(coord2peaks.values())
+        peak_intensities = list(coord2intensities.values())
+
+        print("Rounding and grouping peaks...")
+        combined_peaks, intensity_map, original_mz_map = self._round_and_group_peaks(
+            all_peaks, peak_intensities, decimal_precision=decimal_precision
+        )
+
+        print(len(combined_peaks), "unique peaks found")
+
+        print("Finding peak clusters with ANN...")
+        clusters, _ = self._find_peak_clusters_ann(
+            combined_peaks, 
+            ppm_tolerance=ppm_tolerance,
+            ef_search=ann_ef_search,
+            n_neighbors=n_neighbors
+        )
+
+
+        print("Calculating consensus m/z values...")
+        aligned_peaks = []
+        cluster_intensity_maps = []
+
+        min_samples = int(min_fraction * len(coords_list))
+        print("Min fraction", min_fraction, "=", min_samples, "samples")
+        skipped = 0
+
+        for cluster in tqdm(clusters, desc="Calculating consensus m/z values"):
+            # Collect all original m/z values that contributed to these rounded peaks
+            original_mz_values = []
+            intensities = []
+            sample_indices = []
+            
+            for rounded_idx in cluster:
+                rounded_mz = combined_peaks[rounded_idx]
+                for sample_idx, original_mz in original_mz_map[rounded_mz].items():
+                    original_mz_values.append(original_mz)
+                    intensities.append(intensity_map[(rounded_mz, sample_idx)])
+                    sample_indices.append(sample_idx)
+
+            # Weighted median using original precise m/z values
+            sorted_idx = np.argsort(original_mz_values)
+            sorted_mz = np.array(original_mz_values)[sorted_idx]
+            sorted_weights = np.array(intensities)[sorted_idx]
+            cumsum = np.cumsum(sorted_weights)
+
+            if len(sorted_mz) == 1:
+                median_idx = 0
+            else:
+                median_idx = np.searchsorted(cumsum, cumsum[-1]/2)
+                
+            consensus_mz = sorted_mz[median_idx]
+
+            # Create intensity mapping
+            intensity_map_cluster = {}
+            for sample_idx, intensity in zip(sample_indices, intensities):
+                if sample_idx not in intensity_map_cluster or intensity > intensity_map_cluster[sample_idx]:
+                    intensity_map_cluster[sample_idx] = intensity
+    
+            if 174.0115 < consensus_mz < 174.0116:
+                print("consensus_mz", consensus_mz)
+                print("sample_indices", len(sample_indices))
+                print("sorted_weights", len(sorted_weights))
+                print("sorted_weights > 0", len(sorted_weights[sorted_weights>0]))
+
+                print("intensity_map_cluster", len(intensity_map_cluster))
+                cim = np.array(list(intensity_map_cluster.values()))
+                print("cluster_intensity_maps > 0", len(cim[cim>0]))
+
+                print("sorted_mz", len(sorted_mz))
+                print("original_mz_values", len(original_mz_values))
+                print("min_samples", min_samples)
+
+                
+            if len(intensity_map_cluster) < min_samples:
+                skipped += 1
+                continue
+
+
+            aligned_peaks.append(consensus_mz)
+            cluster_intensity_maps.append(intensity_map_cluster)
+
+
+
+        print("Cluster too small, skipping", skipped, "m/z values")
+        assert(len(aligned_peaks) == len(cluster_intensity_maps))
+
+        # Sort peaks by m/z
+        sort_idx = np.argsort(aligned_peaks)
+        aligned_peaks = np.array(aligned_peaks)[sort_idx]
+        cluster_intensity_maps = [cluster_intensity_maps[i] for i in sort_idx]
+
+        # Build final intensity matrix
+        print("Building intensity matrix...")
+        aligned_intensities = np.zeros((len(coord2peaks), len(aligned_peaks)))
+        for peak_idx, intensity_map in tqdm(enumerate(cluster_intensity_maps), desc="Building intensity matrix"):
+            for sample_idx, intensity in intensity_map.items():
+                aligned_intensities[sample_idx, peak_idx] = intensity
+
+
+        coord2aligned_intensities = dict()
+        for coord_idx, coord in tqdm(enumerate(coords_list), desc="Creating coord-dictionary"):
+            coord2aligned_intensities[coord] = aligned_intensities[coord_idx,:]
+
+        return coord2aligned_intensities, aligned_peaks
 
 class IMZMLExtract:
     """IMZMLExtract class is required to access and retrieve data from an imzML file.
@@ -176,6 +679,17 @@ class IMZMLExtract:
         self.logger.info("All have same m/z Values.")
         return True
 
+
+    def get_ppm(self, mz, ppm=None):
+        
+        if ppm is None:
+            ppm = self.ppm
+        
+        return mz * (ppm / 1000000)
+
+    def get_ppm_range(self, mz, ppm):
+        ppmError = self.get_ppm(mz, ppm)
+        return (mz-ppmError, mz+ppmError)
 
     def bins_per_pixel(self, regionid, plot=True):
         
@@ -1092,7 +1606,7 @@ class IMZMLExtract:
         tic_array = _prepare_tic_array(region_array)
         return tic_array
 
-    def plot_tic(self, region_array):
+    def plot_tic(self, region_array, close=True):
         """Displays a matrix where each pixel is the sum of intensity values over all m/z summed in the corresponding pixel in region_array.
 
         Args:
@@ -1104,7 +1618,8 @@ class IMZMLExtract:
         Plotter.plot_array_scatter(peakplot, fig=fig, discrete_legend=False)
         plt.title("TIC (total summed intensity per pixel)", y=1.08)
         plt.show()
-        plt.close()
+        if close:
+            plt.close()
 
     def plot_tnc(self, region_array):
         """Displays a matrix where each pixel is the norm count of intensity values over all m/z summed in the corresponding pixel in region_array.
@@ -1323,7 +1838,7 @@ class IMZMLExtract:
 
     
     @classmethod
-    def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05):    
+    def detect_hv_masses(cls, region, topn=2000, bins=50, meanThreshold=0.05, minquantile=0.25, bgshape=None):    
         """
         https://www.nature.com/articles/nbt.3192#Sec27 / Seurat
         We calculated the mean and a dispersion measure (variance/mean) for each gene across all single cells,
@@ -1358,14 +1873,20 @@ class IMZMLExtract:
             #for i in range(region.shape[0]):
             #    for j in range(region.shape[1]):
             #        allMassIntensities.append(region[i,j,k])
-            allMassIntensities = np.ravel(region[:,:,k])
+            if bgshape is None:
+                allMassIntensities = np.ravel(region[:,:,k])
+            else:
+                kreg = region[:,:,k]
+                allMassIntensities = np.ravel(kreg[~bgshape])
 
             massMean = np.mean(allMassIntensities)
             massVar = np.var(allMassIntensities)
 
             allMassMeanDisp.append((k, massMean, massMean/massVar))
 
+
         minmax = min([x[1] for x in allMassMeanDisp]), max([x[1] for x in allMassMeanDisp])
+        print(minmax[0], "-->", minmax[1])
         binSpace = np.linspace(0, minmax[1], bins)
         binned = np.digitize([x[1] for x in allMassMeanDisp], binSpace)
         bin2elem = defaultdict(list)
@@ -1386,7 +1907,8 @@ class IMZMLExtract:
             allZElems += binElems
 
         allZElems = sorted(allZElems, key=lambda x: x[2], reverse=True)
-        quartile = np.quantile([x[1] for x in allZElems], [0.25])[0]
+        print(allZElems)
+        quartile = np.quantile([x[1] for x in allZElems], [minquantile])[0]
 
         allZElems_selected = [x for x in allZElems if x[1] > quartile]
 
@@ -2285,6 +2807,8 @@ class IMZMLExtract:
 
 
         return sarray, masses_new
+
+        
     def plot_spectra(self, region_array, coords, valRange, xvals=None, stems=False, label="", start_plot=True, end_plot=True):
         """plots selected spectra in a given range for region_array
 

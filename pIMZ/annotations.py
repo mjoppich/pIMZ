@@ -759,6 +759,8 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
 
         self.chebiSets = defaultdict(set)
         self.metabolite2set = defaultdict(set)
+        self.category2name = defaultdict(set)
+
         self.chebiID2Name = {}
         
         bar = makeProgressBar()
@@ -822,11 +824,15 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
                 ppmDist = self.get_ppm(mzWeight, self.mz_ppm)
                 
                 
-                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, {"name": [metaboliteID], "mass": molWeight,
-                                                                           "mzWeight": mzWeight,
-                                                                           "pathway": self.metabolite2set.get(metaboliteID, []),
-                                                                           "pathway_name": [self.chebiID2Name[x] for x in self.metabolite2set.get(metaboliteID, [])]})
+                intervalData = {"name": [metaboliteID], "mass": molWeight,
+                                "mzWeight": mzWeight,
+                                "pathway": self.metabolite2set.get(metaboliteID, []),
+                                "pathway_name": [self.chebiID2Name[x] for x in self.metabolite2set.get(metaboliteID, [])]}
+                self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, intervalData)
                 
+                for cat in intervalData["pathway"]:
+                    self.category2name[cat].add(metaboliteID)
+
 
     def get_mz_for_category(self, category):
         

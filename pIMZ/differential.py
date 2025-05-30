@@ -56,6 +56,9 @@ from .regions import SpectraRegion
 
 import abc
 
+from tqdm import tqdm
+from joblib import Parallel, delayed
+
 # applications
 import progressbar
 def makeProgressBar() -> progressbar.ProgressBar:
@@ -84,7 +87,11 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
             self.logger.info("Added new Stream Handler")
 
-    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion], GroupedRegions], corr_method="benjamini_hochberg", testname="Differential", threshold=0.2, pseudo_count=1e-9) -> None:
+    def __init__(self, specs: Union[SpectraRegion, Dict[Any,SpectraRegion], GroupedRegions],
+                 corr_method="benjamini_hochberg", testname="Differential",
+                 threshold=0.2, pseudo_count=1e-9,
+                 n_jobs=16
+                 ) -> None:
 
         
         if isinstance(specs, SpectraRegion):
@@ -96,6 +103,7 @@ class DifferentialTest(metaclass=abc.ABCMeta):
         self.pseudo_count = pseudo_count
         self.threshold = threshold
         self.corr_method = corr_method
+        self.n_jobs = n_jobs
         #logger
         self.__set_logger()
 
@@ -270,8 +278,17 @@ class DifferentialTest(metaclass=abc.ABCMeta):
                     group2_values = np.concatenate((group2_values, spec_values))
 
 
-            mean_group1 = np.mean(group1_values)
-            mean_group2 = np.mean(group2_values)
+            if len(group1_values) == 0:
+                mean_group1 = 0
+            else:
+                mean_group1 = np.mean(group1_values)
+            
+            if len(group2_values) == 0:
+                mean_group2 = 0
+            else:
+                mean_group2 = np.mean(group2_values)
+            
+            
 
             #print(len(group1_values), len(group2_values), pixels_group1, pixels_group2)
 
@@ -294,8 +311,16 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
         #print("Starting analysis")
         #results = list(map(process_feature, common_features))
-        bar = makeProgressBar()
-        results = [process_feature(x) for x in bar(common_features)]
+
+
+
+        #results = Parallel(n_jobs=self.n_jobs)(
+        #    delayed(process_feature)(
+        #        x
+        #    ) for x in tqdm(common_features, total=len(common_features), desc="Finding peaks")
+        #)
+
+        results = [process_feature(x) for x in tqdm(common_features, total=len(common_features), desc="Testing each feature")]
   
         #print("Finishing analysis")
 
@@ -348,8 +373,8 @@ class DifferentialTest(metaclass=abc.ABCMeta):
 
 class DifferentialTTest(DifferentialTest):
 
-    def __init__(self, region: SpectraRegion) -> None:
-        super().__init__(region)
+    def __init__(self, region: SpectraRegion, **kwargs) -> None:
+        super().__init__(region, **kwargs)
 
 
     def compare_groups(self, group1_values: Iterable, group2_values: Iterable) -> float:

@@ -15,13 +15,13 @@ from setuptools.command.test import test as TestCommand
 # when you run python setup.py test
 class PyTest(TestCommand):
     def finalize_options(self):
-        TestCommand.finalize_options(self)
-        self.test_args = []
-        self.test_suite = True
+ TestCommand.finalize_options(self)
+ self.test_args = []
+ self.test_suite = True
 
     def run_tests(self):
-        import pytest  # import here, because outside the required eggs aren't loaded yet
-        sys.exit(pytest.main(self.test_args))
+ import pytest  # import here, because outside the required eggs aren't loaded yet
+ sys.exit(pytest.main(self.test_args))
 
 ext_lib_path = 'rectangle'
 include_dir = os.path.join(ext_lib_path, 'include')
@@ -39,13 +39,13 @@ print(segment_sources, file=sys.stderr)
 compileArgs = ["-std=c++1z", "-Wall", "-fopenmp", "-fPIC", "-std=gnu++17",'-O3']
 
 libPIMZ=Extension('pIMZ.libPIMZ',
-                      sources=srm_sources+imageregion_sources+segment_sources,
-                      language='c++',
-                      libraries=['z', 'gomp'],
-                      extra_compile_args=compileArgs,
-                      extra_objects=[],
-                      
-                      )
+ sources=srm_sources+imageregion_sources+segment_sources,
+ language='c++',
+ libraries=['z', 'gomp'],
+ extra_compile_args=compileArgs,
+ extra_objects=[],
+ 
+ )
 
 version = "1.0a"
 import pathlib
@@ -57,16 +57,16 @@ setup(name="pIMZ",
       long_description=open("README.md").read(),
       long_description_content_type='text/markdown',
       classifiers=[ # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 3 - Alpha',
-        'Intended Audience :: Developers',
-        'Programming Language :: Python',
-        'Programming Language :: Python :: 3 :: Only',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Topic :: Scientific/Engineering :: Bio-Informatics',
-        'Topic :: Scientific/Engineering :: Medical Science Apps.'
+ 'Development Status :: 3 - Alpha',
+ 'Intended Audience :: Developers',
+ 'Programming Language :: Python',
+ 'Programming Language :: Python :: 3 :: Only',
+ 'Programming Language :: Python :: 3.6',
+ 'Programming Language :: Python :: 3.7',
+ 'Programming Language :: Python :: 3.8',
+ 'Programming Language :: Python :: 3.9',
+ 'Topic :: Scientific/Engineering :: Bio-Informatics',
+ 'Topic :: Scientific/Engineering :: Medical Science Apps.'
       ],
       keywords="IMS MSI imaging mass-spectrometry interactive integrative", # Separate with spaces
       author="Markus Joppich",
@@ -81,30 +81,12 @@ setup(name="pIMZ",
       python_requires='>=3.6',
       # TODO: List of packages that this one depends upon:  
       install_requires=[
-        'numpy>=1.17.5', 
-        'h5py', "networkx~=2.3", "pronto", "upsetplot",
-        'matplotlib', "joblib",
-        'pandas',
-        'scipy', 
-        'scikit-image',
-        'scikit-learn', 
-        'dill', 
-        'pathos',
-        'ms_peak_picker', 
-        'globus_sdk', 
-        'progressbar', 
-        'anndata', 
-        'diffxpy', 
-        'pyimzml',
-        'natsort',
-        'seaborn',
-        'llvmlite', 'pykeops',
-        'imageio', 'umap', 'jinja2', 'hdbscan', 'regex',
-        'Pillow', 'adjustText', 'intervaltree'], #dabest, 'fuzzy-c-means'
+            'numpy>=1.17.5', 'h5py', "networkx~=2.3", "pronto", "upsetplot", 'matplotlib', "joblib", 'pandas', 'scipy', 'scikit-image', 'scikit-learn',  "pybaselines", 'dill',  'pathos', 'ms_peak_picker',  'globus_sdk',  'progressbar',  'anndata',  'diffxpy',  'pyimzml', 'natsort', 'seaborn', 'llvmlite', 'pykeops', 'imageio', 'umap-learn', 'jinja2', 'hdbscan', 'regex','Pillow', 'adjustText', 'intervaltree'
+            ], #dabest, 'fuzzy-c-means'
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
-        'console_scripts': 
-            []
+ 'console_scripts': 
+     []
       },
       ext_modules=[libPIMZ]
 )
