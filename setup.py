@@ -9,19 +9,6 @@ Licensed under MIT.
 '''
 import sys, os
 from setuptools import setup, find_packages, Extension
-from setuptools.command.test import test as TestCommand
-
-# This is a plug-in for setuptools that will invoke py.test
-# when you run python setup.py test
-class PyTest(TestCommand):
-    def finalize_options(self):
- TestCommand.finalize_options(self)
- self.test_args = []
- self.test_suite = True
-
-    def run_tests(self):
- import pytest  # import here, because outside the required eggs aren't loaded yet
- sys.exit(pytest.main(self.test_args))
 
 ext_lib_path = 'rectangle'
 include_dir = os.path.join(ext_lib_path, 'include')
@@ -81,7 +68,7 @@ setup(name="pIMZ",
       python_requires='>=3.6',
       # TODO: List of packages that this one depends upon:  
       install_requires=[
-            'numpy>=1.17.5', 'h5py', "networkx~=2.3", "pronto", "upsetplot", 'matplotlib', "joblib", 'pandas', 'scipy', 'scikit-image', 'scikit-learn',  "pybaselines", 'dill',  'pathos', 'ms_peak_picker',  'globus_sdk',  'progressbar',  'anndata',  'diffxpy',  'pyimzml', 'natsort', 'seaborn', 'llvmlite', 'pykeops', 'imageio', 'umap-learn', 'jinja2', 'hdbscan', 'regex','Pillow', 'adjustText', 'intervaltree'
+            'numpy>=1.17.5', 'joblib', 'tqdm', 'h5py', "networkx~=2.3", "hnswlib", "pronto", "upsetplot", 'matplotlib', "joblib", 'pandas', 'scipy', 'scikit-image', 'scikit-learn',  "pybaselines", 'dill',  'pathos', 'ms_peak_picker',  'globus_sdk',  'progressbar',  'anndata',  'diffxpy',  'pyimzml', 'natsort', 'seaborn', 'llvmlite', 'pykeops', 'imageio', 'umap-learn', 'jinja2', 'hdbscan', 'regex','Pillow', 'adjustText', 'intervaltree'
             ], #dabest, 'fuzzy-c-means'
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
