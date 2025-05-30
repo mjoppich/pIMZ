@@ -68,7 +68,7 @@ setup(name="pIMZ",
       python_requires='>=3.6',
       # TODO: List of packages that this one depends upon:  
       install_requires=[
-            'numpy>=1.17.5', 'joblib', 'tqdm', 'h5py', "networkx~=2.3", "hnswlib", "pronto", "upsetplot", 'matplotlib', "joblib", 'pandas', 'scipy', 'scikit-image', 'scikit-learn',  "pybaselines", 'dill',  'pathos', 'ms_peak_picker',  'globus_sdk',  'progressbar',  'anndata',  'diffxpy',  'pyimzml', 'natsort', 'seaborn', 'llvmlite', 'pykeops', 'imageio', 'umap-learn', 'jinja2', 'hdbscan', 'regex','Pillow', 'adjustText', 'intervaltree'
+            'numpy>=1.17.5', 'joblib', 'tqdm', 'h5py', "networkx~=2.3", "hnswlib", "pronto", "upsetplot", 'matplotlib', "joblib", 'pandas', 'scipy', 'scikit-image', 'scikit-learn<1.7',  "pybaselines", 'dill',  'pathos', 'ms_peak_picker',  'globus_sdk',  'progressbar',  'anndata',  'diffxpy',  'pyimzml', 'natsort', 'seaborn', 'llvmlite', 'pykeops', 'imageio', 'umap-learn', 'jinja2', 'hdbscan', 'regex','Pillow', 'adjustText', 'intervaltree'
             ], #dabest, 'fuzzy-c-means'
       # TODO: List executable scripts, provided by the package (this is just an example)
       entry_points={
