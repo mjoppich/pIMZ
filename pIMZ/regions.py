@@ -1115,7 +1115,7 @@ class SpectraRegion():
             self.logger.info("{}: Used {} of {} mz values".format(str(plotDescription), usedMZValues, len(useMZ)))
             
         if usedMZValues == 0:
-            return
+            return None
 
         if log:
             image = np.log(image)
@@ -2389,7 +2389,7 @@ class SpectraRegion():
         return cons_spectra
 
 
-    def plot_boxplot(self, mzvalues, pw=None, pw_match_name="name"):
+    def plot_boxplot(self, mzvalues, pw=None, pw_match_name="name", verbose=False):
         """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster.
 
         Args:
@@ -2467,6 +2467,11 @@ class SpectraRegion():
 
         return dfObj
 
+
+    def get_features_df(self):
+
+        features = [x for x in self.get_mz_vector()]
+        return pd.DataFrame.from_dict({"features": features})
 
     def mass_dabest(self, masses, background=0):
         """Plots seaborn.boxplot depicting the range of intensity values of each desired mass within each cluster. Additionally, plots mean difference effect sizes with help of the DABEST package. The given cluster id is considered a control group.

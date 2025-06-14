@@ -1622,6 +1622,8 @@ class IMZMLExtract:
         plt.show()
         if close:
             plt.close()
+        else:
+            return fig
 
     def plot_tnc(self, region_array):
         """Displays a matrix where each pixel is the norm count of intensity values over all m/z summed in the corresponding pixel in region_array.
@@ -2839,7 +2841,14 @@ class IMZMLExtract:
         for xi, x in enumerate(coords):
             labelstr = "{} {}".format(label, str(x))
             if not stems:
-                plt.plot(xvals, region_array[x], label=labelstr)
+                p=plt.plot(xvals, region_array[x], label=labelstr)
+                markerline, stemlines, baseline = plt.stem(xvals, [0]*len(xvals), label=labelstr, basefmt=" ")
+                color=p[-1].get_color()
+                plt.setp(stemlines, 'color', color)
+                plt.setp(markerline, 'color', color)
+                plt.setp(stemlines, 'linestyle', 'dotted')
+
+                
             else:
                 markerline, stemlines, baseline = plt.stem(xvals, region_array[x], label=labelstr, markerfmt=stemFormats[xi])
                 plt.setp(stemlines, 'color', plt.getp(markerline,'color'))

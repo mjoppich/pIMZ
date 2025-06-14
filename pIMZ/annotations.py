@@ -833,6 +833,9 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
                     self.category2name[cat].add(metaboliteID)
 
 
+    def get_entity_df(self):
+        return pd.DataFrame({ "match" : self.chebiID2Name.keys() , "CHEBI_name" : self.chebiID2Name.values() })
+
     def get_mz_for_category(self, category):
         
         if not category in self.category2name:

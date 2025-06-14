@@ -1085,7 +1085,7 @@ class ShrunkenCentroidClusterer(RegionClusterer):
         for clusterID in np.unique(image):
             clusterID = int(clusterID)
             elems = np.transpose(np.nonzero(image == clusterID))
-            c2c[clusterID] = elems
+            c2c[clusterID] = np.array(list([tuple(x) for x in elems]))
 
         return c2c
 
