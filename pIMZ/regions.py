@@ -53,11 +53,15 @@ from .plotting import Plotter
 import jinja2
 
 # applications
-import progressbar
-def makeProgressBar() -> progressbar.ProgressBar:
-    return progressbar.ProgressBar(widgets=[
-        progressbar.Bar(), ' ', progressbar.Percentage(), ' ', progressbar.AdaptiveETA()
-        ])
+import tqdm
+def makeProgressBar() -> tqdm.tqdm:
+    return tqdm.tqdm
+
+
+from PIL import Image
+
+
+
 
 class SpectraRegion():
     pass
@@ -4068,3 +4072,61 @@ document.addEventListener('readystatechange', event => {
             df["mean.{}".format(x)] = meanVec
 
         return df
+
+
+    def export_combo_analyser(self, outfolder, prefix, segmentation="segmented", pwAnnot=None, pw_match_name="pathway"):
+
+        
+        arr = self.plot_tic(plot=False, plot_log=False, hist=False)
+
+        self.logger.info("Exporting {} images with shape {}".format(segmentation, arr.shape))
+
+        result = Image.fromarray((255*arr/arr.max()).astype(np.uint8))
+        result.save('{}/{}_ticview.png'.format(outfolder, prefix))
+
+        result = Image.fromarray((255*self.meta[segmentation]/self.meta[segmentation].max()).astype(np.uint8))
+        result.save('{}/{}_segmentation.png'.format(outfolder, prefix))
+
+        segArray = self.meta[segmentation] / np.max(self.meta[segmentation])
+        colormap = matplotlib.cm.get_cmap('viridis')
+        segArrayRGB = colormap(segArray)[:, :, :3] * 255  # Drop alpha, scale to 0-255
+        segArrayRGB = segArrayRGB.astype(np.uint8)
+
+        result = Image.fromarray(segArrayRGB, 'RGB')
+        result.save('{}/{}_csegmentation.png'.format(outfolder, prefix))
+
+
+        if pwAnnot is None:
+            # use spec region features as annotation/features
+            self.logger.info("Exporting {} data with shape {}".format(prefix, self.region_array.shape))
+
+            np.save("{}/{}_data.npy".format(outfolder, prefix), self.region_array)
+            np.save("{}/{}_data_annot.npy".format(outfolder, prefix), np.array([str(x) for x in self.idx2mz]))
+
+            return
+
+
+        #pwAnnot is given!
+        intensityDict = {}
+        self.logger.info("Creating intensity array from annotation {} data with set length {}".format(pw_match_name, len(pwAnnot.set2name)))
+
+        bar = makeProgressBar()
+        for setIdx, setName in bar(enumerate(pwAnnot.set2name.keys()), total=len(pwAnnot.set2name)):
+            
+            massarray=self.mass_heatmap(setName, pw=pwAnnot, pw_match_name=pw_match_name, plot=False, verbose=False)
+
+            if massarray is None:
+                continue
+
+            intensityDict[(setName, pwAnnot.set2name[setName])] = massarray
+
+        intCombArray = np.zeros((self.region_array.shape[0], self.region_array.shape[1], len(intensityDict)))
+        for i, elemName in bar(enumerate(intensityDict), total=len(intensityDict)):
+            intCombArray[:, :, i] = intensityDict[elemName]
+
+
+        self.logger.info("Exporting {} data with shape {}".format(prefix, intCombArray.shape))
+        np.save("{}/{}_data.npy".format(outfolder, prefix), intCombArray)
+        np.save("{}/{}_data_annot.npy".format(outfolder, prefix), np.array([str(x) for x in intensityDict]))
+
+        return

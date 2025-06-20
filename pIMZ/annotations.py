@@ -114,6 +114,10 @@ class ProteinWeights():
         self.mz_tree = IntervalTree()
         self.data2slot = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
 
+        self.sets = defaultdict(set)
+        self.feature2set = defaultdict(set)
+        self.set2name = defaultdict(set)
+
         if filename != None:
             self.__load_file(filename)
 
@@ -398,7 +402,26 @@ class ProteinWeights():
             print_proteins (bool, optional): If True, all collision proteins are printed. Defaults to False.
         """
 
+    def get_entity_df(self):
+        return pd.DataFrame({ "match" : self.set2name.keys() , "CHEBI_name" : self.set2name.values() })
 
+    def get_mz_for_name(self, category, data_slot="mzWeight"):
+        
+        if not category in self.set2name:
+            self.logger.error("Not a valid category: " + str(category))
+            return None
+        
+        return self.get_data_for_proteins(self.set2name[category], data_slot=data_slot)
+
+
+    def get_enrichment_data(self):
+        
+        enrichmentData = {}
+        
+        for x in self.sets:
+            enrichmentData[ x ] = ("{} ({})".format(self.set2name[x], x), set(self.sets[x]))
+            
+        return enrichmentData
           
 
 class MaxquantPeptides(ProteinWeights):
@@ -500,7 +523,6 @@ class SDFProteinWeights(AnnotatedProteinWeights):
     def __load_file(self, filename):
 
         self.sdf_dic = self.sdf_reader(filename)
-        self.category2element = defaultdict(set)
 
         for lm_id in self.sdf_dic:
 
@@ -528,16 +550,12 @@ class SDFProteinWeights(AnnotatedProteinWeights):
             self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, intervalData)
             
             for cat in intervalData["category"]:
-                self.category2element[cat].add(proteinName)
+                self.sets[cat].add(proteinName)
+                self.feature2set[proteinName].add(cat)
 
-    def get_enrichment_data(self):
-        
-        enrichmentData = {}
-        
-        for x in self.category2element:
-            enrichmentData[ x ] = ("{}".format(x), set(self.category2element[x]))
-            
-        return enrichmentData
+
+        self.set2name = {x: x for x in self.sets}
+    
 
     @classmethod
     def sdf_reader(cls, filename, dbIdentifier = "LM_ID"):
@@ -621,16 +639,10 @@ class SLProteinWeights(AnnotatedProteinWeights):
                                                                        "category": categories})
             
             for cat in categories:
-                self.category2name[cat].add(proteinName)
+                self.sets[cat].add(proteinName)
+                self.feature2set[proteinName].add(cat)
 
-    def get_enrichment_data(self):
-        
-        enrichmentData = {}
-        
-        for x in self.category2name:
-            enrichmentData[ x ] = ("{}".format(x), set(self.category2name[x]))
-            
-        return enrichmentData
+        self.set2name = {x: x for x in self.sets}
 
 
 class PBProteinWeights(AnnotatedProteinWeights):
@@ -759,11 +771,8 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
             
             return None
 
-        self.chebiSets = defaultdict(set)
-        self.metabolite2set = defaultdict(set)
-        self.category2name = defaultdict(set)
 
-        self.chebiID2Name = {}
+
 
         for x in tqdm.tqdm(self.gr, total=len(self.gr), desc="Processing ChEBI Ontology"):
             xterm = self.gr[x]
@@ -776,7 +785,7 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
             
             molWeight = get_mass_property(self.gr[x])
                         
-            self.chebiID2Name[xterm.id] = xterm.name
+            self.set2name[xterm.id] = xterm.name
 
             if molWeight is None:
                 # not an entity
@@ -785,11 +794,11 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
                     
                     if molWeight is None:
                         continue
-                    self.chebiSets[xterm.id].add(subElem.id)
+                    self.sets[xterm.id].add(subElem.id)
                     
-        for setName in self.chebiSets:
-            for metabolite in self.chebiSets[setName]:
-                self.metabolite2set[metabolite].add(setName)
+        for setName in self.sets:
+            for metabolite in self.sets[setName]:
+                self.feature2set[metabolite].add(setName)
 
 
         self.logger.info("Reading Metabolites")
@@ -825,34 +834,15 @@ class ChebiProteinWeights(AnnotatedProteinWeights):
                 
                 intervalData = {"name": [metaboliteID], "mass": molWeight,
                                 "mzWeight": mzWeight,
-                                "pathway": self.metabolite2set.get(metaboliteID, []),
-                                "pathway_name": [self.chebiID2Name[x] for x in self.metabolite2set.get(metaboliteID, [])]}
+                                "pathway": self.feature2set.get(metaboliteID, []),
+                                "pathway_name": [self.set2name[x] for x in self.feature2set.get(metaboliteID, [])]}
                 self.mz_tree.addi(mzWeight - ppmDist, mzWeight + ppmDist, intervalData)
                 
                 for cat in intervalData["pathway"]:
-                    self.category2name[cat].add(metaboliteID)
+                    self.sets[cat].add(metaboliteID)
 
 
-    def get_entity_df(self):
-        return pd.DataFrame({ "match" : self.chebiID2Name.keys() , "CHEBI_name" : self.chebiID2Name.values() })
 
-    def get_mz_for_category(self, category):
-        
-        if not category in self.category2name:
-            self.logger.error("Not a valid category: " + str(category))
-            return None
-        
-        return self.get_data_for_proteins(self.category2name[category], data_slot="mzWeight")
-
-
-    def get_enrichment_data(self):
-        
-        enrichmentData = {}
-        
-        for x in self.chebiSets:
-            enrichmentData[ x ] = ("{} ({})".format(self.chebiID2Name[x], x), set(self.chebiSets[x]))
-            
-        return enrichmentData
     
 
 class PPIAnalysis:

@@ -12,7 +12,12 @@ from math import sqrt
 from pylab import *
 from scipy.optimize import curve_fit
 from scipy.stats import zscore
-
+from skimage.filters import threshold_multiotsu
+from skimage.measure import label, regionprops
+from collections import Counter,defaultdict
+import numpy as np
+from sklearn.linear_model import Lasso
+from sklearn.preprocessing import StandardScaler
 
 class ComboAnalyser:
     """
@@ -30,6 +35,7 @@ class ComboAnalyser:
         adata: np.array,
         adata_anno: np.array,
         mapping: np.array,
+        cache_mappings: bool = True
     ):
 
         self.spec = spec
@@ -74,6 +80,59 @@ class ComboAnalyser:
 
         self.spec_cluster_list = None
         self.trans_cluster_list = None
+
+        self.cache_mappings = cache_mappings
+        if self.cache_mappings:
+            self.mapped_data = {}
+        else:
+            self.mapped_data = None
+        
+
+    def spatially_relevant_features(self, where="both", min_expr_count=1000, min_conn_count=250):
+
+        if where == "both":
+            tx_features = self._get_spatially_relevant_features(self.trans_anno, self.trans, min_expr_count=min_expr_count, min_conn_count=min_conn_count)
+            px_features = self._get_spatially_relevant_features(self.spec_anno, self.spec, min_expr_count=min_expr_count, min_conn_count=min_conn_count)
+            return tx_features, px_features
+        
+        elif where == "trans":
+            tx_features = self._get_spatially_relevant_features(self.trans_anno, self.trans, min_expr_count=min_expr_count, min_conn_count=min_conn_count)
+            return tx_features
+        
+        elif where == "spec":
+            px_features = self._get_spatially_relevant_features(self.spec_anno, self.spec, min_expr_count=min_expr_count, min_conn_count=min_conn_count)
+            return px_features
+
+        print("where must be 'both', 'trans' or 'spec'")
+
+    def _get_spatially_relevant_features(self, expr_annot, expr, min_expr_count=1000, min_conn_count=250):
+        relevant_genes = {}
+        for i, gene in tqdm(enumerate(expr_annot), total=len(expr_annot)):
+            image = expr[:, :, i]
+
+            try:
+                thresholds = threshold_multiotsu(image, classes=2)
+                regions = np.digitize(image, bins=thresholds)
+
+                exprcount = min( [(regions == 0).flatten().sum(), (regions == 1).flatten().sum()])
+
+                if exprcount < min_expr_count:
+                    continue
+
+                lregions = label(regions)
+                conncount = Counter(lregions.flatten()).most_common(10)[1][1]
+
+                if conncount < min_conn_count:
+                    continue
+
+                relevant_genes[gene] = regions
+            except:
+                continue
+
+            
+        print(len(relevant_genes))
+        return relevant_genes
+
 
     """
         checks for all cells in the 3D matrix wether the value ist greater 0 and returns a bool matrix of the same size
@@ -251,93 +310,29 @@ class ComboAnalyser:
         resv = resv.reshape(sx,sy)
         return resv
 
-    """
-    def transform_feature(self, X):
-        rh, rw, _ = self.spec.shape
-        h, w, _ = self.trans.shape
 
-        # Extract coordinates from the mapping array
-        c = self.mapping.reshape(-1, 2)
+    def get_feature_distributions(self, si, ti):
+        s, t = self.get_features(si, ti)
+        return s.flatten(), t.flatten()
 
-        # Convert coordinates to indices
-        cx = c[:, 0].astype(int)
-        cy = rh - 1 - c[:, 1].astype(int)
+    def get_features(self, si, ti):
 
-        # Create a boolean mask to filter valid indices
-        valid_mask = (0 < cx) & (cx < rw) & (0 < cy) & (cy < rh)
-
-        # Filter valid indices and corresponding X values
-        valid_cx = cx[valid_mask]
-        valid_cy = cy[valid_mask]
-        valid_X = X.reshape(-1)[valid_mask]
-
-        # Initialize the result array
-        result = np.zeros((rh, rw))
-
-        # Use advanced indexing to assign values
-        result[valid_cy, valid_cx] = valid_X
-
-        return result
-
-    """
-
-    """
-    def get_feature_distributions(self, feature_tx, feature_px):
-
-        txImageShape = self.get_transcriptomics_shape()
-        print(f"txImageShape: {txImageShape}")
-
-        pxImage = np.zeros(txImageShape)#(( txImageShape[0] , txImageShape[1] ))
-        txImage = np.zeros(txImageShape)
-
-        # copy tx values into txImage
-        txImage = self.trans[ : , : , feature_tx]
+        s = self.spec[:, :, si]
         
-        # acquire pxImage values with get prot location
-        #for x in range(txImageShape[0]):
-        #    for y in range(txImageShape[1]):
-        #        px, py = self.map_coordinates(y , x)
+        if self.cache_mappings and ti in self.mapped_data:
+            t = self.mapped_data[ti]
+        else:
+            t = self.trans[:, :, ti]
+            t = self.transform_feature(t)
+            if self.cache_mappings:
+                self.mapped_data[ti] = t
 
-        #        if px < self.spec.shape[0] and py < self.spec.shape[1]:
-        #            pxImage[x,y] = self.spec[ px, py, feature_px]
-                #else:
-                    #print(f"{px} , {py}   not in   {self.spec.shape}")
-
-        txImage = self.transform_feature(txImage)
-
-        print(txImage.shape)
-        print(pxImage.shape)
-
-        pxVec = pxImage.flatten()
-        txVec = txImage.flatten()
-
-        return txVec, pxVec
-        """
-
-    """
-        maps transcriptomic and metabolomic data and returns 2 vectors (same length)
-    """
-
-    def get_feature_distributions(self, pi, ti):
-
-        t = self.trans[:, :, ti]
-        p = self.spec[:, :, pi]
-        t = self.transform_feature(t)
-
-        return p.flatten(), t.flatten()
-
-    def get_features(self, pi, ti):
-
-        t = self.trans[:, :, ti]
-        p = self.spec[:, :, pi]
-        t = self.transform_feature(t)
-
-        return p, t
+        return s, t
 
     def get_feature_distributions_per_cluster(self, pi, ti):
         t = self.trans_clustered_intensities[:, ti]
         p = self.spec_clustered_intensities[:, pi]
-        # t = self.transform_feature(t)
+
         return p.flatten(), t.flatten()
 
     def get_feature_distributions_within_cluster(self, pi, ti, p_cluster, t_cluster):
@@ -382,27 +377,12 @@ class ComboAnalyser:
         # return p_flat[bool_array] , t_flat[bool_array]
         return p_flat[self.mask.flatten()], t_flat[self.mask.flatten()]
 
-    """
-        removes values from p_flat and t_flat where one value is 0
-    """
-
     def remove_zeros(self, p_flat, t_flat):
         bool_array = (p_flat > 0) & (t_flat > 0)
         return p_flat[bool_array], t_flat[bool_array]
 
-    """
-    def remove_zeros(self, p_flat , t_flat, feature_px , feature_tx):
-        print(f"spec greater zero mask length {len(self.spec_greater_zero_mask[ : , : , feature_px ].flatten())}")
-        print(f"trans greater zero mask length {len( self.trans_greater_zero_mask[ : , : , feature_tx ].flatten() )}")
-        
-        return p_flat[ self.spec_greater_zero_mask[ : , : , feature_px ].flatten() ] , t_flat[ self.trans_greater_zero_mask[ : , : , feature_tx ].flatten() ]
-    """
 
-    """
-        
-    """
-
-    def regression_custom(self, pxVec, txVec, feature_px, feature_tx, plot):
+    def regression_custom(self, pxVec, txVec, feature_px, feature_tx, plot, series=None):
         method = "regression"
 
         if len(txVec) == 0 or min(txVec) == max(txVec):
@@ -448,23 +428,26 @@ class ComboAnalyser:
         frac_pixel_trans = pixel_trans / self.trans_max_pixel
         frac_pixel_spec = pixel_spec / self.spec_max_pixel
 
-        return (
-            slope,
-            intercept,
-            r_value,
-            standard_error_of_mean,
-            mae,
-            rms,
-            mean_expression_spec,
-            mean_expression_trans,
-            len(txVec),
-            pixel_spec,
-            pixel_trans,
-            frac_pixel_spec,
-            frac_pixel_trans,
-        )  # coefs , len(txVec)
+        if series is None:
+            series = pd.Series()
 
-    def correlation_custom(self, pxVec, txVec, feature_px, feature_tx, plot):
+        series["slope"] = slope
+        series["intercept"] = intercept
+        series["r_value"] = r_value
+        series["standard_error_of_mean"] = standard_error_of_mean
+        series["mae"] = mae
+        series["rms"] = rms
+        series["mean_expression_spec"] = mean_expression_spec
+        series["mean_expression_trans"] = mean_expression_trans
+        series["txVec_len"] = len(txVec)
+        series["pixel_spec"] = pixel_spec
+        series["pixel_trans"] = pixel_trans
+        series["frac_pixel_spec"] = frac_pixel_spec
+        series["frac_pixel_trans"] = frac_pixel_trans
+
+        return series
+
+    def correlation_custom(self, pxVec, txVec, feature_px, feature_tx, plot, series=None):
         corr = np.corrcoef(txVec, pxVec)
         if plot:
             self.plot_correlation(
@@ -474,9 +457,35 @@ class ComboAnalyser:
                 self.get_feature_name_from_px_index(feature_px),
                 round(corr[0, 1], 5),
             )
-        return corr, len(txVec)
 
-    def exponential_fit_custom(self, pxVec, txVec, feature_px, feature_tx, plot):
+        
+        mean_expression_spec = self.spec_mean_expression[feature_px]
+        pixel_spec = self.spec_pixel[feature_px]
+
+        mean_expression_trans = self.trans_mean_expression[feature_tx]
+        pixel_trans = self.trans_pixel[feature_tx]
+
+        frac_pixel_trans = pixel_trans / self.trans_max_pixel
+        frac_pixel_spec = pixel_spec / self.spec_max_pixel
+
+
+        if series is None:
+            series = pd.Series()
+
+        pixel = len(txVec)
+        series["corr_coef"] = corr[0, 1]
+        series["mean_expression_spec"] = mean_expression_spec
+        series["mean_expression_trans"] = mean_expression_trans
+        series["pixel_spec"] = pixel_spec
+        series["pixel_trans"] = pixel_trans
+        series["frac_pixel_spec"] = frac_pixel_spec
+        series["frac_pixel_trans"] = frac_pixel_trans
+        series["pixel"] = pixel
+
+        return series
+    
+
+    def exponential_fit_custom(self, pxVec, txVec, feature_px, feature_tx, plot, series=None):
         method = "exponential"
         if len(txVec) >= 10:
             initial_guess = [np.max(pxVec), np.median(txVec), 0.001, np.min(pxVec)]
@@ -520,201 +529,78 @@ class ComboAnalyser:
                 f"{self.get_feature_name_from_px_index(feature_px)}  vs.  {self.get_feature_name_from_tx_index(feature_tx)}\n{method}\nR² = {round(r_square , 3)}  RMSE = {round(rmse , 3)}",
             )
 
-        return (
-            a,
-            b,
-            c,
-            d,
-            r_square,
-            rmse,
-            mean_expression_spec,
-            mean_expression_trans,
-            pixel_spec,
-            pixel_trans,
-            frac_pixel_spec,
-            frac_pixel_trans,
-            pixel,
-        )
 
-    def evaluate_distribution(
-        self,
-        feature_tx,
-        feature_px,
-        method="regression",
-        plot=True,
-        silent=False,
-        remove_zeros=True,
-    ):
+        if series is None:
+            series = pd.Series()
 
-        if not silent:
-            print("get feature distribution ...")
-        pxVec, txVec = self.get_feature_distributions(feature_px, feature_tx)
+        series["exponential_a"] = a
+        series["exponential_b"] = b
+        series["exponential_c"] = c
+        series["exponential_d"] = d
 
-        # pxVec, txVec = self.mask_on(pxVec, txVec)
-        if remove_zeros:
-            pxVec, txVec = self.remove_zeros(pxVec, txVec)
+        series["r_square"] = r_square
+        series["rmse"] = rmse
+        series["mean_expression_spec"] = mean_expression_spec
+        series["mean_expression_trans"] = mean_expression_trans
+        series["pixel_spec"] = pixel_spec
+        series["pixel_trans"] = pixel_trans
+        series["frac_pixel_spec"] = frac_pixel_spec
+        series["frac_pixel_trans"] = frac_pixel_trans
+        series["pixel"] = pixel
 
-        if not silent:
-            print(f"txVec & pxVec has length {len(txVec)} / {len(pxVec)}")
+        return series
+    
+    def jaccard_custom(self, pxExpr, txExpr, feature_px, feature_tx, plot, series=None):
+        method = "jaccard"
 
-        # regression
-        if method == "regression":
-            if not silent:
-                print("compute linear regression ...")
-            return self.regression_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        txThresholds = threshold_multiotsu(txExpr, classes=2)
+        txRegions = np.digitize(txExpr, bins=txThresholds)
 
-        # correlation
-        elif method == "correlation":
-            if not silent:
-                print("compute correlation ...")
-            return self.correlation_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        pxThresholds = threshold_multiotsu(pxExpr, classes=2)
+        pxRegions = np.digitize(pxExpr, bins=pxThresholds)
 
-        elif method == "exponential":
+        pxCoords = set([tuple([x,y]) for x,y in zip(*np.where(pxRegions==1))])
+        txCoords = set([tuple([x,y]) for x,y in zip(*np.where(txRegions==1))])
 
-            if not silent:
-                print("compute exponential fit ...")
-            return self.exponential_fit_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        coordIntersect = pxCoords.intersection(txCoords)
+        coordUnion = pxCoords.union(txCoords)
 
-    def evaluate_distribution_per_cluster(
-        self,
-        feature_tx,
-        feature_px,
-        method="regression",
-        plot=True,
-        silent=False,
-        remove_zeros=True,
-    ):
-        if not silent:
-            print("get feature distribution per cluster ...")
-        pxVec, txVec = self.get_feature_distributions_per_cluster(
-            feature_px, feature_tx
-        )
+        jaccardIndex = len(coordIntersect) / len(coordUnion)
 
-        # pxVec, txVec = self.mask_on(pxVec, txVec)
-        if remove_zeros:
-            if not silent:
-                print(f"   initial txVec & pxVec length: {len(txVec)} / {len(pxVec)}")
-                print("   remove zeros ...")
-            pxVec, txVec = self.remove_zeros(pxVec, txVec)
 
-        if not silent:
-            print(f"   txVec & pxVec has length {len(txVec)} / {len(pxVec)}")
+        mean_expression_spec = self.spec_mean_expression[feature_px]
+        pixel_spec = self.spec_pixel[feature_px]
 
-        ### regression
-        if method == "regression":
-            if not silent:
-                print("compute linear regression ...")
-            return self.regression_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        mean_expression_trans = self.trans_mean_expression[feature_tx]
+        pixel_trans = self.trans_pixel[feature_tx]
 
-        ### correlation
-        elif method == "correlation":
-            if not silent:
-                print("compute correlation ...")
-            return self.correlation_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        frac_pixel_trans = pixel_trans / self.trans_max_pixel
+        frac_pixel_spec = pixel_spec / self.spec_max_pixel
 
-        ### exponential fit
-        elif method == "exponential":
-            if not silent:
-                print("compute exponential fit ...")
-            return self.exponential_fit_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        if series is None:
+            series = pd.Series()
 
-    def evaluate_distribution_within_clusters(
-        self,
-        feature_tx,
-        feature_px,
-        cluster_trans,
-        cluster_spec,
-        method="regression",
-        plot=True,
-        silent=False,
-        remove_zeros=True,
-    ):
-        if not silent:
-            print("get feature distribution ...")
-        pxVec, txVec = self.get_feature_distributions_within_cluster(
-            feature_px, feature_tx, cluster_spec, cluster_trans
-        )
+        series["sx_coords"] = len(pxCoords)
+        series["tx_oords"] = len(txCoords)
 
-        if remove_zeros:
-            if not silent:
-                print(f"   initial txVec & pxVec length: {len(txVec)} / {len(pxVec)}")
-                print("   remove zeros ...")
-            pxVec, txVec = self.remove_zeros(pxVec, txVec)
+        series["jaccard"] = jaccardIndex
 
-        if not silent:
-            print(f"txVec & pxVec has length {len(txVec)} / {len(pxVec)}")
+        series["jaccard_intersect"] = len(coordIntersect)
+        series["jaccard_union"] = len(coordUnion)
 
-        # regression
-        if method == "regression":
-            if not silent:
-                print("compute linear regression ...")
-            return self.regression_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        series["mean_expression_spec"] = mean_expression_spec
+        series["mean_expression_trans"] = mean_expression_trans
 
-        # correlation
-        elif method == "correlation":
-            if not silent:
-                print("compute correlation ...")
-            return self.correlation_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        series["pixel_spec"] = pixel_spec
+        series["pixel_trans"] = pixel_trans
 
-        elif method == "exponential":
+        series["frac_pixel_spec"] = frac_pixel_spec
+        series["frac_pixel_trans"] = frac_pixel_trans
 
-            if not silent:
-                print("compute exponential fit ...")
-            return self.exponential_fit_custom(
-                pxVec=pxVec,
-                txVec=txVec,
-                feature_px=feature_px,
-                feature_tx=feature_tx,
-                plot=plot,
-            )
+        return series
+
+
+    
 
     def scatter_hist_exponential(self, x, y, a, b, c, d, title=""):
         # Define the figure and the grid
@@ -753,17 +639,7 @@ class ComboAnalyser:
     def exponential_func(self, x, a, b, c, d):
         return a * np.exp(-c * (x - b)) + d
 
-    def analyse_interesting_features(self, n_tx=3, n_px=3, method="regression"):
 
-        tx_tic = self.trans.sum(axis=0).sum(axis=0)
-        px_tic = self.spec.sum(axis=0).sum(axis=0)
-
-        tx_top_index = np.argsort(tx_tic)[-n_tx:][::-1]
-        px_top_index = np.argsort(px_tic)[-n_px:][::-1]
-
-        for t in tx_top_index:
-            for p in px_top_index:
-                self.evaluate_distribution(t, p, method)
 
     def scatter_hist(self, x, y, title=""):
         # Define the figure and the grid
@@ -828,247 +704,135 @@ class ComboAnalyser:
         # Show the plots
         plt.show()
 
-    # def plot_gene_metabolite_pair(self, tx_index , px_index):
 
-    """
-    def one_metabolite_vs_all_genes(self, metabolite, method = "regression"):
-
-        trans_list = []
-        trans_name_list = []
-        pixel = []
-
-        
-        if method == "regression":
-            m = []
-            t = []
-            
-            for trans in tqdm(range(self.trans.shape[2])):
-                coefs , pix = self.evaluate_distribution(trans , metabolite ,  method , plot = False , silent = True)
-                m.append(coefs[0])
-                t.append(coefs[1])
-                trans_list.append(trans)
-                trans_name_list.append(self.get_feature_name_from_tx_index(trans))
-                pixel.append(pix)
-                
-            
-            met_list = [metabolite] * len(m)
-            met_name_list = [self.get_feature_name_from_px_index(metabolite)] * len(m)
-    
-            
-            return pd.DataFrame({"tx" : trans_list , "gene" : trans_name_list , "px" : met_list , "metabolite" : met_name_list , "m" : m , "t" : t , "pixel" : pixel })
-
-
-        elif method == "correlation":
-            corr_coef = []
-
-            for trans in tqdm(range(self.trans.shape[2])):
-                coefs, pix = self.evaluate_distribution(trans , metabolite , method , plot = False , silent = True)
-                corr_coef.append(coefs[0, 1])
-                trans_list.append(trans)
-                trans_name_list.append(self.get_feature_name_from_tx_index(trans))
-                pixel.append(pix)
-            
-            met_list = [metabolite] * len(corr_coef)
-            met_name_list = [self.get_feature_name_from_px_index(metabolite)] * len(corr_coef)
-    
-            
-            return pd.DataFrame({"tx" : trans_list , 
-                                 "gene" : trans_name_list , 
-                                 "px" : met_list , 
-                                 "metabolite" : met_name_list , 
-                                 "corr_coef" : corr_coef , 
-                                 "pixel" : pixel })
-    """
-
-
-    def evaluate_one_vs_all_regression(self, gene, eval_func, analysis = "pixel", remove_zeros=True, trans_cluster=None, spec_cluster=None):
-
-        records = []
-        method="regression"
-
-        for metabolite in tqdm(range(self.spec.shape[2])):
-            if analysis == "within_cluster":
-                (
-                    slope,
-                    intercept,
-                    r_value,
-                    sem,
-                    mae,
-                    rms,
-                    mean_expr_spec,
-                    mean_expr_trans,
-                    pix,
-                    pix_spec,
-                    pix_trans,
-                    frac_pix_spec,
-                    frac_pix_trans,
-                ) = eval_func(
-                    gene,  # self.evaluate_distribution(gene ,
-                    metabolite,
-                    trans_cluster,
-                    spec_cluster,
-                    method,
-                    remove_zeros=remove_zeros,
-                    plot=False,
-                    silent=True,
-                )
-            else:
-                (
-                    slope,
-                    intercept,
-                    r_value,
-                    sem,
-                    mae,
-                    rms,
-                    mean_expr_spec,
-                    mean_expr_trans,
-                    pix,
-                    pix_spec,
-                    pix_trans,
-                    frac_pix_spec,
-                    frac_pix_trans,
-                ) = eval_func(
-                    gene,  # self.evaluate_distribution(gene ,
-                    metabolite,
-                    method,
-                    remove_zeros=remove_zeros,
-                    plot=False,
-                    silent=True,
-                )
-                
-            geneName = self.get_feature_name_from_tx_index(gene)
-            metaboliteName = self.get_feature_name_from_px_index(metabolite)
-            record = (gene, geneName, metabolite, metaboliteName, slope, intercept, r_value,
-                      sem, mae, rms, pix, pix_trans, pix_spec, frac_pix_trans, frac_pix_spec, mean_expr_trans, mean_expr_spec)
-
-            records.append(record)
-
-
-        columns = ["tx", "gene", "px", "metabolite", "m", "t", "r_value", "SEM", "MAE", "RMSE", "pixel", "transcriptomic_pixel", "metabolite_pixel", "fraction_transcriptomic_pixel", "fraction_metabolite_pixel", "transcriptomic_mean_expression", "metabolite_mean_expression"]
-
-
-        df = pd.DataFrame.from_records(records)
-        df.columns = columns
-
-        return df
-
-
-
-
-    def one_gene_vs_all_metabolites(
+    def one_gene_vs_all(
         self,
         gene,
         trans_cluster=None,
         spec_cluster=None,
-        method="regression",
+        methods=["regression"],
         analysis="pixel",
         remove_zeros=True,
-    ):
+        verbose=False
+        ):
 
-        met_list = []
-        met_name_list = []
-        pixel = []
-        pixel_spec = []
-        pixel_trans = []
-        mean_ex_spec = []
-        mean_ex_trans = []
-        frac_pix_trans_list = []
-        frac_pix_spec_list = []
+        for method in methods:
+            if method not in ["regression", "correlation", "exponential", "jaccard"]:
+                raise ValueError(
+                    f"Method {method} is not supported. Choose from 'regression', 'correlation', 'exponential', or 'jaccard'."
+                )
 
-        if analysis == "pixel":
-            func = self.evaluate_distribution
-        elif analysis == "cluster":
-            func = self.evaluate_distribution_per_cluster
+        if analysis not in ["pixel", "per_cluster", "within_cluster"]:
+            raise ValueError(
+                f"Analysis {analysis} is not supported. Choose from 'pixel', 'per_cluster', or 'within_cluster'."
+            )
+
+        createVector = (len(set(["regression", "correlation", "exponential"]).intersection(methods)) > 0)
+
+        if analysis == "per_cluster":
+            if self.trans_clustered_intensities is None or self.spec_clustered_intensities is None:
+                self.group_data_for_clustering()
+
         elif analysis == "within_cluster":
-            func = self.evaluate_distribution_within_clusters
-
-        if method == "regression":
-
-            return self.evaluate_one_vs_all_regression(
-                gene,
-                func,
-                analysis=analysis,
-                remove_zeros=remove_zeros,
-                trans_cluster=trans_cluster,
-                spec_cluster=spec_cluster
-            )
-
-        elif method == "correlation":
-            corr_coef = []
-
-            for metabolite in tqdm(range(self.spec.shape[2])):
-                coefs, pix = self.evaluate_distribution(
-                    gene, metabolite, method, plot=False, silent=True
-                )
-                corr_coef.append(coefs[0, 1])
-                met_list.append(metabolite)
-                met_name_list.append(self.get_feature_name_from_px_index(metabolite))
-                pixel.append(pix)
-
-            trans_list = [gene] * len(corr_coef)
-            trans_name_list = [self.get_feature_name_from_tx_index(gene)] * len(
-                corr_coef
-            )
-
-            return pd.DataFrame(
-                {
-                    "tx": trans_list,
-                    "gene": trans_name_list,
-                    "px": met_list,
-                    "metabolite": met_name_list,
-                    "corr_coef": corr_coef,
-                    "pixel": pixel,
-                }
-            )
-
-        elif method == "exponential":
-
-
-            return self.evaluate_one_vs_all_exponential(
-                gene,
-                func,
-                analysis=analysis,
-                method=method,
-                remove_zeros=remove_zeros,
-                trans_cluster=trans_cluster,
-                spec_cluster=spec_cluster
-            )
-
-    def evaluate_one_vs_all_exponential(self, gene, eval_func, method, analysis = "pixel", remove_zeros=True, trans_cluster=None, spec_cluster=None):
-
-        records = []
-        for metabolite in tqdm(range(self.spec.shape[2])):
-
-            if analysis == "within_cluster":
-                record = eval_func(
-                    gene,
-                    metabolite,
-                    trans_cluster,
-                    spec_cluster,
-                    method,
-                    remove_zeros=remove_zeros,
-                    plot=False,
-                    silent=True,
-                )
-            else:
-                record = eval_func(
-                    gene,
-                    metabolite,
-                    method,
-                    remove_zeros=remove_zeros,
-                    plot=False,
-                    silent=True,
+            if spec_cluster is None or trans_cluster is None:
+                raise ValueError(
+                    "For 'within_cluster' analysis, both spec_cluster and trans_cluster must be provided."
                 )
 
-            geneName = self.get_feature_name_from_tx_index(gene)
-            metaboliteName = self.get_feature_name_from_px_index(metabolite)
-            entry = tuple(list([gene, geneName, metabolite, metaboliteName]) + list(record))
+        resultsByMethod = defaultdict(list)
 
-            records.append(entry)
+        feature_tx_id = self.get_tx_index_from_feature(gene)
 
-        df = pd.DataFrame.from_records(records)
+        for feature_sx_id in tqdm(range(self.spec.shape[2])):
 
-        return df
+            feature_sx = self.get_feature_name_from_px_index(feature_sx_id)
+
+            if verbose:
+                print("get feature distribution ...")
+            pxMap, txMap = self.get_features(feature_sx_id, feature_tx_id)
+
+            if createVector:
+
+                if analysis == "pixel":
+                    pxVec, txVec = pxMap.flatten(), txMap.flatten()
+                elif analysis == "per_cluster":
+                    pxVec, txVec = self.get_feature_distributions_per_cluster(
+                        feature_sx_id, feature_tx_id
+                    )
+                elif analysis == "within_cluster":
+                    pxVec, txVec = self.get_feature_distributions_within_cluster(
+                        feature_sx_id, feature_tx_id, spec_cluster, trans_cluster
+                    )
+
+                if remove_zeros:
+                    pxVec, txVec = self.remove_zeros(pxVec, txVec)
+                if verbose:
+                    print(f"txVec & pxVec has length {len(txVec)} / {len(pxVec)}")
+
+            series = pd.Series([feature_sx_id, feature_sx, feature_tx_id, gene, analysis], index=["feature_sx_id", "feature_sx", "feature_tx_id", "feature_tx", "analysis"])
+
+            for method in methods:      
+
+                # regression
+                if method == "regression":
+                    if verbose:
+                        print("compute linear regression ...")
+                    
+                    resultsByMethod[method].append(self.regression_custom(
+                        pxVec=pxVec,
+                        txVec=txVec,
+                        feature_px=feature_sx_id,
+                        feature_tx=feature_tx_id,
+                        plot=False,
+                        series=series.copy()
+                    ))
+
+                # correlation
+                elif method == "correlation":
+                    if verbose:
+                        print("compute correlation ...")
+                    resultsByMethod[method].append(self.correlation_custom(
+                        pxVec=pxVec,
+                        txVec=txVec,
+                        feature_px=feature_sx_id,
+                        feature_tx=feature_tx_id,
+                        plot=False,
+                        series=series.copy()
+                    ))
+
+                elif method == "exponential":
+
+                    if verbose:
+                        print("compute exponential fit ...")
+                    resultsByMethod[method].append(self.exponential_fit_custom(
+                        pxVec=pxVec,
+                        txVec=txVec,
+                        feature_px=feature_sx_id,
+                        feature_tx=feature_tx_id,
+                        plot=False,
+                        series=series.copy()
+                    ))
+                
+                elif method == "jaccard":
+
+                    if verbose:
+                        print("compute jaccard methdod ...")
+
+                    resultsByMethod[method].append(self.jaccard_custom(
+                        pxExpr=pxMap,
+                        txExpr=txMap,
+                        feature_px=feature_sx_id,
+                        feature_tx=feature_tx_id,
+                        plot=False,
+                        series=series.copy()
+                    ))
+            
+
+        final_dfs = {}
+        for method in resultsByMethod:
+            final_dfs[method] = pd.concat(resultsByMethod[method], axis=1).T
+
+        return final_dfs
 
     def top_n_intesity_metabolites(self, n):
         tic = self.spec.sum(axis=0).sum(axis=0)
@@ -1082,67 +846,79 @@ class ComboAnalyser:
         return top_n_indices
 
     def plot_gene_metabolite_pair(self, tx_index, px_index, exponential=True):
+        return self.plot_trans_spec_pair(tx_index, px_index, exponential=exponential)
 
-        trans_temp = self.trans[:, :, tx_index]
-        spec_temp = self.spec[:, :, px_index]
 
-        trans_mapped = self.transform_feature(trans_temp)
+    def plot_trans_spec_pair(self, tx_index, px_index, analysis="pixel", spec_cluster=None, trans_cluster=None, exponential=True):
+
+
+
+        if analysis == "per_cluster":
+            if self.trans_clustered_intensities is None or self.spec_clustered_intensities is None:
+                self.group_data_for_clustering()
+                
+        elif analysis == "within_cluster":
+            if spec_cluster is None or trans_cluster is None:
+                raise ValueError(
+                    "For 'within_cluster' analysis, both spec_cluster and trans_cluster must be provided."
+                )
+
+
 
         pxVec, txVec = self.get_feature_distributions(px_index, tx_index)
         pxVec, txVec = self.remove_zeros(pxVec, txVec)
 
-        fig = plt.figure(figsize=(25, 7))
-        gs = fig.add_gridspec(
-            4, 6, width_ratios=[5, 1, 6, 6, 6, 6], height_ratios=[1, 2, 2, 1]
-        )
+        pxMap, txMap = self.get_features(px_index, tx_index)       
 
-        # Scatter plot
-        (
-            slope,
-            intercept,
-            r_value,
-            sem,
-            mae,
-            rms,
-            mean_expr_spec,
-            mean_expr_trans,
-            pix,
-            pix_spec,
-            pix_trans,
-            frac_pix_spec,
-            frac_pix_trans,
-        ) = self.evaluate_distribution(
-            tx_index, px_index, "regression", plot=False, silent=True
-        )
+        if analysis == "pixel":
+            pxVec, txVec = pxMap.flatten(), txMap.flatten()
+        elif analysis == "per_cluster":
+            pxVec, txVec = self.get_feature_distributions_per_cluster(
+                px_index, tx_index
+            )
+        elif analysis == "within_cluster":
+            pxVec, txVec = self.get_feature_distributions_within_cluster(
+                px_index, tx_index, spec_cluster, trans_cluster
+            )
 
-        ax_hexa = fig.add_subplot(gs[1:4, 0])
-        """
-        sns.regplot(x=txVec, y=pxVec, ax=ax_scatter, scatter_kws={'alpha':0.5})
-        #ax_scatter.scatter(data1[0], data1[1])
-        #ax_scatter.set_title(titles[0])
-        ax_scatter.set_xlabel('gene expression')
-        ax_scatter.set_ylabel('metabolite intesity')
-        """
+        pxVec, txVec = self.remove_zeros(pxVec, txVec)
+        txMap_original = self.trans[:, :, tx_index]
+
+
+
+
+        fig = plt.figure(figsize=(25, 20))
+        #gs = fig.add_gridspec(
+        #    4, 7, width_ratios=[6, 1, 0.25, 6, 6, 6, 6], height_ratios=[1, 2, 2, 1]
+        #)
+
+
+        gs = fig.add_gridspec(4, 2, width_ratios=[1, 4])
+
+        gs0 = gs[0].subgridspec(4, 3, wspace=0.1, hspace=0.1, width_ratios=[4, 0.5, 0.5], height_ratios=[1, 2, 2, 1])
+        gs1 = gs[1].subgridspec(5, 4, wspace=0.5, height_ratios=[1, 2, 1, 2, 1])
+
+
+        se_reg = self.regression_custom(pxVec, txVec, px_index, tx_index, plot=False)
+
+        ax_hexa = fig.add_subplot(gs0[1:4, 0])
 
         hexa = ax_hexa.hexbin(x=txVec, y=pxVec, gridsize=30, cmap="Blues")
-        cbar0 = fig.colorbar(hexa, ax=ax_hexa)
-        cbar0.set_label("counts")
+        #cbar0 = fig.colorbar(hexa, ax=ax_hexa)
+        #cbar0.set_label("counts")
         # ax_hexa.colorbar(label='counts')
         ax_hexa.set_xlabel("gene expression")
         ax_hexa.set_ylabel("metabolite intensity")
         # ax_hexa.title('Hexbin Plot with Regression Line')
-        reg_y = slope * txVec + intercept
+        reg_y = se_reg["slope"] * txVec + se_reg["intercept"]
         # Overlay the regression line
         ax_hexa.plot(txVec, reg_y, color="black", linewidth=1, label="lin")
 
         # TODO: sorry have to remove exponential fit for cell type analysis
         if exponential:
-            a, b, c, d, r_square_exp, rmse_exp, _, _, _, _, _, _, _ = (
-                self.evaluate_distribution(
-                    tx_index, px_index, "exponential", plot=False, silent=True
-                )
-            )
-            exp_y = self.exponential_func(txVec, a, b, c, d)
+            se_exp = self.exponential_fit_custom(pxVec, txVec, px_index, tx_index, plot=False)
+
+            exp_y = self.exponential_func(txVec, se_exp["exponential_a"], se_exp["exponential_b"], se_exp["exponential_c"], se_exp["exponential_d"])
             sorted_indices = np.argsort(txVec)
             ax_hexa.plot(
                 txVec[sorted_indices],
@@ -1155,20 +931,23 @@ class ComboAnalyser:
         ax_hexa.legend()
 
         # Histograms
-        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_hexa)
-        ax_histy = fig.add_subplot(gs[1:4, 1], sharey=ax_hexa)
+        ax_histx = fig.add_subplot(gs0[0, 0], sharex=ax_hexa)
+        ax_histy = fig.add_subplot(gs0[1:4, 1], sharey=ax_hexa)
+
+        cbar_ax = fig.add_subplot(gs0[1:4, 2])
+        fig.colorbar(hexa, cax=cbar_ax)
+        cbar_ax.set_label("counts")
 
         ax_histx.hist(txVec, bins=40, edgecolor="black")
 
-        (
+        if exponential:
             ax_histx.set_title(
-                f"regression (R² = {round(r_value * r_value , 3)} , RMSE = {round(rms , 3)})\nexponential (R² = {round(r_square_exp , 3)} , RMSE = {round(rmse_exp , 3)})\npixel = {pix}"
+                f"regression (R² = {round(se_reg["r_value"] * se_reg["r_value"] , 3)} , RMSE = {round(se_reg["rms"] , 3)})\nexponential (R² = {round(se_exp["r_square"] , 3)} , RMSE = {round(se_exp["rmse"] , 3)})\npixel = {se_exp["pixel"]}"
             )
-            if exponential
-            else ax_histx.set_title(
-                f"regression (R² = {round(r_value * r_value , 3)} , RMSE = {round(rms , 3)})\npixel = {pix}"
+        else:
+            ax_histx.set_title(
+                f"regression (R² = {round(se_reg["r_value"] * se_reg["r_value"] , 3)} , RMSE = {round(se_reg["rms"] , 3)})\npixel = {se_reg["pixel"]}"
             )
-        )
 
         ax_histy.hist(pxVec, bins=40, orientation="horizontal", edgecolor="black")
 
@@ -1178,23 +957,18 @@ class ComboAnalyser:
 
         #print("Figure 1 done")
 
+
         # Second plot
         tx_name = self.get_feature_name_from_tx_index(tx_index)
         px_name = self.get_feature_name_from_px_index(px_index)
-        corr_coef, pixel = self.evaluate_distribution(
-            feature_tx=tx_index,
-            feature_px=px_index,
-            method="correlation",
-            plot=False,
-            silent=True,
-        )
-        corr_coef = round(corr_coef[0, 1], 3)
+
+        se_corr = self.correlation_custom(pxVec, txVec, px_index, tx_index, plot=False)
 
         x_axis = list(range(1, len(txVec) + 1))
-        ax2 = fig.add_subplot(gs[0:2, 2])
+        ax2 = fig.add_subplot(gs1[0:2, 0])
         ax2.plot(x_axis, txVec, label=str(tx_name), alpha=0.5)
         ax2.plot(x_axis, pxVec, label=str(px_name), alpha=0.5)
-        ax2.set_title(f"Correlation (corr_coef = {corr_coef})\npixel = {pixel}")
+        ax2.set_title(f"Correlation (corr_coef = {se_corr["corr_coef"]})\npixel = {se_corr["pixel_spec"]}")
         ax2.set_xlabel("Index")
         ax2.set_ylabel("Intensities")
         ax2.legend()
@@ -1209,7 +983,7 @@ class ComboAnalyser:
         px_normalized = px_normalized / max(px_normalized)
 
 
-        ax2_2 = fig.add_subplot(gs[2:4, 2])
+        ax2_2 = fig.add_subplot(gs1[3:5, 0])
         ax2_2.plot(x_axis, tx_normalized, label=str(tx_name), alpha=0.5)
         ax2_2.plot(x_axis, px_normalized, label=str(px_name), alpha=0.5)
         ax2_2.set_title("normalized correlation")
@@ -1222,15 +996,11 @@ class ComboAnalyser:
         #print("Figure 2_2 done")
 
         # Third plot
-        ax3 = fig.add_subplot(gs[0:4, 3])
-        # ax3.plot(data3[0], data3[1])
-        # ax3.set_title(titles[2])
-        # ax3.set_xlabel('X Axis')
-        # ax3.set_ylabel('Y Axis')
-        im = ax3.imshow(trans_temp, cmap="viridis", interpolation="nearest")
-        trans_greater_zero = trans_temp > 0
+        ax3 = fig.add_subplot(gs1[:, 1])
+        im = ax3.imshow(txMap_original, cmap="viridis", interpolation="nearest")
+
         ax3.set_title(
-            f"gene expression\nmean expression = {round( mean_expr_trans , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {pix_trans}"
+            f"gene expression\nmean expression = {round( se_corr["mean_expression_trans"] , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {se_corr["pixel_trans"]}"
         )
         cbar = fig.colorbar(im, ax=ax3)
         cbar.set_label("Intensity")  # Label for the colorbar
@@ -1239,16 +1009,11 @@ class ComboAnalyser:
 
 
         # Fourth plot
-        ax4 = fig.add_subplot(gs[0:4, 4])
-        # ax3.plot(data3[0], data3[1])
-        # ax3.set_title(titles[2])
-        # ax3.set_xlabel('X Axis')
-        # ax3.set_ylabel('Y Axis')
-        im = ax4.imshow(spec_temp, cmap="viridis", interpolation="nearest")
-        spec_greater_zero = spec_temp > 0
-        # TODO: sorry have to add this if statement for cell type analysis
+        ax4 = fig.add_subplot(gs1[:, 2])
+        im = ax4.imshow(pxMap, cmap="viridis", interpolation="nearest")
+
         ax4.set_title(
-            f"metabolite expression\nmean expression = {round(mean_expr_spec , 3)}\nmetabolite name = {px_name}\nmetabolite pixel = {pix_spec}"
+            f"metabolite expression\nmean expression = {round(se_corr["mean_expression_spec"] , 3)}\nmetabolite name = {px_name}\nmetabolite pixel = {se_corr["pixel_spec"]}"
         )
         cbar = fig.colorbar(im, ax=ax4)
         cbar.set_label("Intensity")  # Label for the colorbar
@@ -1256,390 +1021,20 @@ class ComboAnalyser:
         #print("Figure 4 done")
 
         # Fifth plot
-        ax5 = fig.add_subplot(gs[0:4, 5])
-        # ax3.plot(data3[0], data3[1])
-        # ax3.set_title(titles[2])
-        # ax3.set_xlabel('X Axis')
-        # ax3.set_ylabel('Y Axis')
-        im = ax5.imshow(trans_mapped, cmap="viridis", interpolation="nearest")
-        spec_greater_zero = spec_temp > 0
-        # TODO: sorry have to add this if statement for cell type analysis
+        ax5 = fig.add_subplot(gs1[:, 3])
+        im = ax5.imshow(txMap, cmap="viridis", interpolation="nearest")
+
         ax5.set_title(
-            f"mapped gene expression\nmean expression = {round( mean_expr_trans , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {pix_trans}"
+            f"mapped gene expression\nmean expression = {round( se_corr["mean_expression_trans"] , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {se_corr["pixel_trans"]}"
         )
         cbar = fig.colorbar(im, ax=ax5)
         cbar.set_label("Intensity")  # Label for the colorbar
 
         #print("Figure 5 done")
 
-        #plt.show()
-        #plt.close(fig)
         return fig
 
-    def plot_gene_metabolite_pair_clusterwise(self, tx_index, px_index):
-
-        trans_temp = self.trans_clustered_intensities[:, tx_index]
-        spec_temp = self.spec_clustered_intensities[:, px_index]
-
-        pxVec, txVec = self.get_feature_distributions_per_cluster(px_index, tx_index)
-        pxVec, txVec = self.remove_zeros(pxVec, txVec)
-
-        fig = plt.figure(figsize=(20, 7))
-        gs = fig.add_gridspec(
-            4, 5, width_ratios=[5, 1, 6, 6, 6], height_ratios=[1, 2, 2, 1]
-        )
-
-        # Scatter plot
-        (
-            slope,
-            intercept,
-            r_value,
-            sem,
-            mae,
-            rms,
-            mean_expr_spec,
-            mean_expr_trans,
-            pix,
-            pix_spec,
-            pix_trans,
-            frac_pix_spec,
-            frac_pix_trans,
-        ) = self.evaluate_distribution_per_cluster(
-            tx_index, px_index, "regression", plot=False, silent=True
-        )
-        ax_hexa = fig.add_subplot(gs[1:4, 0])
-
-        hexa = ax_hexa.hexbin(x=txVec, y=pxVec, gridsize=30, cmap="Blues")
-        cbar0 = fig.colorbar(hexa, ax=ax_hexa)
-        cbar0.set_label("counts")
-        # ax_hexa.colorbar(label='counts')
-        ax_hexa.set_xlabel("gene expression")
-        ax_hexa.set_ylabel("metabolite intensity")
-        # ax_hexa.title('Hexbin Plot with Regression Line')
-        reg_y = slope * txVec + intercept
-        # Overlay the regression line
-        ax_hexa.plot(txVec, reg_y, color="black", linewidth=1, label="lin")
-
-        a, b, c, d, r_square_exp, rmse_exp, _, _, _, _, _, _, _ = (
-            self.evaluate_distribution_per_cluster(
-                tx_index, px_index, "exponential", plot=False, silent=True
-            )
-        )
-        exp_y = self.exponential_func(txVec, a, b, c, d)
-        sorted_indices = np.argsort(txVec)
-        ax_hexa.plot(
-            txVec[sorted_indices],
-            exp_y[sorted_indices],
-            color="grey",
-            linewidth=1,
-            label="exp",
-        )
-
-        ax_hexa.legend()
-
-        # Histograms
-        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_hexa)
-        ax_histy = fig.add_subplot(gs[1:4, 1], sharey=ax_hexa)
-
-        ax_histx.hist(txVec, bins=40, edgecolor="black")
-        ax_histx.set_title(
-            f"regression (R² = {round(r_value * r_value , 3)} , RMSE = {round(rms , 3)})\nexponential (R² = {round(r_square_exp , 3)} , RMSE = {round(rmse_exp , 3)})\nclusters = {pix}"
-        )
-        ax_histy.hist(pxVec, bins=40, orientation="horizontal", edgecolor="black")
-
-        # Remove ticks on the histogram plots
-        plt.setp(ax_histx.get_xticklabels(), visible=False)
-        plt.setp(ax_histy.get_yticklabels(), visible=False)
-
-        # Second plot
-        tx_name = self.get_feature_name_from_tx_index(tx_index)
-        px_name = self.get_feature_name_from_px_index(px_index)
-        corr_coef, pixel = self.evaluate_distribution_per_cluster(
-            feature_tx=tx_index,
-            feature_px=px_index,
-            method="correlation",
-            plot=False,
-            silent=True,
-        )
-        corr_coef = round(corr_coef[0, 1], 3)
-
-        x_axis = list(range(1, len(txVec) + 1))
-        ax2 = fig.add_subplot(gs[0:2, 2])
-        ax2.plot(x_axis, txVec, label=str(tx_name), alpha=0.5)
-        ax2.plot(x_axis, pxVec, label=str(px_name), alpha=0.5)
-        ax2.set_title(f"Correlation (corr_coef = {corr_coef})\nclusters = {pixel}")
-        ax2.set_xlabel("Index")
-        ax2.set_ylabel("Intensities")
-        ax2.legend()
-
-        # Normalize the vectors to 100%
-        tx_normalized = [
-            (val - min(txVec)) / (max(txVec) - min(txVec)) * 100 for val in txVec
-        ]
-        px_normalized = [
-            (val - min(pxVec)) / (max(pxVec) - min(pxVec)) * 100 for val in pxVec
-        ]
-        ax2_2 = fig.add_subplot(gs[2:4, 2])
-        ax2_2.plot(x_axis, tx_normalized, label=str(tx_name), alpha=0.5)
-        ax2_2.plot(x_axis, px_normalized, label=str(px_name), alpha=0.5)
-        ax2_2.set_title("normalized correlation")
-        ax2_2.set_xlabel("Index")
-        ax2_2.set_ylabel("Intensities (%)")
-        ax2_2.legend()
-        # Adjust layout
-        plt.tight_layout()
-
-        # Third plot
-        ax3 = fig.add_subplot(gs[0:4, 3])
-
-        unique_trans_clusters = np.sort(np.unique(self.trans_cluster))
-        cluster_value_dict = {}
-        for i in range(len(unique_trans_clusters)):
-            cluster_value_dict[unique_trans_clusters[i]] = trans_temp[i]
-        data = np.zeros_like(self.trans_cluster)
-        for i in range(self.trans_cluster.shape[0]):
-            for j in range(self.trans_cluster.shape[1]):
-                data[i, j] = cluster_value_dict[self.trans_cluster[i, j]]
-
-        im = ax3.imshow(data, cmap="viridis", interpolation="nearest")
-        trans_greater_zero = trans_temp > 0
-        ax3.set_title(
-            f"gene expression\nmean expression = {round( mean_expr_trans , 3)}\ntranscriptomic pixel = {pix_trans}"
-        )
-        cbar = fig.colorbar(im, ax=ax3)
-        cbar.set_label("Intensity")  # Label for the colorbar
-
-        # Fourth plot
-        ax4 = fig.add_subplot(gs[0:4, 4])
-
-        unique_spec_clusters = np.sort(np.unique(self.spec_cluster))
-        cluster_value_dict = {}
-        for i in range(len(unique_spec_clusters)):
-            cluster_value_dict[unique_spec_clusters[i]] = spec_temp[i]
-        data = np.zeros_like(self.spec_cluster)
-        for i in range(self.spec_cluster.shape[0]):
-            for j in range(self.spec_cluster.shape[1]):
-                data[i, j] = cluster_value_dict[self.spec_cluster[i, j]]
-
-        im = ax4.imshow(data, cmap="viridis", interpolation="nearest")
-        spec_greater_zero = spec_temp > 0
-        ax4.set_title(
-            f"metabolite expression\nmean expression = {round(mean_expr_spec , 3)}\nmetabolite pixel = {pix_spec}"
-        )
-        cbar = fig.colorbar(im, ax=ax4)
-        cbar.set_label("Intensity")  # Label for the colorbar
-
-        # print(unique_trans_clusters)
-        # print(cluster_value_dict)
-
-        plt.close(fig)
-        return fig
-
-    def plot_gene_metabolite_pair_within_cluster(
-        self, tx_index, px_index, trans_cluster, spec_cluster
-    ):
-
-        trans_temp = self.trans[:, :, tx_index]
-        spec_temp = self.spec[:, :, px_index]
-
-        pxVec, txVec = self.get_feature_distributions_within_cluster(
-            px_index, tx_index, p_cluster=spec_cluster, t_cluster=trans_cluster
-        )
-        pxVec, txVec = self.remove_zeros(pxVec, txVec)
-
-        fig = plt.figure(figsize=(25, 6))
-        gs = fig.add_gridspec(
-            4, 6, width_ratios=[5, 1, 6, 3, 6, 6], height_ratios=[1, 2, 2, 1]
-        )
-
-        # Scatter plot
-        (
-            slope,
-            intercept,
-            r_value,
-            sem,
-            mae,
-            rms,
-            mean_expr_spec,
-            mean_expr_trans,
-            pix,
-            pix_spec,
-            pix_trans,
-            frac_pix_spec,
-            frac_pix_trans,
-        ) = self.evaluate_distribution_within_clusters(
-            tx_index,
-            px_index,
-            trans_cluster,
-            spec_cluster,
-            "regression",
-            plot=False,
-            silent=True,
-        )
-
-        ax_hexa = fig.add_subplot(gs[1:4, 0])
-
-        hexa = ax_hexa.hexbin(x=txVec, y=pxVec, gridsize=30, cmap="Blues")
-
-        # ax_hexa.colorbar(label='counts')
-        ax_hexa.set_xlabel("gene expression")
-        ax_hexa.set_ylabel("metabolite intensity")
-        # ax_hexa.title('Hexbin Plot with Regression Line')
-        reg_y = slope * txVec + intercept
-        # Overlay the regression line
-        ax_hexa.plot(txVec, reg_y, color="black", linewidth=1, label="lin")
-
-        a, b, c, d, r_square_exp, rmse_exp, _, _, _, _, _, _, _ = (
-            self.evaluate_distribution_within_clusters(
-                tx_index,
-                px_index,
-                trans_cluster,
-                spec_cluster,
-                "exponential",
-                plot=False,
-                silent=True,
-            )
-        )
-        exp_y = self.exponential_func(txVec, a, b, c, d)
-        sorted_indices = np.argsort(txVec)
-        ax_hexa.plot(
-            txVec[sorted_indices],
-            exp_y[sorted_indices],
-            color="grey",
-            linewidth=1,
-            label="exp",
-        )
-
-        ax_hexa.legend()
-
-        # Histograms
-        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_hexa)
-        ax_histy = fig.add_subplot(gs[1:4, 1], sharey=ax_hexa)
-
-        ax_histx.hist(txVec, bins=40, edgecolor="black")
-        ax_histx.set_title(
-            f"regression (R² = {round(r_value * r_value , 3)} , RMSE = {round(rms , 3)})\nexponential (R² = {round(r_square_exp , 3)} , RMSE = {round(rmse_exp , 3)})\npixel = {pix}"
-        )
-        ax_histy.hist(pxVec, bins=40, orientation="horizontal", edgecolor="black")
-
-        # Remove ticks on the histogram plots
-        plt.setp(ax_histx.get_xticklabels(), visible=False)
-        plt.setp(ax_histy.get_yticklabels(), visible=False)
-
-        cbar0 = fig.colorbar(hexa, ax=ax_histy)  # ax_hexa)
-        cbar0.set_label("counts")
-
-        # correlation plot
-        tx_name = self.get_feature_name_from_tx_index(tx_index)
-        px_name = self.get_feature_name_from_px_index(px_index)
-        corr_coef, pixel = self.evaluate_distribution_within_clusters(
-            feature_tx=tx_index,
-            feature_px=px_index,
-            method="correlation",
-            plot=False,
-            silent=True,
-            cluster_trans=trans_cluster,
-            cluster_spec=spec_cluster,
-        )
-        corr_coef = round(corr_coef[0, 1], 3)
-
-        x_axis = list(range(1, len(txVec) + 1))
-        ax2 = fig.add_subplot(gs[0:2, 2])
-        ax2.plot(x_axis, txVec, label=str(tx_name), alpha=0.5)
-        ax2.plot(x_axis, pxVec, label=str(px_name), alpha=0.5)
-        ax2.set_title(
-            f"Correlation (corr_coef = {corr_coef})\nshared pixel in cluster = {pixel}"
-        )
-        ax2.set_xlabel("Index")
-        ax2.set_ylabel("Intensities")
-        ax2.legend()
-
-        # Normalize the vectors to 100%
-        tx_normalized = [
-            (val - min(txVec)) / (max(txVec) - min(txVec)) * 100 for val in txVec
-        ]
-        px_normalized = [
-            (val - min(pxVec)) / (max(pxVec) - min(pxVec)) * 100 for val in pxVec
-        ]
-        ax2_2 = fig.add_subplot(gs[2:4, 2])
-        ax2_2.plot(x_axis, tx_normalized, label=str(tx_name), alpha=0.5)
-        ax2_2.plot(x_axis, px_normalized, label=str(px_name), alpha=0.5)
-        ax2_2.set_title("normalized correlation")
-        ax2_2.set_xlabel("Index")
-        ax2_2.set_ylabel("Intensities (%)")
-        ax2_2.legend()
-        # Adjust layout
-        plt.tight_layout()
-
-        # 2nd plot
-        trans_cluster_bool = self.trans_cluster == trans_cluster
-        trans_cluster_mask = np.where(trans_cluster_bool, 0, -1)
-        max_trans_cl = np.max(self.trans_cluster)
-        trans_cluster_contrast = np.where(trans_cluster_bool, max_trans_cl / 2, 0)
-        temp_trans_cl = self.trans_cluster * trans_cluster_mask + trans_cluster_contrast
-        new_column = np.full((temp_trans_cl.shape[0], 1), max_trans_cl)
-        temp_trans_cl = np.hstack((temp_trans_cl, new_column))
-        temp_trans_cl = np.hstack((temp_trans_cl, new_column * -1))
-
-        ax21 = fig.add_subplot(gs[0:2, 3])
-        im = ax21.imshow(temp_trans_cl, cmap="seismic", interpolation="nearest")
-        # spec_greater_zero = spec_temp > 0
-        ax21.set_title(f"transcriptomic clustering")
-
-        spec_cluster_bool = self.spec_cluster == spec_cluster
-        spec_cluster_mask = np.where(spec_cluster_bool, 0, -1)
-        max_spec_cl = np.max(self.spec_cluster)
-        spec_cluster_contrast = np.where(spec_cluster_bool, max_spec_cl / 2, 0)
-        temp_spec_cl = self.spec_cluster * spec_cluster_mask + spec_cluster_contrast
-        new_column = np.full((temp_spec_cl.shape[0], 1), max_spec_cl)
-        temp_spec_cl = np.hstack((temp_spec_cl, new_column))
-        temp_spec_cl = np.hstack((temp_spec_cl, new_column * -1))
-
-        ax22 = fig.add_subplot(gs[2:4, 3])
-        im = ax22.imshow(temp_spec_cl, cmap="seismic", interpolation="nearest")
-        # spec_greater_zero = spec_temp > 0
-        ax22.set_title(f"metabolomic clustering")
-
-        # 3rd plot
-        trans_cluster_mask = self.trans_cluster == trans_cluster
-        trans_cluster_mask = np.where(trans_cluster_mask, 1, -1)
-        trans_temp = trans_temp * trans_cluster_mask
-        new_column = np.full((trans_temp.shape[0], 1), np.max(np.abs(trans_temp)))
-        pix_temp = np.sum(trans_temp > 0, axis=(0, 1))
-
-        trans_temp = np.hstack((trans_temp, new_column))
-        trans_temp = np.hstack((trans_temp, new_column * -1))
-        trans_temp = self.z_scale(trans_temp)
-
-        ax3 = fig.add_subplot(gs[0:4, 4])
-        im = ax3.imshow(trans_temp, cmap="seismic", interpolation="nearest")
-        spec_greater_zero = spec_temp > 0
-        ax3.set_title(
-            f"z-scaled gene expression\nmean expression = {round(mean_expr_trans , 3)}\ngene pixel = {pix_temp}"
-        )
-        cbar = fig.colorbar(im, ax=ax3)
-        cbar.set_label("Intensity")
-
-        # Fourth plot
-        spec_cluster_mask = self.spec_cluster == spec_cluster
-        spec_cluster_mask = np.where(spec_cluster_mask, 1, -1)
-        new_column = np.full((spec_temp.shape[0], 1), np.max(spec_temp))
-        spec_temp = spec_temp * spec_cluster_mask
-        pix_temp = np.sum(spec_temp > 0, axis=(0, 1))
-
-        spec_temp = np.hstack((spec_temp, new_column))
-        spec_temp = np.hstack((spec_temp, new_column * -1))
-        spec_temp = self.z_scale(spec_temp)
-
-        ax4 = fig.add_subplot(gs[0:4, 5])
-        im = ax4.imshow(spec_temp, cmap="seismic", interpolation="nearest")
-        spec_greater_zero = spec_temp > 0
-        ax4.set_title(
-            f"z-scaled metabolite expression\nmean expression = {round(mean_expr_spec , 3)}\nmetabolite pixel = {pix_temp}"
-        )
-        cbar = fig.colorbar(im, ax=ax4)
-        cbar.set_label("Intensity")  # Label for the colorbar
-
+    
     def apply_fraction_filter(self, fraction=1.00):
         print(
             f"only keep the top {fraction * 100} % data points (0 values are omitted)"
@@ -1701,14 +1096,23 @@ class ComboAnalyser:
                 "shape of the clustering does not match the shape of spatial metabolite data !"
             )
 
-    def add_trans_clustering(self, trans_cl):
+    def add_trans_clustering(self, trans_cl, map_to_spec=False):
         print("adding transcriptomic clustering ...")
         if trans_cl.shape == self.trans_tic.shape:
-            self.trans_cluster = trans_cl
+            
+            new_clusters = np.zeros_like(trans_cl)
+            for ci, cl in enumerate(np.unique(trans_cl.flatten().tolist()[0])):
+                new_clusters[trans_cl == cl] = ci
+            self.trans_cluster = new_clusters
+
             print(
-                f"{len(np.unique(trans_cl))} clusters (min: {np.min(trans_cl)} , max: {np.max(trans_cl)})"
+                f"{len(np.unique(self.trans_cluster))} clusters (min: {np.min(self.trans_cluster)} , max: {np.max(self.trans_cluster)})"
             )
             self.trans_cluster_list = np.sort(np.unique(self.trans_cluster))
+
+            if map_to_spec:
+                spec_cl = self.transform_feature(self.trans_cluster.copy())
+                self.add_spec_clustering(spec_cl)
         else:
             print(
                 "shape of the clustering does not match the shape of spatial transcriptomic data !"
@@ -1821,9 +1225,9 @@ class ComboAnalyser:
 
         ### Metabolites:
         print("group metabolite expression for clusters ...")
-        group_data = np.zeros((len(np.unique(self.spec_cluster)), self.spec.shape[2]))
-        cluster_list = np.sort(np.unique(self.spec_cluster))
-        # print(cluster_list)
+        group_data = np.zeros((len(np.unique(self.spec_cluster.flatten().tolist())), self.spec.shape[2]))
+        cluster_list = np.sort(np.unique(self.spec_cluster.flatten().tolist()))
+        print(cluster_list)
         count = 0
         for cluster in tqdm(cluster_list):
             # cur = self.spec.copy()
@@ -1832,7 +1236,6 @@ class ComboAnalyser:
             # cl = cl.flatten()
             # cl = cl == cluster
             # cur = cur[cl , :]
-
             cur = self.spec[self.spec_cluster == cluster, :]
 
             if method == "sum":
@@ -1852,8 +1255,9 @@ class ComboAnalyser:
 
         ### Genes:
         print("group gene expression for clusters ...")
-        group_data = np.zeros((len(np.unique(self.trans_cluster)), self.trans.shape[2]))
-        cluster_list = np.sort(np.unique(self.trans_cluster))
+        group_data = np.zeros((len(np.unique(self.trans_cluster.flatten().tolist())), self.trans.shape[2]))
+        cluster_list = np.sort(np.unique(self.trans_cluster.flatten().tolist()))
+        print(cluster_list)
         count = 0
         for cluster in tqdm(cluster_list):
             cur = self.trans[self.trans_cluster == cluster, :]
@@ -1872,6 +1276,8 @@ class ComboAnalyser:
             count += 1
         self.trans_clustered_intensities = group_data
 
+
+
     def z_scale(self, m):
         return (m - np.mean(m)) / np.std(m)  # zscore(matrix)
 
@@ -1880,9 +1286,7 @@ class ComboAnalyser:
             x = X[:, :, j]
 
 
-import numpy as np
-from sklearn.linear_model import Lasso
-from sklearn.preprocessing import StandardScaler
+
 
 
 class LassoAnalyzer:
