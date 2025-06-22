@@ -35,7 +35,8 @@ class ComboAnalyser:
         adata: np.array,
         adata_anno: np.array,
         mapping: np.array,
-        cache_mappings: bool = True
+        cache_mappings: bool = True,
+        cache_otsu: bool = True,
     ):
 
         self.spec = spec
@@ -86,6 +87,12 @@ class ComboAnalyser:
             self.mapped_data = {}
         else:
             self.mapped_data = None
+
+        self.cache_otsu = cache_otsu
+        if self.cache_otsu:
+            self.mapped_data_otsu = {}
+        else:
+            self.mapped_data_otsu = None
         
 
     def spatially_relevant_features(self, where="both", min_expr_count=1000, min_conn_count=250):
@@ -551,19 +558,36 @@ class ComboAnalyser:
         return series
     
     def jaccard_custom(self, pxExpr, txExpr, feature_px, feature_tx, plot, series=None):
-        method = "jaccard"
 
-        txThresholds = threshold_multiotsu(txExpr, classes=2)
-        txRegions = np.digitize(txExpr, bins=txThresholds)
+        # get px coords
+        pxTuple = ("px", feature_px)
+        if self.cache_otsu and pxTuple in self.mapped_data_otsu:
+            pxCoords = self.mapped_data_otsu[pxTuple]
+        else:
+            pxThresholds = threshold_multiotsu(pxExpr, classes=2)
+            pxRegions = np.digitize(txExpr, bins=pxThresholds)
+            pxCoords = np.array([(x + (y*pxRegions.shape[0])) for x,y in zip(*np.where(pxRegions==1))])
 
-        pxThresholds = threshold_multiotsu(pxExpr, classes=2)
-        pxRegions = np.digitize(pxExpr, bins=pxThresholds)
+            if self.cache_otsu:
+                self.mapped_data_otsu[pxTuple] = pxCoords
 
-        pxCoords = set([tuple([x,y]) for x,y in zip(*np.where(pxRegions==1))])
-        txCoords = set([tuple([x,y]) for x,y in zip(*np.where(txRegions==1))])
 
-        coordIntersect = pxCoords.intersection(txCoords)
-        coordUnion = pxCoords.union(txCoords)
+        # get tx coords
+        txTuple = ("tx", feature_tx)
+        if self.cache_otsu and txTuple in self.mapped_data_otsu:
+            txCoords = self.mapped_data_otsu[txTuple]
+        else:
+            txThresholds = threshold_multiotsu(txExpr, classes=2)
+            txRegions = np.digitize(txExpr, bins=txThresholds)
+            txCoords = np.array([(x + (y*txRegions.shape[0])) for x,y in zip(*np.where(txRegions==1))])
+
+            if self.cache_otsu:
+                self.mapped_data_otsu[txTuple] = txCoords
+
+
+        # calculate jaccard index
+        coordIntersect = np.intersect1d(pxCoords, txCoords)
+        coordUnion = np.union1d(pxCoords, txCoords)
 
         jaccardIndex = len(coordIntersect) / len(coordUnion)
 
@@ -580,6 +604,8 @@ class ComboAnalyser:
         if series is None:
             series = pd.Series()
 
+
+        #output
         series["sx_coords"] = len(pxCoords)
         series["tx_oords"] = len(txCoords)
 
@@ -1002,7 +1028,7 @@ class ComboAnalyser:
         ax3.set_title(
             f"gene expression\nmean expression = {round( se_corr["mean_expression_trans"] , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {se_corr["pixel_trans"]}"
         )
-        cbar = fig.colorbar(im, ax=ax3)
+        cbar = fig.colorbar(im, ax=ax3, fraction=0.04, pad=0.04)
         cbar.set_label("Intensity")  # Label for the colorbar
 
         #print("Figure 3 done")
@@ -1015,7 +1041,7 @@ class ComboAnalyser:
         ax4.set_title(
             f"metabolite expression\nmean expression = {round(se_corr["mean_expression_spec"] , 3)}\nmetabolite name = {px_name}\nmetabolite pixel = {se_corr["pixel_spec"]}"
         )
-        cbar = fig.colorbar(im, ax=ax4)
+        cbar = fig.colorbar(im, ax=ax4, fraction=0.04, pad=0.04)
         cbar.set_label("Intensity")  # Label for the colorbar
 
         #print("Figure 4 done")
@@ -1027,7 +1053,7 @@ class ComboAnalyser:
         ax5.set_title(
             f"mapped gene expression\nmean expression = {round( se_corr["mean_expression_trans"] , 3)}\ntranscript name = {tx_name}\ntranscriptomic pixel = {se_corr["pixel_trans"]}"
         )
-        cbar = fig.colorbar(im, ax=ax5)
+        cbar = fig.colorbar(im, ax=ax5, fraction=0.04, pad=0.04)
         cbar.set_label("Intensity")  # Label for the colorbar
 
         #print("Figure 5 done")
